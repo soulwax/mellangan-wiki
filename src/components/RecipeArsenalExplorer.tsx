@@ -143,7 +143,7 @@ export const RecipeArsenalExplorer: React.FC = () => {
             >
               {forms.map((f) => (
                 <option key={f} value={f} className="bg-dark-900">
-                  {f === 'ALL' ? 'All 10 Forms' : `Form::${f}`}
+                  {f === 'ALL' ? 'All Forms (15 FormBehaviors)' : `Form::${f}`}
                 </option>
               ))}
             </select>

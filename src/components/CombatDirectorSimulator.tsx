@@ -13,65 +13,106 @@ type SimTab = "director" | "status" | "draft";
 interface PortentDef {
   name: string;
   rate: number;
-  hp: number;
+  horde: number;
+  speed: number;
   xp: number;
+  score: number;
+  elite: number;
   color: string;
   desc: string;
 }
 
 const PORTENTS: PortentDef[] = [
   {
-    name: "Still Night",
+    name: "CALM (15% Roll)",
     rate: 1.0,
-    hp: 1.0,
+    horde: 1.0,
+    speed: 1.0,
     xp: 1.0,
+    score: 1.0,
+    elite: 0.0,
     color: "text-slate-300",
-    desc: "Baseline nocturnal cadence; no omen modifiers active.",
+    desc: "The night is still; baseline nocturnal cadence with no omen modifiers.",
   },
   {
-    name: "Blood Moon",
-    rate: 0.82,
-    hp: 1.25,
-    xp: 1.35,
+    name: "BLOOD MOON",
+    rate: 1.25,
+    horde: 1.3,
+    speed: 1.0,
+    xp: 1.2,
+    score: 1.3,
+    elite: 0.0,
     color: "text-rose-400",
-    desc: "Faster trickle spawns (+22%), +25% monster HP, +35% XP drops.",
+    desc: "More foes, richer spoils (+25% spawn rate, +30% horde size, +20% XP, 1.3x score).",
   },
   {
-    name: "Swarming Dark",
-    rate: 0.72,
-    hp: 0.85,
-    xp: 1.15,
+    name: "THE SWARM",
+    rate: 1.45,
+    horde: 1.5,
+    speed: 0.92,
+    xp: 1.1,
+    score: 1.35,
+    elite: 0.0,
     color: "text-amber-400",
-    desc: "Relentless fodder density (-28% interval) with slightly lower monster HP.",
+    desc: "They come without end (+45% spawn rate, +50% horde count, 0.92x speed).",
   },
   {
-    name: "Iron Fog",
-    rate: 1.1,
-    hp: 1.4,
-    xp: 1.3,
+    name: "IRON NIGHT",
+    rate: 0.85,
+    horde: 1.0,
+    speed: 1.0,
+    xp: 1.25,
+    score: 1.3,
+    elite: 0.14,
     color: "text-sky-400",
-    desc: "Slower trickle cadence, but heavily armored enemies (+40% HP).",
+    desc: "Fewer foes, many are elites (0.85x trickle rate, +14% flat elite chance, +25% XP).",
+  },
+  {
+    name: "WAR DRUMS",
+    rate: 1.0,
+    horde: 1.45,
+    speed: 1.08,
+    xp: 1.15,
+    score: 1.3,
+    elite: 0.0,
+    color: "text-orange-400",
+    desc: "Hordes gather in force (+45% horde size, +8% foe speed, +15% XP).",
+  },
+  {
+    name: "CHAMPION'S HOUR",
+    rate: 1.0,
+    horde: 1.0,
+    speed: 1.0,
+    xp: 1.3,
+    score: 1.4,
+    elite: 0.08,
+    color: "text-purple-400",
+    desc: "Great foes walk the dark (2x Champion frequency, up to 3 active, +8% elites, 1.4x score).",
   },
 ];
 
 const WAVE_DEFS = [
-  { name: "Bat Swarm", kind: "Bat", scale: 1.3, minTime: 0 },
-  { name: "Wolf Pack", kind: "Wolf", scale: 1.0, minTime: 60 },
-  { name: "Bone March", kind: "Skeleton", scale: 1.0, minTime: 150 },
-  { name: "Grave Tide", kind: "Zombie", scale: 0.85, minTime: 240 },
-  { name: "Covenant Host", kind: "Cultist", scale: 0.65, minTime: 360 },
-  { name: "Golem Siege", kind: "Golem", scale: 0.35, minTime: 480 },
+  { name: "THE HORDE CLOSES IN", kind: "Strong Ring", scale: 1.0, minTime: 0 },
+  { name: "A SWARM DESCENDS", kind: "1.5x Weak + 2 Elites", scale: 1.5, minTime: 60 },
+  { name: "THE LAND STIRS", kind: "Biome localFoes", scale: 1.0, minTime: 90 },
+  { name: "THE PACK HUNTS", kind: "Alpha + Wolf Pack", scale: 1.0, minTime: 100 },
+  { name: "AMBUSH!", kind: "60° Ahead Arc", scale: 1.0, minTime: 120 },
+  { name: "THE DEAD RISE", kind: "Skeletons + Necromancers", scale: 1.0, minTime: 150 },
 ];
 
 const UNLOCK_TIMELINE = [
-  { name: "Bat / Zombie", unlockAt: 0 },
-  { name: "Skeleton /Goblin", unlockAt: 35 },
-  { name: "Wolf / Spore", unlockAt: 75 },
-  { name: "Wasp / Imp", unlockAt: 130 },
-  { name: "Ghost / Cultist", unlockAt: 210 },
-  { name: "Gargoyle / Wraith", unlockAt: 310 },
-  { name: "Golem / Banshee", unlockAt: 430 },
-  { name: "Lich / Elder", unlockAt: 560 },
+  { name: "Bat / Rat / Goblin", unlockAt: 0 },
+  { name: "Slime", unlockAt: 30 },
+  { name: "Skeleton", unlockAt: 60 },
+  { name: "Scorpion", unlockAt: 75 },
+  { name: "Spider / Wolf", unlockAt: 90 },
+  { name: "Ghost", unlockAt: 120 },
+  { name: "Cultist", unlockAt: 150 },
+  { name: "Alpha Wolf", unlockAt: 170 },
+  { name: "Necromancer", unlockAt: 195 },
+  { name: "Knight", unlockAt: 220 },
+  { name: "Burrower", unlockAt: 245 },
+  { name: "Demon", unlockAt: 270 },
 ];
 
 export const CombatDirectorSimulator: React.FC = () => {
@@ -86,6 +127,8 @@ export const CombatDirectorSimulator: React.FC = () => {
   // Tab 2: Status Tick & Cap state
   const [burnPower, setBurnPower] = useState<number>(14);
   const [poisonPower, setPoisonPower] = useState<number>(9);
+  const [bleedPower, setBleedPower] = useState<number>(10);
+  const [targetMoving, setTargetMoving] = useState<boolean>(true);
   const [durationSec, setDurationSec] = useState<number>(3.3);
   const [chillRaw, setChillRaw] = useState<number>(0.45);
   const [markedRaw, setMarkedRaw] = useState<number>(0.6);
@@ -99,8 +142,9 @@ export const CombatDirectorSimulator: React.FC = () => {
   const [commonItemsLeft, setCommonItemsLeft] = useState<number>(10);
 
   const directorStats = useMemo(() => {
-    const duration = 900; // 15:00 run
-    const left = Math.max(0, duration - timeSec);
+    const dawnPull = 60;
+    const dawnAt = 900 - shrinesLit * dawnPull;
+    const left = Math.max(0, dawnAt - timeSec);
     const d = Math.max(0, Math.min(1, 1 - left / 150));
     const daylight = d * d;
 
@@ -112,19 +156,15 @@ export const CombatDirectorSimulator: React.FC = () => {
       spawnFloor,
       spawnInterval - timeSec * spawnRamp,
     );
-    const interval = (rawInterval * p.rate) / difficultyScale;
+    const interval = rawInterval / (p.rate * difficultyScale);
     const batchSize = 1 + Math.floor(timeSec / 75);
 
-    const waveNumber = Math.floor(timeSec / 60);
     const eligibleWaves = WAVE_DEFS.filter((w) => timeSec >= w.minTime);
     const currentWave =
       eligibleWaves[eligibleWaves.length - 1] || WAVE_DEFS[0];
-    const hordeCount = Math.min(
-      48,
-      Math.max(
-        6,
-        Math.round((10 + waveNumber * 3.2) * currentWave.scale * difficultyScale),
-      ),
+    const baseCount = Math.min(48, 10 + timeSec / 18);
+    const hordeCount = Math.round(
+      baseCount * p.horde * currentWave.scale * difficultyScale,
     );
 
     const unlocked = UNLOCK_TIMELINE.filter((u) => timeSec >= u.unlockAt);
@@ -132,11 +172,11 @@ export const CombatDirectorSimulator: React.FC = () => {
     const shrineRingCount = 8 + 3 * shrinesLit;
 
     return {
+      dawnAt,
       left,
       daylight,
       interval,
       batchSize,
-      waveNumber,
       currentWave,
       hordeCount,
       unlockedCount: unlocked.length,
@@ -149,7 +189,8 @@ export const CombatDirectorSimulator: React.FC = () => {
     const clampedDur = Math.min(60, Math.max(0.5, durationSec));
     const fullHalfSecTicks = Math.floor(clampedDur / 0.5);
     const remainderSec = +(clampedDur - fullHalfSecTicks * 0.5).toFixed(2);
-    const combinedDps = burnPower + poisonPower;
+    const bleedEff = bleedPower * (targetMoving ? 1.6 : 1.0);
+    const combinedDps = burnPower + poisonPower + bleedEff;
     const perHalfTickDmg = combinedDps * 0.5;
     const remainderDmg = combinedDps * remainderSec;
     const chillClamped = Math.min(0.65, chillRaw);
@@ -162,6 +203,7 @@ export const CombatDirectorSimulator: React.FC = () => {
     return {
       fullHalfSecTicks,
       remainderSec,
+      bleedEff,
       perHalfTickDmg,
       remainderDmg,
       chillClamped,
@@ -170,7 +212,7 @@ export const CombatDirectorSimulator: React.FC = () => {
       incomingMult,
       totalDoTDmg,
     };
-  }, [burnPower, poisonPower, durationSec, chillRaw, markedRaw]);
+  }, [burnPower, poisonPower, bleedPower, targetMoving, durationSec, chillRaw, markedRaw]);
 
   const draftStats = useMemo(() => {
     const wClass = classTalentsLeft * 3;
@@ -275,7 +317,7 @@ export const CombatDirectorSimulator: React.FC = () => {
                     Run Clock (<code>level.time</code>)
                   </span>
                   <span className="text-gold-300 font-semibold">
-                    {formatClock(timeSec)} / 15:00 ({timeSec}s)
+                    {formatClock(timeSec)} / {formatClock(directorStats.dawnAt)} ({timeSec}s)
                   </span>
                 </div>
                 <input
@@ -292,10 +334,10 @@ export const CombatDirectorSimulator: React.FC = () => {
               <div>
                 <div className="flex justify-between text-xs font-mono mb-1">
                   <span className="text-slate-400">
-                    Kindled Shrines (<code>night.lit</code>)
+                    Kindled Shrines (<code>night.lit</code> • -60s Dawn Pull)
                   </span>
                   <span className="text-emerald-300 font-semibold">
-                    {shrinesLit} / 3 Lit
+                    {shrinesLit} / 3 Lit (-{shrinesLit * 60}s)
                   </span>
                 </div>
                 <input
@@ -311,7 +353,7 @@ export const CombatDirectorSimulator: React.FC = () => {
 
               <div>
                 <div className="text-xs font-mono text-slate-400 mb-1.5">
-                  Nocturnal Omen (<code>night.portent()</code>)
+                  Nocturnal Omen (<code>level.portent()</code> in <code>Flavour.cpp</code>)
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {PORTENTS.map((p, idx) => (
@@ -326,7 +368,7 @@ export const CombatDirectorSimulator: React.FC = () => {
                     >
                       <div className={`font-semibold ${p.color}`}>{p.name}</div>
                       <div className="text-[10px] text-slate-500">
-                        rate ×{p.rate} • hp ×{p.hp}
+                        rate ×{p.rate} • horde ×{p.horde} • xp ×{p.xp}
                       </div>
                     </button>
                   ))}
@@ -376,21 +418,23 @@ export const CombatDirectorSimulator: React.FC = () => {
                     {(directorStats.daylight * 100).toFixed(1)}%
                   </div>
                   <div className="text-[11px] font-mono text-slate-400">
-                    {directorStats.left <= 150
-                      ? "Sunrise quadratic ramp!"
-                      : `Begins in ${directorStats.left - 150}s`}
+                    {directorStats.left <= 0
+                      ? "DAWN REACHED!"
+                      : directorStats.left <= 150
+                        ? "Sunrise quadratic ramp!"
+                        : `Begins in ${directorStats.left - 150}s`}
                   </div>
                 </div>
 
                 <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800">
                   <div className="text-[10px] font-mono uppercase text-slate-400">
-                    Active Horde Wave
+                    Latest Eligible Wave
                   </div>
-                  <div className="text-sm font-mono font-bold text-rose-300 mt-0.5 truncate">
+                  <div className="text-xs font-mono font-bold text-rose-300 mt-0.5 truncate">
                     {directorStats.currentWave.name}
                   </div>
                   <div className="text-[11px] font-mono text-slate-400">
-                    {directorStats.hordeCount}× {directorStats.currentWave.kind}
+                    {directorStats.hordeCount}× ({directorStats.currentWave.kind})
                   </div>
                 </div>
 
@@ -463,6 +507,33 @@ export const CombatDirectorSimulator: React.FC = () => {
                   value={poisonPower}
                   onChange={(e) => setPoisonPower(Number(e.target.value))}
                   className="w-full accent-emerald-400"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs font-mono mb-1">
+                  <span className="text-slate-400">
+                    Bleed Stack (<code>StatusKind::Bleed</code> • Additive)
+                  </span>
+                  <button
+                    onClick={() => setTargetMoving((m) => !m)}
+                    className={`px-2 py-0.5 rounded border text-[10px] ${
+                      targetMoving
+                        ? "bg-rose-500/20 border-rose-500/50 text-rose-300 font-semibold"
+                        : "bg-dark-900 border-dark-750 text-slate-400"
+                    }`}
+                  >
+                    {targetMoving ? `Moving: 1.6× (${statusStats.bleedEff.toFixed(1)} DPS)` : `Still: 1.0× (${bleedPower} DPS)`}
+                  </button>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={40}
+                  step={1}
+                  value={bleedPower}
+                  onChange={(e) => setBleedPower(Number(e.target.value))}
+                  className="w-full accent-rose-400"
                 />
               </div>
 
@@ -574,12 +645,11 @@ export const CombatDirectorSimulator: React.FC = () => {
 
               <div className="p-2.5 rounded-lg bg-dark-900/90 border border-dark-800 text-xs font-mono text-slate-300 leading-relaxed">
                 <span className="text-rose-300 font-semibold">
-                  No Lost Fractional Damage:
+                  Lossless 0.5s Ticks &amp; 1.6× Bleed:
                 </span>{" "}
-                When <code>e.time &lt;= 0</code>,{" "}
-                <code>StatusEffects::tick</code> flushes{" "}
-                <code>damage(e.power * e.elapsed, e.source)</code> before
-                clearing the slot.
+                <code>Status::tick</code> scales <code>Bleed</code> by{" "}
+                <code>k = moving ? 1.6f : 1.0f</code> and flushes{" "}
+                <code>damage(e.power * e.elapsed * k, e.source)</code> on expiry.
               </div>
             </div>
           </div>

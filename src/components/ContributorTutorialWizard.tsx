@@ -110,10 +110,10 @@ const STEPS: TutorialStep[] = [
     ],
     rules: [
       'All SpriteObject subclasses automatically use Pool.c via inherited operator new / sized operator delete.',
-      'New enemies must be appended after EnemyKind::Cyclops so classic progression and Codex slain indices remain intact.',
+      'New enemies must be appended at the end of EnemyKind so classic progression and Codex slain indices remain intact.',
       'Monster audio cues must route through Enemy::voice (on-screen only) with a cooldown gap in Sound.cpp to prevent crowd comb-filtering.',
     ],
-    files: ['src/item/weapon/Recipe.cpp', 'src/entity/enemy/Plans.cpp', 'src/level/biome/Biome.cpp'],
+    files: ['src/item/weapon/Recipe.cpp', 'src/entity/enemy/ai/Plans.cpp', 'src/level/biome/Biome.cpp'],
   },
   {
     id: 6,

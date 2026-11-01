@@ -938,12 +938,12 @@ flowchart LR
     id: 'weapon-synthesis',
     title: '09. Combinatorial Weapon Synthesis (15 FormBehaviors & 16 Payloads)',
     category: 'gameplay',
-    summary: 'Data-driven Recipe table, 15 polymorphic FormBehavior kinematic engines (including Whip, Wall & Spiral), 16 composable pay::Payload bitflags, and 29 weapon evolutions.',
+    summary: 'Data-driven Recipe table, 15 polymorphic FormBehavior kinematic engines (including Whip, Wall & Spiral), 16 composable pay::Payload bitflags, and 41 weapon evolutions.',
     sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/Forms.hpp', 'src/item/weapon/form/Shape.cpp'],
     content: `
 ### Orthogonal Weapon Architecture: \`FormBehavior\` × \`pay::Payload\`
 
-Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any weapon—including the 22 class-exclusive weapons, 7 Mage spells, and 29 evolved artifacts—is defined by pairing one of **15 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
+Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any recipe weapon—including the 22 class-exclusive weapons and 7 Mage spells (29 \`RECIPES\` alongside 12 bespoke shared weapons = **41 evolvable weapons** in \`EVOLUTIONS[]\`)—is defined by pairing one of **15 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
 
 \`\`\`cpp
 void RecipeShot::strike(Mob &e, double xd, double yd) {
@@ -1287,7 +1287,7 @@ flowchart TD
 ### Hands-On Tutorial 1: Creating a New Weapon Step by Step
 
 There are two ways to add a weapon in Mellangan:
-1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the 12 existing \`Form\` trajectories (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`) with any combination of \`pay::Payload\` bitflags (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`).
+1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the **15 existing \`Form\` trajectories** (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`, \`Whip\`, \`Wall\`, \`Spiral\`) with any combination of the **16 \`pay::Payload\` bitflags** (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Bleed\`, \`Weaken\`, \`Fear\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`, \`Shatter\`, \`Execute\`).
 2. **The Custom \`Upgrade\` Subclass Path (\`src/item/weapon/*.cpp\`):** Ideal when your weapon introduces brand-new projectile physics or custom rendering.
 
 ---
@@ -1494,13 +1494,13 @@ flowchart TD
     title: '15. Tutorial 3: Adding a Playable Hero, Active Skill, Talent & Relic',
     category: 'contribute',
     summary: 'Step-by-step guide to defining HeroData, Mob-symmetric active skills, class talents, boss relics, and Codex unlock predicates.',
-    sourceFiles: ['src/hero/Hero.hpp', 'src/hero/Hero.cpp', 'src/hero/ExpansionHero.cpp', 'src/item/skill/Skill.hpp', 'src/item/talent/ExpansionTalents.cpp', 'src/item/relic/ExpansionRelics.cpp'],
+    sourceFiles: ['src/hero/Hero.hpp', 'src/hero/Hero.cpp', 'src/hero/ExpansionHero.hpp', 'src/hero/Warden.cpp', 'src/item/skill/Skill.hpp', 'src/item/talent/ExpansionTalents.cpp', 'src/item/relic/ExpansionRelics.cpp'],
     content: `
 ### Hands-On Tutorial 3: Creating a Playable Hero & Class Kit
 
-Playable classes in Mellangan are governed by \`class Hero : public HeroData\` (\`src/hero/Hero.hpp\`). A complete class package consists of:
-1. **The \`Hero\` definition (\`src/hero/\`):** Base stat modifiers, unlock predicate \`bool (*met)(const Codex &)\`, passive class hook (\`equip\`, \`tick\`, \`guard\`, \`slay\`, \`wisdom\`, \`edge\`), signature weapon, and 3 favoured upgrade affinities (\`affinity[3]\`).
-2. **The Active \`HeroSkill\` (\`cast(Mob &)\`):** Automatically wrapped into a \`Spacebar\` active skill by \`HeroSkill(const Hero &hero)\` (\`src/item/skill/Skill.hpp\`).
+Playable classes in Mellangan are governed by \`class Hero : public HeroData\` (\`src/hero/Hero.hpp\`) and \`class ExpansionHero : public Hero\` (\`src/hero/ExpansionHero.hpp\`). A complete class package consists of:
+1. **The \`Hero\` definition (\`src/hero/*.cpp\`):** Base stat modifiers, unlock predicate \`bool (*met)(const Codex &)\`, passive class hook (\`equip\`, \`tick\`, \`guard\`, \`slay\`, \`wisdom\`, \`edge\`), signature weapon, and 3 favoured upgrade affinities (\`affinity[3]\`).
+2. **The Active \`HeroSkill\` (\`cast(Mob &)\`):** Automatically wrapped into a \`Spacebar\` active skill by \`HeroSkill(const Hero &hero)\` (\`src/item/skill/Skill.hpp\`), plus 2 additional draftable class skills in \`src/item/skill/\`.
 3. **Class Talents & Boss Relics (\`src/item/talent/\`, \`src/item/relic/\`):** Class-restricted passives and boss-chest relics.
 
 ---
@@ -1521,14 +1521,14 @@ struct HeroData {
 };
 \`\`\`
 
-For example, in \`src/hero/ExpansionHero.cpp\`, unlock predicates inspect \`const Codex &c\` (such as \`c.count(c.biomes) >= 3\`, \`c.kills() >= 200\`, \`c.shrines >= 2\`, or \`c.bestStreak >= 30\`):
+For example, in \`src/hero/Warden.cpp\` (and similarly across \`Tinkerer.cpp\`, \`Oracle.cpp\`, and \`Corsair.cpp\`), unlock predicates inspect \`const Codex &c\` (such as \`c.count(c.biomes) >= 3\`, \`c.kills() >= 200\`, \`c.shrines >= 2\`, \`c.bestStreak >= 30\`, or \`c.dawns > 0\`):
 
 \`\`\`cpp
-bool chronomancer(const Codex &c) { return c.nightsSurvived >= 1; }
+bool chronomancer(const Codex &c) { return c.dawns > 0; }
 
 const HeroData CHRONO_DATA = {
     "CHRONOMANCER", "Hourglass Shard", "Weaver of fractured seconds",
-    "Cooldowns tick 15% faster below half health", "survive until dawn", chronomancer, 84,
+    "Cooldowns tick 15% faster below half health", "see a dawn", chronomancer, 84,
     {0.55f, 0.85f, 1.0f, 1.0f}, -5, 1.04f, 0.05f, -0.05f, 4, 0, 0, 0.03f,
     "TIME STOP", "Freeze nearby foes for 2.5s and restore 25% cooldown", 12,
     {"Hourglass Shard", "Hourglass Tonic", "Prism Beam"}
@@ -2207,107 +2207,116 @@ flowchart LR
   },
   {
     id: 'night-spawner-director',
-    title: '21. Night Clock, Wave Director, Shrine Kindling & Omen Modifiers',
+    title: '21. Night Clock, 11 Omens, Shrine Dawn-Pull & 7-Stream Wave Director',
     category: 'gameplay',
-    summary: 'How Night.cpp and Spawner.cpp orchestrate the 15-minute nocturnal survival arc, quadratic sunrise, shrine kindling retaliation rings, and 7 concurrent spawn streams.',
+    summary: 'How Night.cpp, Flavour.cpp, and Spawner.cpp orchestrate the 15-minute survival arc, 11 nocturnal Omens, 60s shrine dawn-pull, and 7 concurrent spawn streams.',
     sourceFiles: ['src/level/Night.cpp', 'src/level/Spawner.cpp', 'src/entity/enemy/Rank.cpp', 'src/level/Flavour.cpp'],
     content: `
-### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\`)
+### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
 
-Every run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`), which tracks the countdown to dawn (\`duration = 900.0f\` seconds by default), the active nocturnal omen (\`Portent\`), and the kindling state of the three sacred Shrines scattered across the map.
+Every run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`) and \`RunRules\` (\`src/level/RunRules.hpp\`), which track the countdown to dawn (\`r.nightLength = 900.0f\` seconds by default), the active nocturnal \`Omen\` (\`OMENS[11]\` in \`src/level/Flavour.cpp\`), and the kindling state of sacred Shrines scattered across the map.
 
-#### Deterministic Omen Selection (\`PORTENTS[]\`)
-At the start of a run, \`Night::init(Level &level)\` seeds a dedicated local PRNG by XORing the world seed with the ASCII constant \`'NIGH'\` (\`0x4E494748u\`):
-
-\`\`\`cpp
-void Night::init(Level &level) {
-  RNG rng(level.seed() ^ 0x4E494748u);
-  omen = rng.range(0, PORTENT_COUNT - 1);
-  banner = 4.5f;
-}
-\`\`\`
-
-The selected \`Portent\` globally scales three core pacing multipliers read by \`Spawner\` and \`Enemy\`:
-- \`portent().rate\`: Multiplies the time between trickle spawns (values \`< 1.0f\` accelerate spawns).
-- \`portent().hp\`: Multiplies enemy maximum health at spawn time.
-- \`portent().xp\`: Multiplies experience gem values dropped across the night.
+#### The 11 Nocturnal Omens (\`OMENS[OMEN_COUNT = 11]\` in \`Flavour.cpp\`)
+At the start of a run, \`Level\` rolls \`rng.chance(0.85f)\` (unless overridden by \`rules.omen\`) to activate one of **11 global Omens** (falling back to \`CALM\` on the remaining 15% of nights). Each \`Omen\` modifies six global pacing parameters (\`rate, horde, speed, xp, score, elite\`) accessed via \`level.portent()\`:
+- **\`BLOOD MOON\`:** \`rate = 1.25\`, \`horde = 1.3\`, \`xp = 1.2\`, \`score = 1.3\` (faster spawns & larger hordes).
+- **\`AURORA\`:** \`xp = 1.35\`, \`score = 1.1\`, \`elite = 0.05\` (richer XP gems and more elites).
+- **\`GALE\`:** \`speed = 1.15\`, \`score = 1.2\` (\`+15%\` monster movement speed).
+- **\`OUTLAW SEASON\`:** \`score = 1.25\` (doubles Renegade hunting party frequency).
+- **\`MIMIC MOON\`:** \`xp = 1.15\`, \`score = 1.2\` (\`2.5×\` disguised Chest Mimics).
+- **\`THE SWARM\`:** \`rate = 1.45\`, \`horde = 1.5\`, \`speed = 0.92\`, \`xp = 1.1\`, \`score = 1.35\` (relentless swarm density).
+- **\`IRON NIGHT\`:** \`rate = 0.85\`, \`xp = 1.25\`, \`score = 1.3\`, \`elite = 0.14\` (\`+14%\` flat elite promotion rate).
+- **\`WAR DRUMS\`:** \`horde = 1.45\`, \`speed = 1.08\`, \`xp = 1.15\`, \`score = 1.3\` (frequent war-party waves).
+- **\`LONG NIGHT\`:** \`rate = 1.15\`, \`horde = 1.2\`, \`speed = 1.05\`, \`xp = 1.2\`, \`score = 1.4\`.
+- **\`QUIET HOURS\`:** \`rate = 0.75\`, \`horde = 0.8\`, \`xp = 0.9\`, \`score = 0.85\` (calmer night, lower score multiplier).
+- **\`CHAMPION'S HOUR\`:** \`xp = 1.3\`, \`score = 1.4\`, \`elite = 0.08\` (halves Champion spawn interval and increases max simultaneous Champions to 3).
 
 ---
 
-### Quadratic Sunrise & Shrine Kindling Mechanics
+### Shrine Dawn-Pull & Quadratic Sunrise Mechanics (\`Night.cpp\`)
 
-#### 1. The Final 150 Seconds (\`Night::daylight()\`)
-Rather than switching abruptly from night to day, \`Night::daylight()\` begins warming the ambient lightmap during the final **150 seconds** (\`2.5 minutes\`) before dawn using a smooth quadratic curve:
-
+#### 1. Shrine Kindling Pulls Dawn Closer by 60 Seconds (\`Night::dawnAt()\`)
+Standing within \`28 px\` of an unlit \`StructureKind::Shrine\` charges \`kindling\` over \`KINDLE = 6.0f\` seconds (\`kindling += DT * level.kindleRate / KINDLE\`, decaying at \`DT * 0.5f\` when stepping away). When \`kindling >= 1.0f\`, \`Night::kindle(Level &level, Shrine &s)\` executes:
+1. Marks \`s.lit = true\`, increments \`lit\`, sets \`offering = true\` (opening \`ShrineMenu\` for a blessing/curse choice), and records the biome bit in \`level.litBiomes |= 1u << int(world::biomeUnder(s.x, s.y))\`.
+2. Heals the player by \`+35% maxHp\` and spawns a **guard retaliation ring** of \`8 + 3 * lit\` enemies of tier \`strongestUnlocked(level.time)\` at radius \`170 px\`.
+3. **Pulls Dawn Closer:** Every kindled shrine subtracts \`r.dawnPull = 60.0f\` seconds from the night length!
 \`\`\`cpp
-float Night::daylight() const {
-  float d = clampf(1.0f - left() / 150.0f, 0.0f, 1.0f);
-  return d * d;
+float Night::dawnAt(const Level &level) const {
+  const RunRules &r = level.rules;
+  return nightStart + r.nightLength - (r.endsAtDawn ? lit * r.dawnPull : 0);
 }
 \`\`\`
 
-When \`left() <= 0\`, \`Night::strikeDawn(level)\` triggers once: it plays \`Assets::sfxDawn\`, awards the player \`+30% maxHp\` healing, and sweeps every surviving enemy in \`level.enemies()\` with \`9999.0f\` radiant damage while spawning golden \`HealDebris\` bursts across the screen.
-
-#### 2. Shrine Kindling & The Guard Retaliation Ring
-To survive the night and unlock shrine boons, the player seeks out up to 3 unlit \`StructureKind::Shrine\` landmarks (revealed on the HUD compass by \`Night::nearestUnlitShrine\`).
-- Standing within \`KINDLE_RADIUS\` of an unlit shrine charges \`kindling\` at \`DT * level.kindleRate / KINDLE\`.
-- Stepping outside the circle decays \`kindling\` at half speed (\`DT * 0.5f\`).
-- Once \`kindling >= 1.0f\`, \`Night::kindle(level, *active)\` executes:
-  1. Marks \`s.lit = true\`, increments \`lit\`, sets \`offering = true\` (which opens \`ShrineMenu\` for a blessing/curse choice), and records the shrine's biome bit in \`level.litBiomes |= 1u << int(level.biomeUnder(s.x, s.y))\`.
-  2. Restores \`35% maxHp\` and emits an expanding golden \`Nova\`.
-  3. Spawns a **retaliation ring** of \`8 + 3 * lit\` enemies of the highest currently unlocked tier (\`strongestUnlocked(level.time)\`) evenly spaced around a \`170 px\` circle!
+#### 2. The Final 150 Seconds (\`Night::daylight()\`)
+During the final **150 seconds** before \`dawnAt()\`, \`Night::daylight(level)\` smoothly warms the ambient lightmap along a quadratic curve \`d * d\`:
+\`\`\`cpp
+float Night::daylight(const Level &level) const {
+  if (!level.rules.endsAtDawn && !nightTime)
+    return 1;
+  if (dawn)
+    return 1;
+  float left = dawnAt(level) - level.time;
+  float d = std::clamp(1.0f - left / 150.0f, 0.0f, 1.0f);
+  return d * d;
+}
+\`\`\`
+When \`level.time >= dawnAt(level)\`, \`Night::tick\` sets \`dawn = true\` and triggers \`level.game.onDawn()\` (or cycles seamlessly between night and day via \`Night::cycle\` in non-ending campaign modes where \`!r.endsAtDawn\`).
 
 ---
 
 ### The 7-Stream Wave Director (\`src/level/Spawner.cpp\`)
 
-\`Spawner::tick(Level &level)\` runs during \`PROF_HOUSEKEEP\` and coordinates **seven independent spawn streams**, all bounded by the difficulty's \`enemyCap\` and positioned just outside the camera viewport via \`Screen::reach() + 28.0f\`:
+\`Spawner::tick(Level &level)\` runs during \`PROF_HOUSEKEEP\` and coordinates **seven independent spawn streams**, all bounded by \`b.enemyCap\` and positioned outside the camera viewport via \`R_MIN = 220 + reach\` to \`R_MAX = 260 + reach\`:
 
 1. **Dynamic Trickle Stream (\`Spawner::trickle\`):**
-   The trickle interval decays linearly with elapsed time \`t\` down to \`b.spawnFloor\`:
    \`\`\`cpp
-   float interval = std::max(b.spawnFloor, b.spawnInterval - t * b.spawnRamp) *
-                    level.night.portent().rate;
+   float rate = level.portent().rate * level.rules.spawnRate * level.night.spawnScale();
+   float interval = std::max(b.spawnFloor, b.spawnInterval - t * b.spawnRamp) / rate;
    int batch = 1 + int(t / b.batchEvery);
    \`\`\`
    Each enemy in the batch is chosen by \`Spawner::pick(level, r, x, y)\`:
    - \`1.5%\` chance (after \`70s\`): \`EnemyKind::Thief\` treasure goblin.
-   - \`b.localChance\`: A biome-native specialist from \`localFoes(level.biomeUnder(x, y))\`.
-   - \`b.strongChance\`: One of the top 2 most recently unlocked monster tiers.
-   - Otherwise: Uniform draw from \`r.common\`, with an elite promotion roll after \`b.eliteStart\`.
-2. **Named Horde Waves (\`Spawner::horde\`):**
-   Every \`b.hordeEvery\` seconds, the director selects from 6 structured \`WAVE_DEFS\` (\`Bat Swarm\`, \`Wolf Pack\`, \`Bone March\`, \`Grave Tide\`, \`Covenant Host\`, \`Golem Siege\`) and spawns an arc cluster of \`min(b.hordeMax, (b.hordeBase + wave * b.hordeRamp) * def.scale)\` monsters around a shared approach angle.
+   - \`b.localChance\`: A biome-native specialist from \`localFoes(world::biomeUnder(x, y))\`.
+   - \`b.strongChance\`: One of the top 2 most recently unlocked monster tiers in \`r.common\`.
+   - Otherwise: Uniform draw from \`r.common\`, promoting to an elite with probability \`min(b.eliteCap, (t - b.eliteStart) * b.eliteRamp) + level.portent().elite\` (and rolling 1 \`Trait\` after \`90s\`, or 2 \`Traits\` with \`20%\` chance after \`300s\`).
+2. **6 Named Minute-Wave Templates (\`WAVE_DEFS[6]\` in \`Spawner::horde\`):**
+   Every \`b.hordeEvery\` (\`60s\`), \`Spawner::horde(t)\` computes \`count = int(min(b.hordeMax, b.hordeBase + t / b.hordeRamp) * o.horde * level.rules.hordeScale)\` and selects a non-repeating wave template from \`WAVE_DEFS[6]\`:
+   - **\`"THE HORDE CLOSES IN"\` (\`from = 0s\`):** Full ring of strong unlocked foes around the player.
+   - **\`"A SWARM DESCENDS"\` (\`from = 60s\`):** \`1.5×\` count of fast early-tier swarmers led by 2 elites.
+   - **\`"THE PACK HUNTS"\` (\`from = 100s\`):** Coordinated \`Alpha\` wolves and \`Wolf\` packs.
+   - **\`"AMBUSH!"\` (\`from = 120s\`):** Concentrated \`60°\` (\`PI / 3\`) arc directly ahead of the player's movement vector!
+   - **\`"THE DEAD RISE"\` (\`from = 150s\`):** Tight inner ring of \`Skeleton\`s (\`130..170 px\`) backed by an outer ring of \`Necromancer\` summoners (\`220..250 px\`).
+   - **\`"THE LAND STIRS"\` (\`from = 90s\`):** Biome-native ambush drawn entirely from \`localFoes(biome)\` plus 2 biome elites.
 3. **Disguised Chest Mimics (\`Spawner::mimics\`):**
-   Seeds dormant \`EnemyKind::Mimic\` ambushes near landmarks.
-4. **Renegade Outlaw Hunting Parties (\`Spawner::renegades\`):**
-   Spawns coordinated bands of \`2..4\` \`Outlaw\` enemies wearing randomized procedural armor palettes (\`outlawVariant\`).
+   Every \`45s\` (or \`18s\` under \`MIMIC MOON\`), hides a dormant \`EnemyKind::Mimic\` ahead of the player if fewer than 2 mimics are active.
+4. **Renegade Adventurer Hunting Parties (\`Spawner::renegades\`):**
+   From \`180s\` onward (or \`90s\` under \`OUTLAW SEASON\`), announces *"RENEGADES ON YOUR TRAIL"* and spawns \`1..2\` weapon-wielding \`Outlaw\`, \`Berserker\`, \`PitFighter\`, or \`Deserter\` foes.
 5. **Named Epithet Champions (\`Spawner::champions\`):**
-   Spawns high-threat miniboss elites assigned procedural titles and rank modifiers via \`Rank.cpp\`.
-6. **Explosive Powder Barrels (\`Spawner::barrel\`):**
-   Places destructible \`Barrel\` hazards every \`20s\` along the player's perimeter.
-7. **Landmark & Timed Bosses (\`Spawner::boss\`):**
-   Every \`b.bossEvery\` seconds, spawns the cycling 3-phase boss (\`Golem\`, \`Lich\`, \`Broodmother\`, \`Reaper\`, \`Titan\`) scaled by \`1.0f + bossCount * b.bossHpStep\`.
+   From \`150s\` onward (every \`120s\`, or \`60s\` under \`CHAMPION'S HOUR\`), \`spawnChampion\` rolls a procedural epithet (\`Rank.cpp\`), 2 \`Trait\`s, 1 active \`Skill\`, and 1 player \`Upgrade\` weapon.
+6. **Explosive Supply Barrels (\`Spawner::barrel\`):**
+   Places a destructible \`SupplyBarrel\` every \`20s\` along the player's perimeter.
+7. **Regional & Cycling 3-Phase Bosses (\`Spawner::boss\`):**
+   Every \`b.bossEvery\` seconds, \`bossFor(world::biomeUnder(player->x, player->y))\` selects the biome's regional boss from \`BOSS_DEFS[9]\` (or cycles \`THE CYCLOPS\`, \`THE PACK LORD\`, and \`THE LICH\` on a 30% classic roll), scaled by \`1.0f + (bosses - 1) * b.bossHpStep\`.
 `,
     mermaidCharts: [
       {
-        title: 'Night Clock, Shrine Kindling & 7-Stream Spawner Director Pipeline',
+        title: 'Night Clock, 60s Shrine Dawn-Pull & 7-Stream Spawner Director Pipeline',
         chart: `
 flowchart TD
     classDef clock fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
     classDef shrine fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
     classDef stream fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
 
-    Seed["Night::init(level)<br/>RNG(seed ^ 0x4E494748u) -> Pick Portent Omen (rate, hp, xp)"]:::clock
-    Tick["Night::tick(level) @ 60 Hz<br/>left() = duration - level.time"]:::clock
-    DawnCheck{"left() <= 150s?"}:::clock
+    Seed["Level Init: Roll Omen (85% OMENS[0..10], 15% CALM)<br/>portent() -> (rate, horde, speed, xp, score, elite)"]:::clock
+    Tick["Night::tick(level) @ 60 Hz<br/>dawnAt = nightStart + nightLength - lit * dawnPull (60s)"]:::clock
+    DawnCheck{"dawnAt - level.time <= 150s?"}:::clock
     Daylight["Quadratic Sunrise Ramp<br/>d = clamp(1 - left/150, 0, 1); daylight = d * d"]:::clock
-    StrikeDawn["left() <= 0: Night::strikeDawn()<br/>Heal +30% HP + 9999 Radiant Damage Sweep"]:::clock
+    StrikeDawn["level.time >= dawnAt:<br/>dawn = true -> game.onDawn() (or Night::cycle)"]:::clock
 
-    ShrineProx["Player Inside Unlit Shrine Radius?<br/>kindling += DT * kindleRate / KINDLE"]:::shrine
-    Kindle["Night::kindle() @ kindling >= 1.0<br/>offering = true + litBiomesBit + Ring of (8 + 3*lit) Foes @ r=170"]:::shrine
+    ShrineProx["Player Within 28px of Unlit Shrine?<br/>kindling += DT * kindleRate / 6.0s"]:::shrine
+    Kindle["Night::kindle() @ kindling >= 1.0<br/>lit++ (Pulls Dawn -60s!) + Ring of (8 + 3*lit) Foes @ r=170"]:::shrine
 
-    Spawner["Spawner::tick(level) (7 Concurrent Streams)<br/>Spawn Radius = Screen::reach() + 28px"]:::stream
-    Streams["1. trickle(t)  2. horde(t) (WAVE_DEFS)  3. mimics()<br/>4. renegades(t)  5. champions()  6. barrel()  7. boss()"]:::stream
+    Spawner["Spawner::tick(level) (7 Concurrent Streams)<br/>Spawn Ring = [220 + reach .. 260 + reach]"]:::stream
+    Streams["1. trickle(t)  2. horde(t) (WAVE_DEFS[6])  3. mimics()<br/>4. renegades(t)  5. champions()  6. barrel()  7. boss()"]:::stream
 
     Seed --> Tick --> DawnCheck
     DawnCheck -- "Yes" --> Daylight --> StrikeDawn
@@ -2328,9 +2337,9 @@ flowchart TD
     StrongRoll{"chance(b.strongChance)<br/>&& common.size >= 3?"}:::roll
 
     Thief["EnemyKind::Thief<br/>(Treasure Goblin)"]:::out
-    BiomeFoe["Biome-Native Specialist<br/>localFoes(level.biomeUnder(x, y))"]:::out
+    BiomeFoe["Biome-Native Specialist<br/>localFoes(world::biomeUnder(x, y))"]:::out
     TopTwo["Top-2 Newest Unlocked Tier<br/>r.common[size - 1 - range(0, 1)]"]:::out
-    Uniform["Uniform Common Pool<br/>+ Elite Promotion Roll (after b.eliteStart)"]:::out
+    Uniform["Uniform Common Pool<br/>+ Elite & Trait Promotion Roll (after b.eliteStart)"]:::out
 
     Start --> ThiefRoll
     ThiefRoll -- "Yes" --> Thief
@@ -2346,24 +2355,24 @@ flowchart TD
   },
   {
     id: 'persistence-codex-balance',
-    title: '22. Persistence, World History LRU, Codex Unlocks & Balance INI',
+    title: '22. Persistence, 6-World History LRU, Codex Unlocks & Balance INI',
     category: 'core',
-    summary: 'How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 8-slot binary map charts, meta-progression bitmasks, and pointer-to-member INI reflection.',
-    sourceFiles: ['src/meta/Saves.cpp', 'src/meta/Codex.cpp', 'src/meta/Balance.cpp', 'src/Game.cpp'],
+    summary: 'How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 6-slot binary map charts, 12 hero unlock predicates, and pointer-to-member INI reflection.',
+    sourceFiles: ['src/meta/Saves.hpp', 'src/meta/Saves.cpp', 'src/meta/Codex.hpp', 'src/meta/Codex.cpp', 'src/meta/Balance.cpp', 'res/balance.ini'],
     content: `
-### Cross-Platform Persistence & World Chart LRU (\`src/meta/Saves.cpp\`)
+### Cross-Platform Persistence & 6-World Chart LRU (\`src/meta/Saves.cpp\`)
 
-All persistent player state in **Mellangan** is managed by \`Saves\` (\`src/meta/Saves.cpp\`), which resolves the OS-native application preference directory via SDL3's \`SDL_GetPrefPath("soulwax", "Mellangan")\` and performs atomic file reads/writes through \`SDL_LoadFile\` and \`SDL_SaveFile\`.
+All persistent player state in **Mellangan** is managed by \`Saves\` (\`src/meta/Saves.hpp\`, \`src/meta/Saves.cpp\`), which resolves the OS-native application preference directory via SDL3's \`SDL_GetPrefPath("soulwax", "Mellangan")\` and performs file reads/writes through \`SDL_LoadFile\` and \`SDL_SaveFile\`.
 
 #### Saved Files in the Preference Directory
-- \`world.txt\`: Stores the active \`WorldMode\` (\`classic\`, \`random\`, \`daily\`, or \`custom <12-char-code>\`).
-- \`worlds.txt\`: Maintains a most-recently-used (LRU) table of up to \`HISTORY = 8\` past world codes along with best survival time, total runs, and whether dawn was achieved (\`<code> <best> <runs> <dawn>\`).
-- \`chart-<code>.bin\`: Binary fog-of-war exploration charts for each world code in the 8-slot history.
+- \`world.txt\`: Stores the active \`WorldMode\` (\`classic\`, \`random\`, \`daily\`, or \`custom <code-string>\`).
+- \`worlds.txt\`: Maintains a most-recently-used (LRU) table of up to **\`Saves::HISTORY = 6\`** past world codes along with best survival time, total runs, and whether dawn was achieved (\`<code> <best> <runs> <dawn>\`).
+- \`chart-<code>.bin\`: Binary fog-of-war exploration charts for each world code in the 6-slot history.
 - \`codex.txt\`: Human-readable key-value meta-progression ledger managed by \`Codex\`.
 - \`controls.txt\`: Custom keyboard and gamepad bindings.
 
-#### Automatic Binary Chart Garbage Collection
-Whenever a run ends, \`Saves::record(code, time, dawn)\` updates or inserts the world entry at the front of \`history\`. If \`history.size() > HISTORY (8)\`, it automatically deletes the oldest world's binary fog-of-war chart from disk before popping the entry:
+#### Automatic Binary Chart Garbage Collection (\`Saves::HISTORY = 6\`)
+Whenever a run ends, \`Saves::record(code, time, dawn)\` updates or inserts the world entry at the front of \`history\`. If \`int(history.size()) > HISTORY (6)\`, it automatically deletes the oldest world's binary fog-of-war chart from disk before popping the entry:
 
 \`\`\`cpp
 history.insert(history.begin(), w);
@@ -2375,23 +2384,33 @@ while (int(history.size()) > HISTORY) {
 
 ---
 
-### Meta-Progression & Class Unlocks (\`src/meta/Codex.cpp\`)
+### Meta-Progression Ledger & 12 Hero Unlock Predicates (\`src/meta/Codex.hpp\`)
 
-\`Codex\` (\`src/meta/Codex.cpp\`) tracks lifetime career statistics (\`runs\`, \`dawns\`, \`kills\`, \`bestTime\`), per-monster kill counts (\`bestiary[ENEMY_COUNT]\`), discovered combinations (\`recipes\`, \`relics\`, \`biomes\`, \`trials\`), and the \`classes\` unlock bitmask.
+\`Codex\` (\`src/meta/Codex.hpp\`, \`src/meta/Codex.cpp\`) stores lifetime career statistics and discovery bitmasks:
+- **Discovery Bitmasks:** \`uint32_t biomes = 0\` (26 biomes visited) and \`uint32_t relics = 0\` (boss relics found), counted via \`std::popcount(bits)\` (\`Codex::count\`).
+- **Positional Arrays:** \`int slain[KINDS]{}\` (per-species kill counts across all 39 \`EnemyKind\`s, summed by \`Codex::kills()\`) and \`int entered[SITES]{}\` (per-structure visit counts, summed by \`Codex::sites()\`).
+- **Career Counters:** \`int runs = 0, dawns = 0, bestStreak = 0, start = 0, shrines = 0; float bestTime = 0;\`.
 
-#### Deterministic Unlock Predicates (\`Codex::recordRun\`)
-At the conclusion of every run (victory or death), \`Codex::recordRun(const Level &level, bool dawn)\` aggregates the run's discoveries and evaluates five milestone unlock conditions for the core hero roster:
-1. **Knight (\`HeroClass::Knight\`):** Unlocked by default (\`bit(HeroClass::Knight)\` is always set in \`Codex::reset()\`).
-2. **Mage (\`HeroClass::Mage\`):** Unlocked upon lighting at least one Shrine (\`level.night.lit > 0\`).
-3. **Rogue (\`HeroClass::Rogue\`):** Unlocked upon surviving at least **5 minutes** (\`level.time >= 300.0f\`).
-4. **Cleric (\`HeroClass::Cleric\`):** Unlocked upon reaching Dawn (\`dawn == true\`) or slaying **250+ enemies** in a single run (\`level.player->kills >= 250\`).
-5. **Warden (\`HeroClass::Warden\`):** Unlocked upon discovering a **Weapon Evolution** during the run (\`level.player->evolutions > 0\`).
+#### All 12 \`HeroData::met(const Codex &)\` Unlock Predicates (\`src/hero/*.cpp\`)
+Each hero's \`HeroData\` struct binds a pure function pointer \`bool (*met)(const Codex &)\` evaluated directly against \`Codex\`:
+1. **\`MAGE\` (\`Mage.cpp\`):** Unlocked by default (\`return true;\`).
+2. **\`RANGER\` (\`Ranger.cpp\`):** *"see a dawn"* — \`c.dawns > 0\`.
+3. **\`KNIGHT\` (\`Knight.cpp\`):** *"slay 1000 foes"* — \`c.kills() >= 1000\`.
+4. **\`ALCHEMIST\` (\`Alchemist.cpp\`):** *"find 3 relics"* — \`c.count(c.relics) >= 3\`.
+5. **\`STORMCALLER\` (\`Stormcaller.cpp\`):** *"walk 10 regions"* — \`c.count(c.biomes) >= 10\`.
+6. **\`REAPER\` (\`Reaper.cpp\`):** *"a 100 kill streak"* — \`c.bestStreak >= 100\`.
+7. **\`PRIESTESS\` (\`Priestess.cpp\`):** *"kindle 10 shrines"* — \`c.shrines >= 10\`.
+8. **\`DUELIST\` (\`Duelist.cpp\`):** *"survive 10 minutes"* — \`c.bestTime >= 600\`.
+9. **\`WARDEN\` (\`Warden.cpp\`):** *"walk 3 regions"* — \`c.count(c.biomes) >= 3\`.
+10. **\`TINKERER\` (\`Tinkerer.cpp\`):** *"slay 200 foes"* — \`c.kills() >= 200\`.
+11. **\`ORACLE\` (\`Oracle.cpp\`):** *"kindle 2 shrines"* — \`c.shrines >= 2\`.
+12. **\`CORSAIR\` (\`Corsair.cpp\`):** *"reach a 30-kill streak"* — \`c.bestStreak >= 30\`.
 
 ---
 
-### Pointer-to-Member INI Reflection (\`src/meta/Balance.cpp\`)
+### Pointer-to-Member INI Reflection (\`src/meta/Balance.cpp\` & \`res/balance.ini\`)
 
-Rather than hardcoding difficulty multipliers or pulling in a heavy configuration library, \`Balance::load\` (\`src/meta/Balance.cpp\`) parses \`assets/balance.ini\` using a zero-overhead C++ **pointer-to-member table** (\`float Balance::*member\`):
+Rather than hardcoding difficulty multipliers or pulling in a heavy configuration library, \`Balance::load\` (\`src/meta/Balance.cpp\`) parses \`res/balance.ini\` using a zero-overhead C++ **pointer-to-member table** (\`float Balance::*member\`):
 
 \`\`\`cpp
 struct Field {
@@ -2411,14 +2430,14 @@ const Field FIELDS[] = {
 \`\`\`
 
 #### Two-Layer Section Cascade (\`[all]\` → \`[<difficulty>]\`)
-\`Balance::load(text, tier)\` streams \`assets/balance.ini\` in a single pass:
+\`Balance::load(text, tier)\` streams \`res/balance.ini\` in a single pass:
 - Keys under \`[all]\` establish the baseline tuning across all 28 fields.
 - Keys under the active difficulty section (\`[too_young]\`, \`[not_too_rough]\`, \`[hurt_me_plenty]\`, \`[ultra_violence]\`, or \`[nightmare]\`) selectively override only the fields that differ for that tier via \`this->*f.member = std::strtof(value.c_str(), nullptr)\`.
 - Any unrecognized key triggers a non-fatal \`spdlog::warn("balance: unknown key {}", key)\` diagnostic so designers immediately catch typos during \`--dev\` hot-testing.
 `,
     mermaidCharts: [
       {
-        title: 'Saves Preference Directory, 8-World LRU History & Chart Eviction',
+        title: 'Saves Preference Directory, 6-World LRU History & Chart Eviction',
         chart: `
 flowchart TD
     classDef io fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -2426,21 +2445,21 @@ flowchart TD
     classDef gc fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
 
     Pref["Saves::open()<br/>SDL_GetPrefPath('soulwax', 'Mellangan')"]:::io
-    Files["Persistent Files<br/>• world.txt (WorldMode + Seed)<br/>• worlds.txt (LRU History <= 8)<br/>• codex.txt (Meta Unlock Ledger)<br/>• chart-<code>.bin (Fog-of-War)"]:::file
+    Files["Persistent Files<br/>• world.txt (WorldMode + Seed)<br/>• worlds.txt (LRU History <= 6)<br/>• codex.txt (Meta Unlock Ledger)<br/>• chart-<code>.bin (Fog-of-War)"]:::file
     Record["Saves::record(code, time, dawn)<br/>Move/Insert World at history.begin()"]:::io
-    Evict["history.size() > 8?<br/>SDL_RemovePath('chart-' + back.code + '.bin')<br/>history.pop_back()"]:::gc
+    Evict["history.size() > 6 (Saves::HISTORY)?<br/>SDL_RemovePath('chart-' + back.code + '.bin')<br/>history.pop_back()"]:::gc
 
     Pref --> Files --> Record --> Evict
 `,
       },
       {
-        title: 'Balance::load() Pointer-to-Member INI Reflection Cascade',
+        title: 'Balance::load() Pointer-to-Member INI Reflection Cascade (res/balance.ini)',
         chart: `
 flowchart TD
     classDef ini fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
     classDef reflect fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
 
-    File["assets/balance.ini<br/>[all] Baseline + 5 Difficulty Sections"]:::ini
+    File["res/balance.ini<br/>[all] Baseline + 5 Difficulty Sections"]:::ini
     Filter{"section == 'all' ||<br/>section == difficultyName(tier)?"}:::ini
     Bind["Lookup Key in FIELDS[28]<br/>this->*f.member = strtof(value)"]:::reflect
     Systems["Consumed by Spawner, Night, Player & Enemy<br/>(spawnInterval, enemyCap, hordeMax, xpGrowth...)"]:::reflect
