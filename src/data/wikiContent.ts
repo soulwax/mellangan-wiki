@@ -12,7 +12,7 @@ export interface WikiSection {
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -366,14 +366,14 @@ classDiagram
   },
   {
     id: 'workers-concurrency',
-    title: '04. Lock-Free Atomic Stride Worker Pool & 4-Barrier AI',
+    title: '04. Lock-Free Atomic Stride Worker Pool, 4-Barrier AI & Thread Safety',
     category: 'simulation',
-    summary: 'Epoch generation wakeups, atomic fetch_add chunk stealing, main-thread work participation, and race-free separation.',
+    summary: 'Epoch generation wakeups, atomic fetch_add chunk stealing, member-pointer pass<> thunks, per-enemy Xorshift32 PRNGs, and race-free crowd physics.',
     sourceFiles: ['src/Workers.hpp', 'src/Workers.cpp', 'src/level/Level.cpp', 'src/entity/enemy/Enemy.cpp'],
     content: `
 ### Zero-Allocation Fork-Join Concurrency (\`src/Workers.cpp\`)
 
-Standard thread pools allocate heap task wrappers (\`std::function<void()>\`) and push them into mutex-contended queues. \`Workers.cpp\` avoids all dynamic allocation by combining an **epoch counter (\`generation\`)** with **lock-free atomic stride stealing (\`std::atomic<int> next\`)**:
+Standard thread pools allocate heap task wrappers (\`std::function<void()>\`) and push them into mutex-contended queues. \`Workers.cpp\` avoids all dynamic allocation by combining an **epoch counter (\`generation\`)**, **lock-free atomic stride stealing (\`std::atomic<int> next\`)**, and a plain C function pointer \`typedef void (*Job)(void *ctx, int begin, int end);\`:
 
 \`\`\`cpp
 void Workers::run(int n, int size, Job j, void *c) {
@@ -399,17 +399,86 @@ void Workers::work() {
 }
 \`\`\`
 
-#### Key Concurrency Design Decisions
-1. **Small-Batch Fast Path (\`n <= 256\`):** If fewer than 256 enemies exist on the map, \`Workers::run\` executes \`j(c, 0, n)\` directly on the calling thread—zero mutex locks, zero condition-variable syscalls.
-2. **Caller Thread Participation:** After calling \`wake.notify_all()\`, the main thread immediately invokes \`work()\` itself, competing alongside the \`N - 1\` background threads via \`next.fetch_add(chunk)\` so no physical core sits idle waiting.
-3. **Why 4 Sequential Barriers in \`Level::tick()\`?**
-   \`Level::tick()\` runs four separate \`workers.run(n, 256, ...)\` passes over \`thinkers\`:
-   - **Pass 1 (\`Enemy::think\`):** Reads player & leader positions, updates \`GoalQueue\`, writes private \`xWant, yWant\`.
-   - **Pass 2 (\`Enemy::move\`):** Advances \`x, y\` by velocity + knockback decay (\`exp(-9 * DT)\`) and resolves terrain collisions.
-   - **Pass 3 (\`Enemy::push\`):** Queries the read-only CSR spatial grid (\`level->gather\`) to compute soft-body repulsion impulses into private \`xPush, yPush\` fields **without modifying \`x, y\`**.
-   - **Pass 4 (\`Enemy::settle\`):** Adds \`xPush, yPush\` to \`x, y\` and re-runs \`level->collide(x, y, radius)\`.
+#### How Background Worker Threads Sleep & Wake (\`Workers::loop\`)
+At engine startup, \`Workers::Workers()\` spawns \`std::max(2u, std::thread::hardware_concurrency()) - 1\` persistent background threads. Each worker maintains a thread-local \`unsigned seen = 0\` counter and sleeps on \`wake.wait(lock, [&] { return quit || generation != seen; })\`:
+- When \`Workers::run\` increments \`generation++\` and calls \`wake.notify_all()\`, every worker wakes up, snapshots \`seen = generation\`, releases \`mutex\` immediately, and enters \`work()\` to steal chunks lock-free via \`next.fetch_add(chunk)\`.
+- When all chunks are exhausted (\`begin >= count\`), the last worker to decrement \`if (--busy == 0)\` signals \`done.notify_one()\`, releasing the main thread from the barrier.
 
-   Splitting \`push()\` and \`settle()\` across a barrier guarantees **zero read-write data races** on \`Enemy::x, y\` and makes multi-threaded crowd physics deterministic! Furthermore, distant enemies (\`dist > 260px\`) skip \`push()\` on alternating frames using pointer-bit checkerboard parity: \`((uintptr_t(this) >> 5) + level->ticks) & 1\`.
+---
+
+### Compile-Time Member-Pointer Thunks (\`pass<&Enemy::Step>\`)
+
+In \`src/level/Level.cpp\`, \`Level::tick()\` flattens all active enemies into \`std::vector<Enemy *> thinkers\` and dispatches four sequential fork-join barriers using a zero-overhead C++ template over a **member-function pointer** (\`void (Enemy::*Step)()\`):
+
+\`\`\`cpp
+template <void (Enemy::*Step)()>
+void pass(Workers &workers, std::vector<Enemy *> &list) {
+  workers.run(
+      int(list.size()), 256,
+      [](void *ctx, int begin, int end) {
+        Enemy **each = static_cast<Enemy **>(ctx);
+        for (int i = begin; i < end; i++)
+          (each[i]->*Step)();
+      },
+      list.data());
+}
+\`\`\`
+
+Because \`Step\` is a compile-time template argument, the captureless lambda decays directly into a static \`Workers::Job\` function pointer with the member call \`(each[i]->*Step)()\` inlined by the compiler:
+
+\`\`\`cpp
+pass<&Enemy::think>(workers, thinkers);
+pass<&Enemy::move>(workers, thinkers);
+pass<&Enemy::push>(workers, thinkers);
+pass<&Enemy::settle>(workers, thinkers);
+\`\`\`
+
+---
+
+### The 4-Barrier Memory Contract & Crowd Separation Math
+
+1. **Barrier 1 (\`pass<&Enemy::think>\`):**
+   - **Reads:** \`level->player\` position/velocity/aim and pack \`leader\` position.
+   - **Writes (Private per \`Enemy\`):** \`goals\`, \`goalTime\`, \`cooldown\`, \`xMark, yMark\`, \`xWant, yWant\`, \`seed\`, \`wantsFire\`, \`wantsLeader\`.
+2. **Barrier 2 (\`pass<&Enemy::move>\`):**
+   - **Reads:** Private \`xWant, yWant\`, \`status.movement()\`, \`traits.speed()\`, and read-only \`surfaces[]\` (\`surfaceAt\`, \`climb\`).
+   - **Writes (Private per \`Enemy\`):** Integrates \`x += (xWant * level->pace * spdMul + xa) * DT\`, decays knockback velocity via \`KNOCK_DECAY = std::exp(-9 * DT)\`, updates \`facing\`, and rubber-bands stragglers beyond \`560 px\` back to a \`290..320 px\` ring ahead of the player.
+3. **Barrier 3 (\`pass<&Enemy::push>\`):**
+   - **Reads:** Read-only CSR spatial grid (\`level->gather(x, y, radius + 16, nearby, 24)\`) and neighbor coordinates \`(o.x, o.y, o.radius)\`.
+   - **Writes (Private per \`Enemy\`):** Accumulates soft-body repulsion into \`xPush, yPush\` **without modifying \`x, y\`**!
+   - **Mass-Weighted Impulse Math:** Overlapping non-floating neighbors within \`min = (radius + o.radius) * 0.85\` push apart proportionally to inverse radius (\`share = o.type.speed <= 0 ? 1.0 : o.radius / (radius + o.radius)\`):
+     \`\`\`cpp
+     double min = (radius + o.radius) * 0.85, d2 = ox * ox + oy * oy;
+     if (d2 >= min * min || d2 < 1e-6)
+       continue;
+     double dd = std::sqrt(d2),
+            share = o.type.speed <= 0 ? 1.0 : o.radius / (radius + o.radius);
+     double k = (min - dd) / dd * share;
+     xPush += ox * k, yPush += oy * k;
+     \`\`\`
+   - **Pointer-Bit Checkerboard Decimation:** Distant enemies (\`dist > 260 px\`) skip \`push()\` on alternating ticks via \`((uintptr_t(this) >> 5) + level->ticks) & 1\`, cutting crowd-separation CSR queries in half at the screen periphery.
+4. **Barrier 4 (\`pass<&Enemy::settle>\`):**
+   - **Reads:** Private \`xPush, yPush\` and read-only \`solids[]\`.
+   - **Writes:** Commits \`x += xPush, y += yPush\` and resolves solid prop/cliff collisions via \`level->collide(x, y, radius)\`.
+
+---
+
+### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
+
+#### 1. Why Every Enemy Owns a Private Xorshift32 Seed (\`Enemy::roll\`)
+Because worker threads steal 256-enemy chunks in non-deterministic OS scheduling order, calling a shared global PRNG inside \`think()\` or \`move()\` would cause data races and destroy seed reproducibility. Instead, each \`Enemy\` initializes a private odd seed \`seed = rng.next() | 1\` on construction and advances it via **Marsaglia Xorshift32**:
+
+\`\`\`cpp
+float Enemy::roll() {
+  seed ^= seed << 13, seed ^= seed >> 17, seed ^= seed << 5;
+  return float(seed >> 8) / float(1 << 24);
+}
+\`\`\`
+
+#### 2. Deferred Intent Flags (\`wantsFire\` & \`wantsLeader\`) and \`addMutex\`
+- **Ranged Projectiles (\`wantsFire\`):** \`Ranged::tick\` never spawns an \`Orb\` on a worker thread; it sets \`e.wantsFire = true\`. Later, during the serial \`PROF_ENTITIES\` pass on the main thread, \`Enemy::tick() -> Enemy::act()\` consumes \`wantsFire\`, leads the target (\`lead = dd / 70 * 0.7\`), spawns the \`Orb\` (plus a 10-orb radial spiral and 10-spoke \`Shockwave\` if \`boss == true\`), and plays \`Sound::orb\`.
+- **Pack Leader Adoption (\`wantsLeader\`):** \`Follow::tick\` sets \`e.wantsLeader = true\` when a \`Rat\` has no pack leader. Serial \`Enemy::adopt()\` in \`Enemy::act()\` scans \`level->gather(x, y, 140, nearby, 24)\` on the main thread to find an unled, aware rat (\`o->leader == entt::null && o->aware\`), preventing two rats on different worker threads from adopting each other in a mutual cycle!
+- **Mutex-Guarded Spawn Queues (\`addMutex\` & \`Level::flush\`):** Whenever \`Level::add\` or \`Level::spawn\` is called, \`std::lock_guard<std::mutex> lock(addMutex)\` guards appends to \`pending\` and \`particles\`, while actual \`reg.emplace<Owned>\` and \`reg.destroy\` mutations happen exclusively inside \`Level::flush()\` at the end of the tick.
 `,
     mermaidCharts: [
       {
@@ -438,23 +507,26 @@ sequenceDiagram
 `,
       },
       {
-        title: '4-Barrier Race-Free Crowd Separation Architecture',
+        title: '4-Barrier Race-Free Crowd Separation & Serial Act Architecture',
         chart: `
 flowchart TD
     classDef b1 fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef b2 fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef b3 fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef b4 fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef act fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
 
-    B1["Barrier 1: Enemy::think()<br/>Reads: Player, Leader<br/>Writes: xWant, yWant, goals"]:::b1
-    B2["Barrier 2: Enemy::move()<br/>Reads: surfaces[], solids[]<br/>Writes: x, y, xa, ya"]:::b2
-    B3["Barrier 3: Enemy::push()<br/>Reads: CSR Grid & neighbor x, y<br/>Writes: xPush, yPush ONLY"]:::b3
-    B4["Barrier 4: Enemy::settle()<br/>Reads: xPush, yPush<br/>Writes: x += xPush, y += yPush"]:::b4
+    B1["Barrier 1: pass<&Enemy::think><br/>Reads: Player, Leader | Private PRNG: e.roll()<br/>Writes: goals, xWant, yWant, wantsFire, wantsLeader"]:::b1
+    B2["Barrier 2: pass<&Enemy::move><br/>Reads: xWant, yWant, surfaces[]<br/>Writes: x, y, xa/ya *= exp(-9*DT), >560px Tether"]:::b2
+    B3["Barrier 3: pass<&Enemy::push><br/>Reads: CSR Grid & Neighbor (o.x, o.y, o.radius)<br/>Writes: xPush, yPush ONLY (Skips 50% if dist > 260px)"]:::b3
+    B4["Barrier 4: pass<&Enemy::settle><br/>Reads: xPush, yPush, solids[]<br/>Writes: x += xPush, y += yPush + level->collide()"]:::b4
+    S5["Serial Pass (PROF_ENTITIES): Enemy::tick() -> act()<br/>Consumes wantsLeader (adopt()) & wantsFire (spawn Orb)"]:::act
 
-    B1 ==>|Sync| B2 ==>|Sync| B3 ==>|Sync| B4
+    B1 ==>|Sync| B2 ==>|Sync| B3 ==>|Sync| B4 ==>|Main Thread| S5
 `,
       },
     ],
+    interactiveComponent: 'goalai',
   },
   {
     id: 'spatial-grid',
@@ -554,16 +626,21 @@ flowchart LR
   },
   {
     id: 'goal-ai',
-    title: '06. GoalQueue AI Ringbuffer, Static Plans & Ouroboros',
+    title: '06. GoalQueue AI Ringbuffer, Sense Sight-Cone Math & Ouroboros',
     category: 'simulation',
-    summary: 'Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue with interrupt preemption, and Ouroboros bit-twiddling.',
-    sourceFiles: ['src/entity/enemy/ai/Goal.hpp', 'src/entity/enemy/ai/Plans.cpp', 'src/other/Ouroboros.hpp'],
+    summary: 'Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue preemption, 113-degree sight-cone dot products, and Ouroboros bit-twiddling.',
+    sourceFiles: ['src/entity/enemy/ai/Goal.hpp', 'src/entity/enemy/ai/Plans.cpp', 'src/entity/enemy/Enemy.cpp', 'src/other/Ouroboros.hpp'],
     content: `
 ### Zero-Allocation Composable Enemy AI (\`Goal.hpp\` & \`Plans.cpp\`)
 
-Even with thousands of active enemies, Mellangan allocates **zero bytes on the heap** for AI behavior trees. Every \`Goal\` (\`Approach\`, \`Flank\`, \`Stalk\`, \`Howl\`, \`Burrow\`, \`Raise\`, \`Melee\`, \`Ranged\`, \`Falter\`, \`Hide\`, \`Escape\`, \`Lurk\`) is instantiated once as an immutable \`const\` object in static storage inside \`src/entity/enemy/ai/Plans.cpp\`:
+Even with thousands of active enemies on screen, Mellangan allocates **zero bytes on the heap** for AI behavior trees. Every \`Goal\` primitive (\`Approach\`, \`Flank\`, \`Circle\`, \`Follow\`, \`LookOut\`, \`Stalk\`, \`Hide\`, \`Falter\`, \`Melee\`, \`Ranged\`, \`Howl\`, \`Burrow\`, \`Raise\`, \`Mend\`, \`Lurk\`, \`Escape\`) is instantiated once as an immutable \`const\` object in static storage inside \`src/entity/enemy/ai/Plans.cpp\`:
 
 \`\`\`cpp
+struct Sense {
+  double xd, yd, dist, xn, yn;
+  bool seen;
+};
+
 struct Plan {
   const Goal *steps[6];
   const Goal *interrupts[2];
@@ -572,6 +649,7 @@ struct Plan {
 class GoalQueue {
 public:
   const Goal *front() const { return size ? items[head] : nullptr; }
+  bool empty() const { return size == 0; }
   void push(const Goal *g) {
     if (size < 8)
       items[(head + size++) & 7] = g;
@@ -590,9 +668,67 @@ private:
 };
 \`\`\`
 
-#### How \`GoalQueue\` Executes & Preempts
-1. **Bitwise Ring Indexing (\`& 7\`):** Because capacity is fixed at 8 pointers, index wrapping uses bitwise AND \`& 7\` instead of integer division modulo.
-2. **Interrupt Preemption (\`pushFront\`):** On every tick, the enemy checks its plan's \`interrupts[2]\` (such as \`FALTER\` when staggered or \`HIDE\` when approached). If \`g->urgent(enemy, sense)\` returns true and is not already at \`front()\`, \`goals.pushFront(g)\` decrements \`head = (head + 7) & 7\` in $O(1)$ time, immediately suspending the current action and resuming it once the interrupt returns \`GoalState::Done\`!
+---
+
+### Predictive Velocity Leading & Sight-Cone Math (\`Enemy::sense\`)
+
+At the beginning of \`Enemy::think()\`, each enemy constructs a transient \`Sense\` packet (\`src/entity/enemy/Enemy.cpp\`) that combines **velocity-intercept target leading** with a **forward vision cone check**:
+
+\`\`\`cpp
+Sense Enemy::sense() const {
+  const Player &p = *level->player;
+  double rx = p.x - x, ry = p.y - y, raw = std::sqrt(rx * rx + ry * ry);
+  double lead = std::min(0.7, raw / std::max(20.0, double(type.speed))) * 0.6;
+  Sense s{rx + p.xa * lead, ry + p.ya * lead, 0, 0, 0, false};
+  s.dist = std::sqrt(s.xd * s.xd + s.yd * s.yd);
+  if (s.dist > 0.001)
+    s.xn = s.xd / s.dist, s.yn = s.yd / s.dist;
+  s.seen = s.dist < 300 && -(p.xAim * s.xn + p.yAim * s.yn) > 0.55;
+  return s;
+}
+\`\`\`
+
+1. **Predictive Intercept Vector (\`lead\`):**
+   Instead of steering naively toward the player's current position \`(p.x, p.y)\`, the enemy estimates time-to-intercept \`raw / max(20.0, type.speed)\` (clamped to \`0.7s\` and scaled by \`0.6\`, yielding up to \`0.42s\` of velocity lookahead) and offsets \`(s.xd, s.yd)\` by \`(p.xa * lead, p.ya * lead)\`.
+2. **The 113° Forward Sight Cone (\`s.seen\`):**
+   Since \`(s.xn, s.yn)\` points from the **enemy to the player**, its negation \`(-s.xn, -s.yn)\` points from the **player to the enemy**. Taking the dot product with the player's unit aim vector \`(p.xAim, p.yAim)\` yields $\\cos(\\theta)$:
+   \`-(p.xAim * s.xn + p.yAim * s.yn) > 0.55\`.
+   Because $\\arccos(0.55) \\approx 56.6^\\circ$, \`s.seen\` is \`true\` whenever the enemy stands within \`300 px\` inside a **\`113.2°\` forward vision cone** centered on the player's aim!
+
+---
+
+### How \`Enemy::think()\` Executes & Preempts \`GoalQueue\`
+
+\`\`\`cpp
+void Enemy::think() {
+  if (!plan)
+    return void(xWant = yWant = 0);
+  Sense s = sense();
+  for (int i = 0; i < 2 && plan->interrupts[i]; i++) {
+    const Goal *g = plan->interrupts[i];
+    if (goals.front() != g && g->urgent(*this, s))
+      goals.pushFront(g), goalTime = 0, g->start(*this, s);
+  }
+  if (goals.empty())
+    next(s);
+  double xs = 0, ys = 0;
+  for (int step = 0; step < 4; step++) {
+    const Goal *g = goals.front();
+    if (!g || g->tick(*this, s, xs, ys) == GoalState::Running)
+      break;
+    goals.pop();
+    next(s);
+  }
+  goalTime += DT, cooldown -= DT;
+  xWant = xs, yWant = ys;
+}
+\`\`\`
+
+1. **Bitwise Ring Indexing (\`& 7\`):** Because \`items[8]\` is a power-of-two ringbuffer, \`push\` writes to \`(head + size++) & 7\` and \`pop\` advances \`head = (head + 1) & 7\` with zero branches or heap traffic.
+2. **$O(1)$ Interrupt Preemption (\`pushFront\`):** Before ticking the active goal, \`think()\` checks up to 2 \`interrupts\` (\`FALTER\` or \`HIDE\`). If \`g->urgent(*this, s)\` fires, \`goals.pushFront(g)\` decrements \`head = (head + 7) & 7\`, resets \`goalTime = 0\`, and runs \`g->start(*this, s)\`—suspending the interrupted step behind \`head\` so it resumes seamlessly once the interrupt finishes!
+3. **Zero-Latency Multi-Step Cascade (\`step < 4\`):** If the front goal immediately returns \`GoalState::Done\` on the current frame (for example, \`Howl\` or \`Raise\` while \`e.cooldown > 0\`, or \`Approach\` when already inside \`stop\` range), the \`for (int step = 0; step < 4; step++)\` loop pops it, refills \`goals\` from \`plan->steps\` if empty via \`next(s)\`, and ticks the next goal on the **same frame** so the enemy never freezes for a wasted tick!
+
+---
 
 ### Arcane C++20 Bit-Twiddling: \`src/other/Ouroboros.hpp\`
 
@@ -615,9 +751,9 @@ stateDiagram-v2
     PreemptHead --> ExecuteFront : goals.pushFront(FALTER / HIDE)<br/>head = (head + 7) & 7
     CheckInterrupts --> TickActiveGoal : No Urgent Interrupt
     TickActiveGoal --> ExecuteFront : GoalState::Running (Write xWant, yWant)
-    TickActiveGoal --> PopHead : GoalState::Done
+    TickActiveGoal --> PopHead : GoalState::Done (Up to 4 Cascade Steps/Tick)
     PopHead --> ExecuteFront : goals.pop() -> head = (head + 1) & 7
-    PopHead --> [*] : Queue Exhausted
+    PopHead --> [*] : Queue Exhausted -> next(s) Refill
 `,
       },
       {
@@ -2388,5 +2524,157 @@ flowchart TD
       },
     ],
     interactiveComponent: 'director',
+  },
+  {
+    id: 'goal-steering-catalog',
+    title: '24. The 16 AI Goal Primitives, Gait Kinematics & 39-Monster Plan Table',
+    category: 'simulation',
+    summary: 'Complete mathematical breakdown of all 16 Goal subclasses in src/entity/enemy/ai/, Gait wave/weave modulation, V-formation pack following, and subterranean burrow state machines.',
+    sourceFiles: ['src/entity/enemy/ai/Plans.cpp', 'src/entity/enemy/ai/Approach.cpp', 'src/entity/enemy/ai/Melee.cpp', 'src/entity/enemy/ai/Flank.cpp', 'src/entity/enemy/ai/Follow.cpp', 'src/entity/enemy/ai/Burrow.cpp'],
+    content: `
+### Architectural Overview of \`src/entity/enemy/ai/\`
+
+All 39 monster species in **Mellangan** (\`EnemyKind::Bat\` through \`EnemyKind::Cutthroat\`) are driven by combinations of **16 stateless \`Goal\` subclasses** wired into \`const Plan PLANS[39]\` (\`src/entity/enemy/ai/Plans.cpp\`). A compile-time assertion guarantees that every \`EnemyKind\` has a corresponding plan:
+
+\`\`\`cpp
+static_assert(sizeof(PLANS) / sizeof(PLANS[0]) == int(EnemyKind::Count));
+\`\`\`
+
+Each \`Goal\` implements up to five virtual methods (\`src/entity/enemy/ai/Goal.hpp\`):
+- \`void start(Enemy &e, const Sense &s) const\`: Initializes per-enemy scratch fields (\`xMark, yMark\`, \`side\`, \`buried\`, \`faltered\`) when the goal becomes the queue front.
+- \`GoalState tick(Enemy &e, const Sense &s, double &xs, double &ys) const\`: Computes the desired velocity vector \`(xs, ys)\` and returns \`GoalState::Running\` or \`GoalState::Done\`.
+- \`bool urgent(const Enemy &e, const Sense &s) const\`: Evaluated for \`plan->interrupts[0..1]\` before ticking the active goal; if \`true\`, preempts via \`goals.pushFront(g)\`.
+- \`float tell(const Enemy &e) const\`: Returns a normalized \`[0..1]\` telegraph progress value rendered as an expanding warning ring or flash before a strike/eruption.
+- \`bool conceals() const\`: Returns \`true\` during \`Hide\` so \`Ghost\` renders at reduced alpha while backing away.
+
+---
+
+### 1. \`Approach\` & \`Gait\` Wave/Weave Modulation (\`ai/Approach.cpp\`)
+
+\`Approach(double stop, Gait gait)\` is the primary locomotion primitive, parameterized by \`struct Gait\`:
+
+\`\`\`cpp
+struct Gait {
+  double base = 1, pulse = 0, pulseRate = 0, weave = 0, weaveRate = 0;
+  bool rectified = false;
+};
+\`\`\`
+
+On every tick until \`stop > 0 && s.dist < stop && e.cooldown <= 0\`, \`Approach::tick\` computes three kinematic layers:
+1. **Longitudinal Speed Modulation (\`v\`):**
+   \`\`\`cpp
+   double wave = std::sin(e.animT * gait.pulseRate);
+   double v = e.type.speed *
+              (gait.base + gait.pulse * (gait.rectified ? std::max(0.0, wave) : wave));
+   \`\`\`
+   - **\`CHARGE\` / \`MARCH\` / \`CLOSE\` / \`LUMBER\`:** \`{1, 0, 0, 0, 0, false}\` — steady constant velocity.
+   - **\`OOZE\` (\`Slime\`, \`Ghost\`, \`FrostWisp\`):** \`{0.8, 0.4, 2, 0, 0, false}\` — smooth sinusoidal peristaltic pulsing between \`0.4x\` and \`1.2x\` speed.
+   - **\`SCUTTLE\` (\`Scorpion\`, \`EmberImp\`):** \`{0.5, 1.2, 4, 0, 0, true}\` — **half-wave rectified** bursts (\`0.5x\` baseline surging to \`1.7x\` during positive half-cycles of $\\sin(4t)$).
+2. **Orthogonal Serpentine Weave (\`w\`):**
+   \`double w = std::sin(e.animT * gait.weaveRate) * gait.weave;\`
+   Used by \`FLUTTER\` (\`Bat\`, \`weave = 34, rate = 5\`), \`HOVER\` (\`MothWisp\`), \`CASTING_RANGE\` (\`Cultist\`, \`weave = 28, rate = 3\`), and \`SHOOTING_RANGE\` (\`Outlaw\`).
+3. **8-Lane Seed Fan Spread (\`spread\`):**
+   \`\`\`cpp
+   double spread = (int(e.seed >> 3 & 7) - 3.5) * 0.14 *
+                   std::clamp((s.dist - 50) / 160, 0.0, 1.0);
+   \`\`\`
+   Bits \`[5..3]\` of the enemy's seed assign it to one of 8 angular approach lanes spanning $\\pm 3.5 \\times 0.14 = \\pm 0.49\\text{ rad}$ ($\\approx \\pm 28^\\circ$) when \`s.dist >= 210 px\`. As the monster closes from \`210 px\` to \`50 px\`, the spread linearly collapses to \`0°\`, creating natural pincer envelopes that converge directly onto the player at melee range!
+
+---
+
+### 2. Orbital, Pack & Sight-Reactive Steering Goals
+
+- **\`Flank(prefer)\` (\`ai/Flank.cpp\`):**
+  Combines a proportional radial spring \`radial = clamp((s.dist - prefer) * 1.6, -spd, spd)\` with a \`0.95 * spd\` tangential orbit in direction \`e.side\` (\`+1\` or \`-1\`). Completes after \`1.6 + (e.seed % 5) * 0.2\` seconds once within \`prefer + 30 px\`, handing off to \`BITE\` or \`STAB\`.
+- **\`Circle(radius, seconds)\` (\`ai/Circle.cpp\`):**
+  Used by \`MothWisp\` (\`HOVER -> ORBIT -> DIVE\`). Orbits at \`radius = 60 px\` for \`2.5s\` with a tighter \`2.0x\` radial spring before diving.
+- **\`Follow(breakOff)\` (\`ai/Follow.cpp\`):**
+  Used by \`Rat\` (\`PACK -> CHARGE\`). If \`s.dist < 90 px\`, returns \`Done\` to transition to \`CHARGE\`. Otherwise, looks up \`lead = e.level->get<Enemy>(e.leader)\`:
+  - If \`!lead\`, sets \`e.wantsLeader = true\` (resolved by main-thread \`Enemy::adopt()\`).
+  - If \`lead\` is valid, steers toward a **V-formation wing offset** \`12 px\` behind and \`±10 px\` beside the leader:
+    \`\`\`cpp
+    double tx = lead->x - s.yn * 10 * e.side - s.xn * 12,
+           ty = lead->y + s.xn * 10 * e.side - s.yn * 12;
+    \`\`\`
+- **\`LookOut(sight)\` (\`ai/LookOut.cpp\`):**
+  Used by \`Slime\` (\`WATCH 260\`) and \`Knight\` / \`Deserter\` (\`GUARD 220\`). Wanders at \`0.3x\` speed along a random unit direction re-rolled every \`1.5 + e.roll()\` seconds until \`s.dist < sight\` sets \`e.aware = true\`.
+- **\`Stalk(range)\` (\`ai/Stalk.cpp\`):**
+  Used by \`Spider\`. Orbits at \`range = 110 px\` while the player is looking at the spider (\`s.seen == true\`). The instant the player looks away (\`!s.seen && s.dist < range * 1.6\`) or \`goalTime > 7s\`, \`Stalk\` completes and chains into \`CLOSE -> BITE\`.
+
+---
+
+### 3. Preemptive Interrupt Goals (\`Falter\` & \`Hide\`)
+
+- **\`Falter(below = 0.3f)\` (\`ai/Falter.cpp\`):**
+  Attached to \`interrupts[0]\` on 19 monster plans. \`urgent()\` returns \`true\` once per enemy lifetime (\`!e.faltered\`) when \`e.hp < e.maxHp * 0.3f && s.dist < 160\`. \`start()\` sets \`e.faltered = true\`, and \`tick()\` backs away at \`-0.9x\` speed with a lateral sine weave for \`1.1s\`.
+- **\`Hide(range = 240)\` (\`ai/Hide.cpp\`):**
+  Attached to \`EnemyKind::Ghost\`. Whenever \`e.aware && s.seen && s.dist < 240\`, \`Hide\` preempts \`OOZE\`, sets \`conceals() = true\`, and retreats at \`-0.6x\` speed until the player looks away (\`!s.seen\`) or distance exceeds \`240 * 1.3 = 312 px\`.
+
+---
+
+### 4. Combat & Specialist Goals (\`Melee\`, \`Ranged\`, \`Burrow\`, \`Howl\`, \`Raise\`, \`Mend\`, \`Lurk\`, \`Escape\`)
+
+- **\`Melee(windup, lunge, speed, cooldown)\` (\`ai/Melee.cpp\`):**
+  1. \`start()\`: Locks the unit attack vector \`(e.xMark, e.yMark) = (s.xn, s.yn)\` so the player can dodge laterally during the windup!
+  2. **Windup Phase (\`goalTime < windup\`):** Steps backward at \`-8 px/s\` while emitting telegraph progress \`tell() = goalTime / windup\`.
+  3. **Lunge Phase (\`goalTime < windup + lunge\`):** Dashes along the locked \`(xMark, yMark)\` vector at \`e.type.speed * speed\`.
+  4. **Completion:** Sets \`e.cooldown = cooldown\` and returns \`GoalState::Done\`.
+- **\`Ranged(prefer, range)\` (\`ai/Ranged.cpp\`):**
+  Maintains radial distance \`prefer = 150\` while strafing (\`cos(3 * animT) * 28\`). Whenever \`e.cooldown <= 0 && s.dist < range\`, sets \`e.wantsFire = true\` and \`e.cooldown = 2.5f + 1.5f * e.roll()\`.
+- **\`Burrow(travel, warn, surface)\` (\`ai/Burrow.cpp\`):**
+  Three-stage subterranean state machine for \`EnemyKind::Burrower\`:
+  1. **Subterranean Travel (\`buried = true, goalTime < 2.8s\`):** Because \`e.buried\` is \`true\`, \`Level::buildGrid()\` and \`Enemy::push()\` skip the Burrower completely! It chases the player underground at \`1.35x\` speed, emitting \`SmokeDebris\` every 5 ticks until \`s.dist <= 30\` or \`goalTime >= 2.8s\`.
+  2. **Eruption Telegraph (\`2.8s <= goalTime < 3.55s\`):** Halts at \`(xMark, yMark)\` and ramps \`tell()\` from \`0.0\` to \`1.0\` over \`warn = 0.75s\`.
+  3. **Eruption & Surface Recovery (\`goalTime >= 3.55s\`):** Clears \`e.buried = false\`, plays \`Sound::erupt\`, bursts 25 blood sparks, deals \`1.25x\` AoE damage within \`28 px\`, and crawls at \`0.4x\` speed for \`surface = 2.4s\` before executing \`NIP\`.
+- **\`Howl\` (\`Alpha\`), \`Raise\` (\`Necromancer\`), \`Mend\` (\`GoblinShaman\`), \`Lurk\` (\`Mimic\`), and \`Escape\` (\`Thief\`):**
+  - \`Howl\` grants \`frenzy = 6.0f\` (\`+35%\` speed) to self and all \`Wolf\` allies within \`240 px\` (and spawns up to 3 wolves if \`e.boss\`).
+  - \`Raise\` channels for \`0.85s\` and spawns 2 \`Skeleton\` minions (4 if \`e.boss\`).
+  - \`Mend\` scans \`level->gather(x, y, 150, nearby, 24)\` for the most injured ally (\`hp / maxHp < 0.9f\`) and escorts within \`40 px\`.
+  - \`Lurk\` keeps a \`Mimic\` disguised (\`buried = true\`) until \`s.dist < 46 px\`, erupting with \`frenzy = 1.5f\`.
+  - \`Escape\` makes a \`Thief\` flee for \`10.0s\` while dropping gold sparks every 6 ticks, slowing to \`0.35x\` speed during the final \`2.0s\` windup before vanishing!
+`,
+    mermaidCharts: [
+      {
+        title: 'Approach Gait Modulation, 8-Lane Fan Spread & Melee Lock-On Pipeline',
+        chart: `
+flowchart TD
+    classDef sense fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef gait fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef melee fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
+
+    Sense["Enemy::sense()<br/>Velocity Lead: rx + p.xa * lead<br/>Sight Cone: dist < 300 && -(p.Aim · n) > 0.55"]:::sense
+    GaitWave["Approach::tick() Longitudinal Wave<br/>wave = sin(animT * pulseRate)<br/>v = speed * (base + pulse * (rectified ? max(0, wave) : wave))"]:::gait
+    Spread["8-Lane Seed Fan Spread & Orthogonal Weave<br/>spread = ((seed>>3 & 7) - 3.5) * 0.14 * clamp((dist-50)/160, 0, 1)<br/>Rotate (xn, yn) by spread + Apply Orthogonal Weave w"]:::gait
+    StopCheck{"s.dist < stop &&<br/>e.cooldown <= 0?"}:::gait
+    MeleeStart["Melee::start(): Lock (xMark, yMark) = (s.xn, s.yn)<br/>1. Windup (t < windup): v = -8 px/s, tell() = t / windup<br/>2. Lunge (t < windup+lunge): Dash along (xMark, yMark) at speed * mul"]:::melee
+
+    Sense --> GaitWave --> Spread --> StopCheck
+    StopCheck -- "Yes (GoalState::Done)" --> MeleeStart
+`,
+      },
+      {
+        title: 'Burrow 3-Stage Subterranean State Machine & Follow V-Formation Wing Math',
+        chart: `
+flowchart TD
+    classDef burrow fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef pack fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    subgraph Burrower_Plan ["Burrow::tick() (travel=2.8s, warn=0.75s, surface=2.4s)"]
+        B1["Stage 1 (t < 2.8s, buried = true)<br/>Skips CSR Grid & Collision; Chases @ 1.35x Speed + SmokeDebris"]:::burrow
+        B2["Stage 2 (2.8s <= t < 3.55s, buried = true)<br/>Halts at (xMark, yMark); Ramps tell() = (t - 2.8) / 0.75"]:::burrow
+        B3["Stage 3 (t >= 3.55s, buried = false)<br/>Erupts (28px AoE, 1.25x Dmg) + Crawls @ 0.4x Speed for 2.4s"]:::burrow
+        B1 --> B2 --> B3
+    end
+
+    subgraph Rat_Pack ["Follow::tick(breakOff = 90) & Enemy::adopt()"]
+        F1["No Leader? Set wantsLeader = true<br/>Main-Thread Enemy::adopt() Scans gather(140px) for Unled Aware Rat"]:::pack
+        F2["Leader Found: Compute V-Formation Wing Slot<br/>tx = lead->x - yn * 10 * side - xn * 12<br/>ty = lead->y + xn * 10 * side - yn * 12"]:::pack
+        F3["s.dist < 90px: Break Off Formation<br/>Return GoalState::Done -> Transition to CHARGE"]:::pack
+        F1 --> F2 --> F3
+    end
+`,
+      },
+    ],
+    interactiveComponent: 'goalai',
   },
 ];

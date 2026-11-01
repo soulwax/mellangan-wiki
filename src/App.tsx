@@ -13,6 +13,7 @@ import { PixelShaderStudio } from "./components/PixelShaderStudio";
 import { TerrainConstructionLab } from "./components/TerrainConstructionLab";
 import { RendererPipelineInspector } from "./components/RendererPipelineInspector";
 import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
+import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
 import {
   Cpu,
   Layers,
@@ -33,6 +34,7 @@ import {
   ChevronsUpDown,
   Hash,
   GitBranch,
+  Workflow,
 } from "lucide-react";
 
 interface NavTreeItem {
@@ -97,6 +99,31 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
     ],
   },
   {
+    key: "ai-concurrency",
+    label: "AI, Goals & Concurrency",
+    icon: Workflow,
+    color: "text-purple-400",
+    badgeColor: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    items: [
+      {
+        id: "workers-concurrency",
+        shortTitle: "Atomic Worker Pool & 4-Barrier AI",
+      },
+      {
+        id: "goal-ai",
+        shortTitle: "GoalQueue Ringbuffer, Sense & Ouroboros",
+      },
+      {
+        id: "goal-steering-catalog",
+        shortTitle: "16 AI Goals, Gaits & Plans[] Catalog",
+      },
+      {
+        id: "spatial-grid",
+        shortTitle: "CSR Prefix-Sum Spatial Grid",
+      },
+    ],
+  },
+  {
     key: "rendering",
     label: "Rendering & GPU Pipeline",
     icon: Layers,
@@ -150,10 +177,6 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         shortTitle: "Slab Allocator (Pool.c) & Deallocation",
       },
       {
-        id: "workers-concurrency",
-        shortTitle: "Atomic Worker Pool & 4-Barrier AI",
-      },
-      {
         id: "persistence-codex-balance",
         shortTitle: "Saves LRU, Codex Unlocks & Balance INI",
       },
@@ -165,7 +188,7 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
   },
   {
     key: "gameplay-ai",
-    label: "Simulation, AI & Combat",
+    label: "Combat, Spawning & Classes",
     icon: Swords,
     color: "text-rose-400",
     badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
@@ -177,14 +200,6 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "combat-status-draft",
         shortTitle: "Status 0.5s Ticks & Weighted Draft",
-      },
-      {
-        id: "spatial-grid",
-        shortTitle: "CSR Prefix-Sum Spatial Grid",
-      },
-      {
-        id: "goal-ai",
-        shortTitle: "GoalQueue AI Ringbuffer & Ouroboros",
       },
       {
         id: "weapon-synthesis",
@@ -403,6 +418,7 @@ export const App: React.FC = () => {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     "getting-started": true,
     tutorials: true,
+    "ai-concurrency": true,
     rendering: true,
     "world-terrain": true,
     "core-memory": true,
@@ -918,6 +934,9 @@ export const App: React.FC = () => {
                 {activeSection.interactiveComponent === "director" && (
                   <CombatDirectorSimulator />
                 )}
+                {activeSection.interactiveComponent === "goalai" && (
+                  <GoalAiConcurrencyLab />
+                )}
               </div>
             )}
 
@@ -1061,8 +1080,8 @@ export const App: React.FC = () => {
           SDL3
         </p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 23
-          Chapters • 46 Architecture Diagrams • 12 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 24
+          Chapters • 48 Architecture Diagrams • 13 Interactive Simulators
         </p>
       </footer>
     </div>
