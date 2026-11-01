@@ -9,6 +9,7 @@ import { RadixDepthSorter } from './components/RadixDepthSorter';
 import { OuroborosBitLab } from './components/OuroborosBitLab';
 import { RecipeArsenalExplorer } from './components/RecipeArsenalExplorer';
 import { ContributorTutorialWizard } from './components/ContributorTutorialWizard';
+import { PixelShaderStudio } from './components/PixelShaderStudio';
 import {
   Cpu,
   Layers,
@@ -268,6 +269,7 @@ export const App: React.FC = () => {
           {activeSection.interactiveComponent === 'noise' && <BiomeNoiseMap />}
           {activeSection.interactiveComponent === 'arsenal' && <RecipeArsenalExplorer />}
           {activeSection.interactiveComponent === 'contribute' && <ContributorTutorialWizard />}
+          {activeSection.interactiveComponent === 'pixelshader' && <PixelShaderStudio />}
 
           {diagrams.map((d, idx) => (
             <MermaidChart
@@ -334,7 +336,7 @@ export const App: React.FC = () => {
       <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono">
         <p>Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT • SDL3</p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 14 Chapters • 28 Architecture Diagrams • 8 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 18 Chapters • 36 Architecture Diagrams • 9 Interactive Simulators
         </p>
       </footer>
     </div>

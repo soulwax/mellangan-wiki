@@ -12,7 +12,7 @@ export interface WikiSection {
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -1309,6 +1309,433 @@ flowchart TD
     P4["4. Wire Plans.cpp, Roster.cpp & Biome.cpp<br/>Verify Reachability in --test & --test-biome-view"]:::verify
 
     P1 --> P2 --> P3 --> P4
+`,
+      },
+    ],
+  },
+  {
+    id: 'tutorial-hero-class',
+    title: '15. Tutorial 3: Adding a Playable Hero, Active Skill, Talent & Relic',
+    category: 'contribute',
+    summary: 'Step-by-step guide to defining HeroData, Mob-symmetric active skills, class talents, boss relics, and Codex unlock predicates.',
+    sourceFiles: ['src/hero/Hero.hpp', 'src/hero/Hero.cpp', 'src/hero/ExpansionHero.cpp', 'src/item/skill/Skill.hpp', 'src/item/talent/ExpansionTalents.cpp', 'src/item/relic/ExpansionRelics.cpp'],
+    content: `
+### Hands-On Tutorial 3: Creating a Playable Hero & Class Kit
+
+Playable classes in Mellangan are governed by \`class Hero : public HeroData\` (\`src/hero/Hero.hpp\`). A complete class package consists of:
+1. **The \`Hero\` definition (\`src/hero/\`):** Base stat modifiers, unlock predicate \`bool (*met)(const Codex &)\`, passive class hook (\`equip\`, \`tick\`, \`guard\`, \`slay\`, \`wisdom\`, \`edge\`), signature weapon, and 3 favoured upgrade affinities (\`affinity[3]\`).
+2. **The Active \`HeroSkill\` (\`cast(Mob &)\`):** Automatically wrapped into a \`Spacebar\` active skill by \`HeroSkill(const Hero &hero)\` (\`src/item/skill/Skill.hpp\`).
+3. **Class Talents & Boss Relics (\`src/item/talent/\`, \`src/item/relic/\`):** Class-restricted passives and boss-chest relics.
+
+---
+
+#### Step 1: Define \`HeroData\` and the Codex Unlock Predicate
+In \`src/hero/Hero.hpp\`, every hero initializes \`HeroData\`:
+
+\`\`\`cpp
+struct HeroData {
+  const char *name, *weapon, *title, *trait, *need;
+  bool (*met)(const Codex &);
+  int tile;
+  Color tint;
+  float hp, speed, might, haste, magnet, armor, regen, luck;
+  const char *skill, *skillDesc;
+  float cooldown;
+  const char *affinity[3];
+};
+\`\`\`
+
+For example, in \`src/hero/ExpansionHero.cpp\`, unlock predicates inspect \`const Codex &c\` (such as \`c.count(c.biomes) >= 3\`, \`c.kills() >= 200\`, \`c.shrines >= 2\`, or \`c.bestStreak >= 30\`):
+
+\`\`\`cpp
+bool chronomancer(const Codex &c) { return c.nightsSurvived >= 1; }
+
+const HeroData CHRONO_DATA = {
+    "CHRONOMANCER", "Hourglass Shard", "Weaver of fractured seconds",
+    "Cooldowns tick 15% faster below half health", "survive until dawn", chronomancer, 84,
+    {0.55f, 0.85f, 1.0f, 1.0f}, -5, 1.04f, 0.05f, -0.05f, 4, 0, 0, 0.03f,
+    "TIME STOP", "Freeze nearby foes for 2.5s and restore 25% cooldown", 12,
+    {"Hourglass Shard", "Hourglass Tonic", "Prism Beam"}
+};
+\`\`\`
+
+---
+
+#### Step 2: Implement \`Mob\`-Symmetric \`cast(Mob &p)\` (The \`Renegade\` Rule!)
+Why does \`Hero::cast(Mob &p)\` take a \`Mob &\` instead of a \`Player &\`?
+Because **\`Renegade\`** mirror-bosses (\`src/entity/enemy/Renegade.cpp\`) can wield any hero's kit and cast the exact same active skill *against* the player!
+- **Always use \`p.level->foes(p, ...)\` or \`p.hostile\`** when spawning projectiles or dealing area damage inside \`Hero::cast(Mob &p)\` and \`ability::*\` functions (\`src/entity/Ability.hpp\`).
+- Never hardcode \`p.level->player\` as the caster—\`testArtsBothSides()\` in \`src/test/ClassTest.cpp\` specifically tests every hero ability cast by both a \`Player\` and a hostile \`Enemy\`!
+
+\`\`\`cpp
+void MyHero::cast(Mob &p) const {
+  if (p.dead())
+    return;
+  p.level->foes(p, p.x, p.y, 120, [&](Mob &e) {
+    e.afflict(StatusKind::Chill, 2.5f, 0.8f);
+    e.strike(24 * p.might, e.x - p.x, e.y - p.y, 60);
+  });
+  flourish::sigil(*p.level, p.x, p.y, 120, tint, 0);
+  Sound::nova.play(0.4f);
+}
+\`\`\`
+
+---
+
+#### Step 3: Append to \`HEROES[]\` & Add Class Talents / Relics
+1. **Append Only:** Increment \`HERO_COUNT\` in \`src/hero/Hero.hpp\` and append your hero pointer at the **end** of \`HEROES[HERO_COUNT]\` in \`src/hero/Hero.cpp\` so saved \`Codex::start\` indices stay valid.
+2. **Add a Class Talent (\`src/item/talent/\`):** Subclass \`Upgrade\` with \`owner = "CHRONOMANCER"\` so \`LevelUpMenu\` only offers that talent when playing your hero.
+3. **Verify with \`--test\`:** Run \`MellanganApp --test\` to execute \`testClassKits()\` and \`testArtsBothSides()\`.
+`,
+    mermaidCharts: [
+      {
+        title: 'Hero Class, Active Skill & Renegade Mirror-Symmetry Architecture',
+        chart: `
+flowchart LR
+    classDef hero fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef mob fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef target fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    HeroDef["class Hero : public HeroData<br/>equip(Mob &), cast(Mob &), tick(Mob &)"]:::hero
+    HeroSkill["HeroSkill : public Skill<br/>Wraps hero.cast(p) on Spacebar"]:::hero
+
+    PlayerCaster["Player (hostile = false)<br/>Player::cast() -> skill->use(*this)"]:::mob
+    RenegadeCaster["Renegade Mirror Foe (hostile = true)<br/>Renegade::tick() -> hero->cast(*this)"]:::mob
+
+    FoeQuery["level->foes(caster, x, y, r)<br/>Filters by e.hostile != caster.hostile"]:::target
+    Verify["testArtsBothSides() (ClassTest.cpp)<br/>Asserts Symmetry for Player & Hostile Casts"]:::target
+
+    HeroDef --> HeroSkill --> PlayerCaster
+    HeroDef --> RenegadeCaster
+    PlayerCaster & RenegadeCaster --> FoeQuery --> Verify
+`,
+      },
+      {
+        title: 'Codex Unlock Predicate, Class Affinity & Relic Synergy Flow',
+        chart: `
+flowchart TD
+    classDef codex fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef menu fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef run fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Save["Codex Save State (Saves.cpp)<br/>biomes, kills(), shrines, bestStreak"]:::codex
+    Met["HeroData::met(const Codex &)<br/>Unlocks Hero in ClassMenu.cpp"]:::codex
+    Equip["Player::onAdded() -> hero->equip(*this)<br/>Grants Starter Weapon + HeroSkill + Base Stats"]:::menu
+    Affinity["hero->favours(upgrade)<br/>Weights affinity[3] Cards in LevelUpMenu.cpp"]:::run
+    Talent["Class-Restricted Talents (owner == hero->name)<br/>+ Boss Chest Relics (Chest.cpp)"]:::run
+
+    Save --> Met --> Equip --> Affinity --> Talent
+`,
+      },
+    ],
+  },
+  {
+    id: 'tutorial-structures-boss',
+    title: '16. Tutorial 4: Adding World Landmarks, Interactive Sites & 3-Phase Bosses',
+    category: 'contribute',
+    summary: 'Step-by-step guide to procedural StructureDef footprints, interactive encounter::Site triggers, and 3-phase BossDef cast tables.',
+    sourceFiles: ['src/level/Structure.hpp', 'src/level/structure/Landmarks.cpp', 'src/level/encounter/Landmarks.cpp', 'src/entity/enemy/Boss.hpp', 'src/entity/enemy/Boss.cpp'],
+    content: `
+### Hands-On Tutorial 4: World Landmarks, Interactive Encounters & 3-Phase Bosses
+
+Mellangan's overworld isn't just open terrain—it is populated by deterministic **Settlements**, **Biome Landmarks**, and **3-Phase Regional Bosses**. Here is how to author each one step by step.
+
+---
+
+#### Part 1: Adding a World Landmark & Interactive Site
+
+##### Step 1: Append \`StructureKind\` in \`src/level/Structure.hpp\`
+Structures are divided into common settlements (\`Cottage\` .. \`Mine\`) and rare regional **Landmarks** (\`kind >= StructureKind::AncientTree\`).
+- Append your new landmark before \`StructureKind::Count\` in \`enum class StructureKind\`.
+
+##### Step 2: Define the Footprint in \`STRUCTURES[]\` (\`src/level/Structure.cpp\` & \`src/level/structure/Landmarks.cpp\`)
+Every \`StructureDef\` provides four stateless callbacks driven by local tile coordinates \`(lx, ly)\` within the structure's \`w × h\` footprint:
+- \`void (*size)(uint32_t roll, int *w, int *h)\`: Sets the tile bounding box (e.g. \`*w = 9; *h = 9;\`).
+- \`bool (*dirt)(const Structure *s, int lx, int ly)\`: Returns \`true\` where dirt paths or cleared foundations replace grass.
+- \`bool (*ground)(const Structure *s, int lx, int ly, Sprite *out)\`: Overrides floor tiles (cobblestone, rune circles, grates).
+- \`bool (*prop)(const Structure *s, int lx, int ly, uint32_t roll, Prop *p)\`: Places pillars, altars, braziers, or walls with collision radii and heights.
+
+##### Step 3: Wire the Interactive Encounter in \`src/level/encounter/Landmarks.cpp\`
+When the player approaches a landmark and presses \`E\` (or triggers its proximity event), \`encounter::*\` spawns ambient particles (\`encounter::smoke\`, \`encounter::drift\`) and resolves the reward/challenge (buffing stats, kindling a shrine, or summoning an elite guardian).
+- Test your landmark immediately via CLI:
+\`\`\`cpp
+./build/bin/Debug/MellanganApp.exe --dev --landmark 8
+\`\`\`
+
+---
+
+#### Part 2: Designing a 3-Phase Regional Boss (\`src/entity/enemy/Boss.cpp\`)
+
+Regional bosses are configured declaratively via \`struct BossDef\` in \`src/entity/enemy/Boss.hpp\`:
+
+\`\`\`cpp
+struct Phase {
+  const Cast *casts;
+  int count;
+};
+
+struct BossDef {
+  EnemyKind kind;
+  const char *title, *arrival, *fall;
+  Color tone;
+  Phase phases[3];
+  EnemyKind minion;
+  int minions;
+  uint32_t lands;
+};
+\`\`\`
+
+##### Step 1: Compose the 3 Phase \`Cast\` Arrays in \`src/entity/enemy/Boss.cpp\`
+Each \`Cast\` entry specifies \`{ void (*fn)(Enemy &), float cooldown, float range, Color telegraphTone }\`. As the boss's HP drops below **66% (Phase 2)** and **33% (Phase 3)**, it automatically escalates to faster cooldowns and deadlier \`ability::*\` patterns (\`ability::thunder\`, \`ability::comet\`, \`ability::quake\`, \`ability::grasp\`, \`ability::miasma\`, \`ability::firering\`, \`ability::volley\`):
+
+\`\`\`cpp
+const Cast MY_BOSS_P1[] = {
+    {[](Enemy &e) { ability::quake(e, 110, 12); }, 7, 110, GLASS},
+    {[](Enemy &e) { ability::volley(e, 5, 0.2, 220, 8, 1); }, 6, 300, GLASS}};
+const Cast MY_BOSS_P2[] = {
+    {[](Enemy &e) { ability::charge(e, 140, 14); }, 5, 240, GLASS},
+    {[](Enemy &e) { ability::volley(e, 9, 0.15, 230, 8, 1); }, 6, 300, GLASS}};
+const Cast MY_BOSS_P3[] = {
+    {[](Enemy &e) { ability::volley(e, 16, TAU / 16, 220, 8, 1); }, 5, 300, GLASS},
+    {[](Enemy &e) { ability::dance(e, 90, 12, GLASS); }, 5, 200, GLASS}};
+\`\`\`
+
+##### Step 2: Bind the Biome Mask \`lands\` & Minion Retinue
+Set \`lands = land(BiomeId::CrystalFields)\` (or a bitwise OR of multiple \`BiomeId\` bits) so \`bossFor(int biome)\` selects your boss when the night clock triggers a regional boss spawn in that biome!
+`,
+    mermaidCharts: [
+      {
+        title: 'Deterministic Region Structure & Landmark Encounter Pipeline',
+        chart: `
+flowchart LR
+    classDef world fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef def fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef enc fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Region["World::structureInRegion(rx, ry)<br/>Deterministic Seed Roll"]:::world
+    Footprint["StructureDef Callbacks (lx, ly)<br/>size() -> dirt() -> ground() -> prop()"]:::def
+    Ambient["Ambient Site Tick (Sites.cpp)<br/>encounter::smoke / runes / starlight"]:::enc
+    Interact["Player Approaches & Presses E<br/>Triggers Landmark Boon, Trial or Elite"]:::enc
+
+    Region --> Footprint --> Ambient --> Interact
+`,
+      },
+      {
+        title: '3-Phase Boss Cast Rotation, Telegraph & Chest Drop State Machine',
+        chart: `
+stateDiagram-v2
+    [*] --> Arrival: Night Boss Timer or Landmark Trigger
+    Arrival --> Phase1_100_to_67_HP: Announce BossDef.arrival + Spawn Minion Retinue
+    Phase1_100_to_67_HP --> Phase2_66_to_34_HP: HP <= 66% (Escalate Cast Table & Speed)
+    Phase2_66_to_34_HP --> Phase3_Below_33_HP: HP <= 33% (Enrage Casts + Dense Telegraphs)
+    Phase3_Below_33_HP --> Defeated: HP <= 0
+    Defeated --> [*]: Announce BossDef.fall + Spawn Boss Chest (Evolution / Relic)
+`,
+      },
+    ],
+  },
+  {
+    id: 'tutorial-pixel-shader',
+    title: '17. Tutorial 5: Procedural 16x16 Pixel-Art (sprite_kit.py) & Slang Shaders',
+    category: 'contribute',
+    summary: 'Step-by-step guide to painting procedural 16x16 sprites in Python, validating 1px atlas gutters, and authoring Vulkan Slang shaders.',
+    sourceFiles: ['tools/sprite_kit.py', 'tools/atlas_layout.py', 'tools/make_assets.py', 'res/shaders/flash.slang', 'res/shaders/post.slang', 'src/gfx/Screen.cpp'],
+    content: `
+### Hands-On Tutorial 5: Procedural Pixel-Art & Slang Shaders
+
+Mellangan never commits hand-edited binary blobs without a reproducible generator. Both its \`res/atlas.png\` sprite sheet and its SPIR-V GPU shaders (\`*.spv\`) are built deterministically from code.
+
+---
+
+#### Part 1: Authoring 16×16 Sprites with \`tools/sprite_kit.py\`
+
+\`tools/sprite_kit.py\` implements a tiny procedural pixel painter (\`class Canvas\`) designed to match the crisp **Kenney Tiny Town** aesthetic:
+- **Flat 3-Tone Top-Left Lighting:** Shapes receive a 3-color tuple \`pal = (dark_shadow, mid_base, light_highlight)\` lit from \`LIGHT = (-0.6, -0.8)\`.
+- **Automatic 1px Dark Outline:** Calling \`c.image(outline=True)\` walks every opaque pixel's 4-connected neighbors \`((1,0), (-1,0), (0,1), (0,-1))\` and stamps \`OUTLINE = (63, 38, 49, 255)\` around the silhouette.
+- **Primitive Methods on \`Canvas(16, 16)\`:**
+  - \`c.cluster(x, y, rows, color)\`: Paints ASCII pattern strings where any character other than \`'.'\` places a pixel.
+  - \`c.ellipse(cx, cy, rx, ry, pal, dither=0.0, seed=0)\`: Renders a 3-tone shaded ellipse with optional deterministic hash dithering.
+  - \`c.rect(x0, y0, x1, y1, pal)\` and \`c.tri(cx, top, bottom, half, pal)\`: Shaded geometric primitives.
+  - \`c.material(points, dark, light, seed, density=0.2)\`: Applies deterministic coordinate-hash micro-texture.
+
+##### Step-by-Step Atlas Workflow:
+1. Check \`BANDS\` and \`EXPANSION_ACTORS\` / \`EXPANSION_PROPS\` / \`ARSENAL\` in \`tools/atlas_layout.py\` for an available cell index.
+2. Add your \`Canvas(16, 16)\` function in \`tools/make_expansion.py\` or \`tools/make_arsenal.py\` and call \`place_cell(atlas, band, index, sprite)\`.
+3. Run the dual-pass verifier:
+\`\`\`cpp
+python tools/make_assets.py --verify
+\`\`\`
+\`--verify\` runs the entire asset generator **twice** and asserts that every cell's 1px gutter is \`RGBA(0,0,0,0)\`, no bands overlap, and both runs produce **byte-identical RGBA and PNG SHA-256 hashes**!
+
+---
+
+#### Part 2: Authoring Slang Fragment Shaders (\`res/shaders/*.slang\`)
+
+At build time, \`CMakeLists.txt\` compiles every \`res/shaders/*.slang\` file into SPIR-V via \`slangc\`:
+\`slangc <file>.slang -target spirv -profile glsl_450 -entry PixelShader -stage fragment -o shaders/<file>.spv\`
+
+##### Understanding the Vulkan2D Bindless ABI (\`flash.slang\` & \`post.slang\`)
+Every fragment shader shares the same bindless descriptor layout:
+- \`[[vk::push_constant]] Push push;\` — Contains \`cameraIndex\`, bindless \`textureIndex\`, \`texturePos\`, vertex \`colour\`, and \`model\` matrix.
+- \`[[vk::binding(1, 1)]] SamplerState sampler;\`
+- \`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\` — Bindless texture array indexing both \`res/atlas.png\`, the offscreen world target, and the offscreen additive light map (\`post.lightTexture\`).
+- \`[[vk::binding(3, 3)]] ConstantBuffer<T> ubo;\` — Custom uniform buffer (\`FlashData\` in \`flash.slang\` or \`PostData\` in \`post.slang\`).
+
+##### How Sharp Pixel-Art Upscaling & ACES Lighting Work in \`post.slang\`
+Instead of blurry bilinear filtering or shimmering nearest-neighbor at non-integer window scales, \`albedoAt(float2 uv)\` computes sub-pixel anti-aliased texel edges scaled by \`post.scale\`:
+\`\`\`cpp
+float2 p = uv - 0.5;
+float2 i = floor(p);
+float2 f = saturate((p - i - 0.5) * post.scale + 0.5);
+\`\`\`
+Then \`PixelShader\` combines chromatic aberration (\`post.hurt\`), additive light-map multiplication (\`lightAt(uv) * 1.6\`, where \`0.625\` is neutral \`1.0\` so point lights can over-expose above \`1.0\`), 8-tap bloom, **ACES filmic tonemapping**, radial vignette, and pause blur!
+`,
+    mermaidCharts: [
+      {
+        title: 'sprite_kit.py Procedural Canvas -> atlas_layout.py Gutter Verifier Pipeline',
+        chart: `
+flowchart LR
+    classDef py fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef cell fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef check fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Kit["Canvas(16, 16) (sprite_kit.py)<br/>cluster / ellipse / material + Auto-Outline (63,38,49)"]:::py
+    Place["place_cell(atlas, band, idx, img)<br/>Pastes at (band.x + col*18 + 1, band.y + row*18 + 1)"]:::cell
+    Verify["python tools/make_assets.py --verify<br/>Checks 1px Transparent Gutter + Dual-Run SHA-256"]:::check
+    Header["src/Atlas.hpp<br/>constexpr Sprite Bound to GPU UV Quad"]:::check
+
+    Kit --> Place --> Verify --> Header
+`,
+      },
+      {
+        title: 'Vulkan2D Bindless Slang Shader & Light-Map Post-Processing Pipeline',
+        chart: `
+flowchart LR
+    classDef pass fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef ubo fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    WorldTarget["Offscreen World Target<br/>Radix-Sorted Sprites + flash.slang"]:::pass
+    LightTarget["Offscreen Light Map (post.lightTexture)<br/>Neutral 0.625 + Additive Screen::glow()"]:::pass
+    PostUBO["ConstantBuffer<PostData><br/>hurt, lowHealth, vignette, pause, shrine, scale"]:::ubo
+    PostShader["post.slang PixelShader(uv)<br/>Sharp Bilinear + Light*1.6 + 8-Tap Bloom + ACES"]:::out
+
+    WorldTarget & LightTarget & PostUBO --> PostShader
+`,
+      },
+    ],
+    interactiveComponent: 'pixelshader',
+  },
+  {
+    id: 'tutorial-testing-profiling',
+    title: '18. Tutorial 6: Writing Deterministic Tests, Visual QA Views & Prof.c Benchmarks',
+    category: 'contribute',
+    summary: 'Step-by-step guide to authoring assert-driven unit suites, headless GPU screenshot QA views, and 8-slot Prof.c benchmarks.',
+    sourceFiles: ['src/test/Tests.hpp', 'src/test/Test.cpp', 'src/test/view/QaViews.cpp', 'src/Prof.h', 'src/Prof.c', 'src/Bench.cpp'],
+    content: `
+### Hands-On Tutorial 6: Deterministic Testing, Visual QA & Profiling
+
+Every feature contributed to Mellangan is backed by three verification pillars:
+1. **Deterministic Simulation Suites (\`--test\`, \`src/test/Test.cpp\`)**
+2. **Synthetic GPU Visual QA Views (\`--test-*-view\`, \`src/test/view/QaViews.cpp\`)**
+3. **8-Slot Hardware Performance Telemetry (\`--bench\`, \`src/Prof.c\`, \`src/Bench.cpp\`)**
+
+---
+
+#### Part 1: Writing a Deterministic Unit Test (\`src/test/\`)
+
+Notice line 1 of \`src/test/Test.cpp\`:
+\`\`\`cpp
+#undef NDEBUG
+#include <cassert>
+\`\`\`
+By explicitly undefining \`NDEBUG\` before \`<cassert>\`, \`assert(...)\` statements inside the test suite remain active even in optimized Release builds!
+
+##### Step 1: Declare Your Test in \`src/test/Tests.hpp\`
+Add \`void testMyFeature();\` to \`src/test/Tests.hpp\` and call it inside \`runTests()\` in \`src/test/Test.cpp\`.
+
+##### Step 2: Spin Up a Headless \`Level\` and Tick Deterministically
+You can instantiate a \`Level\` directly in memory, spawn a \`Player\` and specific \`Enemy\` kinds at exact pixel coordinates, step \`level.tick()\` for a fixed number of 60 Hz frames, and assert exact HP, status bitmasks, or slab allocations:
+
+\`\`\`cpp
+void testMyFeature() {
+  Level level(12345u);
+  Player *p = level.player;
+  Enemy *foe = level.add<Enemy>(EnemyKind::Slime, p->x + 32, p->y);
+  float beforeHp = foe->hp;
+  for (int i = 0; i < 60; ++i)
+    level.tick();
+  assert(foe->hp < beforeHp);
+}
+\`\`\`
+
+Notice that at the end of \`runTests()\`, \`pool_shutdown()\` is called to verify that \`Pool.c\` reclaims all 64 KB slabs cleanly without memory corruption.
+
+---
+
+#### Part 2: Staging a Synthetic Visual QA View (\`src/test/view/QaViews.cpp\`)
+
+When you add a new visual effect, UI card, monster silhouette, or biome transition, stage it in \`src/test/view/QaViews.cpp\` or \`Screenshots.cpp\` and inspect it with the built-in visual QA flags:
+- \`--test-combat-view\`: Stages dense mid-combat projectile, status, and damage-number readability scenes.
+- \`--test-encounter-view\`: Stages landmark and regional boss telegraph rings.
+- \`--test-gui-view\`: Renders HUD, \`LevelUpMenu\`, \`ShrineMenu\`, and \`CodexMenu\` layouts.
+- \`--test-effects-view\`: Renders weapon \`Form\` and \`Payload\` particle/arc effects side by side.
+- \`--test-arsenal-view "Weapon Name"\`: Focuses the camera on a single weapon's firing cycle.
+- \`--test-biome-view X Y SEED\`: Renders a deterministic biome region at native 1x resolution and saves a PNG via \`vk2dTextureCopyPixels\`.
+
+---
+
+#### Part 3: Profiling with \`Prof.c\` & Running \`--bench\` (\`src/Bench.cpp\`)
+
+To measure the CPU cost of a hot path, wrap it in \`prof_begin(Slot)\` and \`prof_end(Slot)\` (\`src/Prof.h\`):
+- \`PROF_THINK\`: Multithreaded AI \`Sense\` + \`GoalQueue\` worker pool + CSR grid rebuild.
+- \`PROF_ENTITIES\`: Main-thread entity movement, projectiles, and status ticks.
+- \`PROF_PARTICLES\`: \`Particle\` and \`Debris\` simulation.
+- \`PROF_HOUSEKEEP\`: \`Level::flush()\` additions/removals and \`Pool.c\` reclamation.
+- \`PROF_LIGHT\`: Additive offscreen light map rendering (\`LightField.cpp\`).
+- \`PROF_FLOOR\`: Biome ground auto-tiling and barycentric transition blending (\`FloorPainter.cpp\`).
+- \`PROF_SORT\`: 3-pass 12-bit Radix Y-depth sort (\`LevelRender.cpp\`).
+- \`PROF_DRAW\`: Vulkan2D instanced sprite submission and \`post.slang\` composite.
+
+Run the automated benchmark before opening a PR or cutting a release:
+\`\`\`cpp
+./build/bin/Release/MellanganApp.exe --bench
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: 'Headless Deterministic Simulation & Assertions Pipeline (--test)',
+        chart: `
+flowchart LR
+    classDef init fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef sim fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef pass fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Run["MellanganApp --test<br/>runTests() (#undef NDEBUG)"]:::init
+    PoolTest["testPoolAllocAndFree() &<br/>testPoolConcurrency() (8 Threads)"]:::sim
+    SimSuites["27 Deterministic Gameplay Suites<br/>Arsenal, Biomes, Classes, Combat, Traits"]:::sim
+    Shutdown["pool_shutdown()<br/>Reclaims All 64 KB Slabs Cleanly"]:::pass
+
+    Run --> PoolTest --> SimSuites --> Shutdown
+`,
+      },
+      {
+        title: 'Prof.c 8-Slot Frame Budget & Visual QA Readback Architecture',
+        chart: `
+flowchart TD
+    classDef prof fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef qa fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Frame["60 Hz Frame Tick & Render"]:::prof
+    Slots["8 Hardware Counter Slots (Prof.c)<br/>THINK | ENTITIES | PARTICLES | HOUSEKEEP<br/>LIGHT | FLOOR | SORT | DRAW"]:::prof
+    HUD["F8 WorldDebug HUD & --bench Report<br/>Per-Subsystem Millisecond Breakdown"]:::out
+
+    QAFlags["Visual QA CLI Flags<br/>--test-*-view & --capture-screenshots"]:::qa
+    Readback["vk2dTextureCopyPixels -> stbi_write_png<br/>1x Native Pixel Inspection"]:::out
+
+    Frame --> Slots --> HUD
+    Frame --> QAFlags --> Readback
 `,
       },
     ],
