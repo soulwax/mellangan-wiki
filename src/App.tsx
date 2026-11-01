@@ -14,6 +14,7 @@ import { TerrainConstructionLab } from "./components/TerrainConstructionLab";
 import { RendererPipelineInspector } from "./components/RendererPipelineInspector";
 import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
 import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
+import { LootAffixSimulator } from "./components/LootAffixSimulator";
 import {
   Cpu,
   Layers,
@@ -190,26 +191,30 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
   },
   {
     key: "gameplay-ai",
-    label: "Combat, Spawning & Classes",
+    label: "Combat, Loot, Spawning & Classes",
     icon: Swords,
     color: "text-rose-400",
     badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
     items: [
+      {
+        id: "diablo-loot-runrules",
+        shortTitle: "Diablo Loot, 30 Affixes & RunRules",
+      },
       {
         id: "night-spawner-director",
         shortTitle: "Night Clock, Shrines & Wave Director",
       },
       {
         id: "combat-status-draft",
-        shortTitle: "Status 0.5s Ticks & Weighted Draft",
+        shortTitle: "7 Statuses, 0.5s DoT & Bleed Draft",
       },
       {
         id: "weapon-synthesis",
-        shortTitle: "Combinatorial Weapon Recipes",
+        shortTitle: "15 FormBehaviors, 16 Payloads & Evos",
       },
       {
         id: "classes-encounters",
-        shortTitle: "12 Hero Classes, Traits & Bosses",
+        shortTitle: "12 Hero Kits, 39 Foes & 20 Traits",
       },
     ],
   },
@@ -700,7 +705,7 @@ export const App: React.FC = () => {
                     MELLANGAN DOCS
                   </span>
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.5.12
+                    v0.5.14+
                   </span>
                 </div>
               </div>
@@ -715,6 +720,15 @@ export const App: React.FC = () => {
             >
               <Wrench className="w-3.5 h-3.5" />
               <span>Contribute</span>
+            </a>
+
+            <a
+              href="/diablo-loot-runrules"
+              onClick={(e) => selectChapter("diablo-loot-runrules", e)}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-mono text-amber-300 font-semibold transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>0.5.14+ Loot</span>
             </a>
 
             <a
@@ -787,7 +801,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 24 chapters, files..."
+                placeholder="Filter 25 chapters, files..."
                 className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (
@@ -1137,6 +1151,9 @@ export const App: React.FC = () => {
                 {activeSection.interactiveComponent === "goalai" && (
                   <GoalAiConcurrencyLab />
                 )}
+                {activeSection.interactiveComponent === "loot" && (
+                  <LootAffixSimulator />
+                )}
               </div>
             )}
 
@@ -1291,8 +1308,8 @@ export const App: React.FC = () => {
           SDL3
         </p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 24
-          Chapters • 48 Architecture Diagrams • 13 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 25
+          Chapters • 50 Architecture Diagrams • 14 Interactive Simulators
         </p>
       </footer>
     </div>

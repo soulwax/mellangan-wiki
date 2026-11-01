@@ -12,7 +12,7 @@ export interface WikiSection {
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai' | 'loot';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -936,14 +936,14 @@ flowchart LR
   },
   {
     id: 'weapon-synthesis',
-    title: '09. Combinatorial Weapon Synthesis (Recipe.cpp & FormBehavior)',
+    title: '09. Combinatorial Weapon Synthesis (15 FormBehaviors & 16 Payloads)',
     category: 'gameplay',
-    summary: 'Data-driven Recipe table, 10 polymorphic FormBehavior kinematic engines, and 11 composable pay::Payload bitflags.',
-    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/FormBehavior.hpp'],
+    summary: 'Data-driven Recipe table, 15 polymorphic FormBehavior kinematic engines (including Whip, Wall & Spiral), 16 composable pay::Payload bitflags, and 29 weapon evolutions.',
+    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/Forms.hpp', 'src/item/weapon/form/Shape.cpp'],
     content: `
 ### Orthogonal Weapon Architecture: \`FormBehavior\` × \`pay::Payload\`
 
-Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` implements a **combinatorial synthesis engine** where any weapon is defined by pairing a **kinematic trajectory (\`Form\`)** with a **bitmask of on-hit effects (\`pay::Payload\`)**:
+Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any weapon—including the 22 class-exclusive weapons, 7 Mage spells, and 29 evolved artifacts—is defined by pairing one of **15 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
 
 \`\`\`cpp
 void RecipeShot::strike(Mob &e, double xd, double yd) {
@@ -968,43 +968,57 @@ void RecipeShot::strike(Mob &e, double xd, double yd) {
 }
 \`\`\`
 
-#### Level Progression & Reforged Evolution Math
-Every \`RecipeWeapon\` automatically generates its 5-level upgrade descriptions and scales according to whether its \`FormBehavior::of(r.form).area()\` is an **Area Form** (\`Field\`, \`Nova\`, \`Cleave\`, \`Trap\`, \`Beam\`) or a **Count Form** (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Seeker\`, \`Boomerang\`, \`Lob\`):
-- **Damage (\`Lv.2\` & \`Lv.5\`):** \`r.damage * (1 + 0.5f * (at(level, 2) + at(level, 5))) * p.might * power\`
-- **Cooldown (\`Lv.4\`):** \`r.cooldown * (level >= 4 ? 0.75f : 1.0f) * p.haste * pace\`
-- **Projectile Count (\`Lv.3\`, \`Lv.5\`, \`Evolved\`):** \`r.count + (area ? 0 : at(level, 3) + at(level, 5) + evolved)\`
-- **Area Reach (\`Lv.3\`, \`Lv.5\`, \`Evolved\`):** \`r.reach * (area ? 1 + 0.3f * (at(level, 3) + at(level, 5)) + 0.25f * evolved : 1)\`
+#### All 15 Polymorphic \`FormBehavior\` Classes (\`src/item/weapon/form/Forms.hpp\`)
+In \`v0.5.14+\`, each \`Form\` enum maps to a dedicated stateless \`FormBehavior\` subclass:
+1. **Classic Projectile & Area Forms (\`BoltForm\`, \`VolleyForm\`, \`SeekerForm\`, \`OrbitForm\`, \`NovaForm\`, \`RainForm\`, \`FieldForm\`):** Linear bolts, fan volleys, homing seekers, orbital rings, expanding novas, sky bombardments, and persistent ground hazards.
+2. **Class-Kit Forms Added in \`v0.5.14\` (\`CleaveForm\`, \`BoomerangForm\`, \`LobForm\`, \`TrapForm\`, \`BeamForm\`):**
+   - \`CleaveForm\`: Sweeps a wide melee arc in front of the wielder (\`Lionheart Cleave\`, \`Crescent Cut\`, \`Soul Harvest\`).
+   - \`BoomerangForm\`: Flies outward and reverses velocity back to the wielder (\`Hawk Talon\`, \`Bone Wheel\`, \`Fate Wheel\`).
+   - \`LobForm\`: Arcs overhead (\`0.55s\`) and detonates on landing (\`Caustic Flask\`, \`Witchfire Phial\`, \`Flash Grenade\`).
+   - \`TrapForm\`: Arms on the ground for up to \`10s\` until a hostile steps across its trigger radius (\`Bear Trap\`, \`Root Snare\`, \`Clockwork Mine\`).
+   - \`BeamForm\`: Instantaneous piercing line ray (\`0.28s\`) striking all foes along the beam (\`Arc Lance\`, \`Lance of Dawn\`, \`Prophecy Ray\`).
+3. **Shape Forms Added in Post-\`0.5.14\` (\`src/item/weapon/form/Shape.cpp\`):**
+   - **\`WhipForm\`:** Lashes an 8-segment sine-swaying line (\`CRACK = 0.08s\`) and calls \`strikeHarder(s, e, b > s.reach * 0.75 ? 1.5f : 1.0f)\` so the **outer 25% tip deals \`1.5×\` crack damage**!
+   - **\`WallForm\`:** Summons barrier segments at \`48 + 22 * i\` px ahead that pulse every \`0.5s\` and physically push enemies out of the wall (\`e.x += s.dx * push, e.y += s.dy * push\`).
+   - **\`SpiralForm\`:** Launches shots along an expanding Archimedean spiral (\`a = s.tx + s.age * 3.0f, r = speed * 0.8f * s.age\`).
+
+#### All 16 Composable \`pay::\` Payload Bitflags (\`Recipe.hpp\`)
+- **Status Payloads:** \`Burn (1)\`, \`Chill (2)\`, \`Poison (4)\`, \`Mark (8)\`, \`Bleed (2048)\`, \`Weaken (4096)\`, \`Fear (8192)\`.
+- **Kinematic & Finisher Payloads:** \`Pull (16)\`, \`Pierce (32)\`, \`Explode (64)\`, \`Split (128)\`, \`Leech (256)\` (heals wielder on hit), \`Chain (512)\` (arcs to nearby foe), \`Stagger (1024)\` (heavy knockback + brief pin), \`Shatter (16384)\` (bonus damage against \`Chilled\` targets), and \`Execute (32768)\` (instantly finishes low-health non-boss enemies).
+
+#### Mob-Symmetric Wielding & 29 Weapon Evolutions
+Every \`RecipeWeapon\` and \`RecipeShot\` operates on \`Mob &\` rather than \`Player &\` (\`s.hostile()\`), allowing **Renegade Adventurers** and **Named Champions** to wield player weapons against you while sparing other monsters! Maxing any of the 22 class weapons or 7 Mage spell weapons while holding its partner passive unlocks its **Evolution** (doubling damage, accelerating cooldown, and adding a bonus projectile or wider area).
 `,
     mermaidCharts: [
       {
-        title: 'Combinatorial RecipeWeapon Dispatch & Payload Pipeline',
+        title: 'Combinatorial RecipeWeapon Dispatch & 15 FormBehavior Hierarchy',
         chart: `
 flowchart TD
     classDef rec fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef form fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef pay fill:#181524,stroke:#ec4899,stroke-width:2px,color:#e2e8f0;
 
-    Recipe["Recipe Struct<br/>(damage, cooldown, reach, speed, count)"]:::rec
-    Form["FormBehavior::of(r.form)<br/>Bolt | Volley | Orbit | Rain | Field<br/>Seeker | Nova | Cleave | Boomerang | Trap | Lob | Beam"]:::form
-    Shot["RecipeShot Entity<br/>Tracks hits[] vector & hitsLeft"]:::form
-    Payload["Bitmask Payload (r.payload)<br/>Burn | Chill | Poison | Mark | Stagger<br/>Pierce | Explode | Chain | Split | Pull | Leech"]:::pay
+    Recipe["Recipe Struct (src/item/weapon/Recipe.hpp)<br/>(damage, cooldown, reach, speed, count, tint)"]:::rec
+    Form["15 Polymorphic FormBehaviors (src/item/weapon/form/)<br/>Bolt | Volley | Seeker | Boomerang | Spiral<br/>Orbit | Nova | Rain | Field | Cleave<br/>Lob | Trap | Beam | Whip (1.5x Tip) | Wall (Push)"]:::form
+    Shot["RecipeShot Entity (Mob-Symmetric: Player or Champion/Renegade)<br/>Tracks hits[] vector, hitsLeft & pulse"]:::form
+    Payload["16 Bitmask Payloads (r.payload)<br/>Burn | Chill | Poison | Mark | Bleed | Weaken | Fear<br/>Pull | Pierce | Explode | Split | Leech | Chain | Stagger | Shatter | Execute"]:::pay
 
     Recipe --> Form --> Shot --> Payload
-    Payload -.->|pay::Split (!child)| Shot
+    Payload -.->|pay::Split / pay::Chain| Shot
 `,
       },
       {
-        title: 'Base Signature Weapons & Relic Evolution Synergies',
+        title: 'Base Signature Weapons & 29 Relic/Passive Evolution Synergies',
         chart: `
 flowchart TD
     classDef wpn fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef cat fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef evo fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
 
-    W1["Level 5 Base Weapon<br/>(Staff, Blade, Bow, Knives, Halo, Scythe...)"]:::wpn
-    C1["Matching Passive Catalyst<br/>(Passive.cpp / Relic Synergy)"]:::cat
-    Chest["Boss / Encounter Chest Drop<br/>(Chest.cpp)"]:::cat
-    Reforge["Evolved Artifact (evolved = true)<br/>+35% Power Multiplier + Bonus Count / +25% Area"]:::evo
+    W1["Level 5 Base Weapon<br/>(22 Class Weapons + 7 Mage Spells + Shared Arsenal)"]:::wpn
+    C1["Partner Passive Catalyst<br/>(1st Class Weapon -> Class Passive; 2nd -> Shared Passive)"]:::cat
+    Chest["Boss / Champion / Landmark Chest Drop<br/>(Chest.cpp)"]:::cat
+    Reforge["Evolved Artifact (evolved = true)<br/>2x Damage + Faster Attack + Extra Strike / Wider Area"]:::evo
 
     W1 --> Chest
     C1 --> Chest
@@ -1016,31 +1030,57 @@ flowchart TD
   },
   {
     id: 'classes-encounters',
-    title: '10. 12 Hero Classes, Elite Traits & Multi-Phase Bosses',
+    title: '10. 12 Hero Kits, 39 Foe Species, 20 Traits, Champions & 9 Bosses',
     category: 'gameplay',
-    summary: 'Hero class kits, TraitSet elite modifiers, multi-phase boss enrages, and regional world encounters.',
-    sourceFiles: ['src/hero/Hero.hpp', 'src/entity/Trait.hpp', 'src/entity/enemy/Boss.cpp', 'src/level/Encounter.cpp'],
+    summary: 'Complete v0.5.14+ breakdown of the 12 full hero kits, 8 general skills, 39 EnemyKind species (Greenwood, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.',
+    sourceFiles: ['src/hero/Hero.hpp', 'src/entity/Trait.hpp', 'src/entity/enemy/Enemy.hpp', 'src/entity/enemy/Boss.cpp', 'src/level/Encounter.cpp'],
     content: `
-### The 12 Playable Hero Classes (\`src/hero/\`)
+### The 12 Complete Playable Hero Kits (\`src/hero/\`)
 
-Each hero class combines a starting signature weapon, an active cooldown \`Skill\`, class-specific \`Talent\` cards, and intrinsic stat modifiers:
-- **Mage (\`Mage.cpp\`):** Arcane scholar with teleport \`Blink\` and +15% XP gem mastery.
-- **Knight (\`Knight.cpp\`):** Armored vanguard with \`Shield Charge\` and timed block mitigation.
-- **Ranger (\`Ranger.cpp\`):** Swift marksman with piercing \`Volley\` and 15% evasion.
-- **Alchemist (\`Alchemist.cpp\`):** Volatile apothecary with \`Miasma\` zones and reagent drops.
-- **Stormcaller (\`Stormcaller.cpp\`):** Conduit of tempests with sky-bound \`Chain Storm\`.
-- **Reaper (\`Reaper.cpp\`):** Harvester of souls with life-draining \`Soul Siphon\`.
-- **Priestess (\`Priestess.cpp\`):** Radiant healer with undead-repelling \`Sacred Light\`.
-- **Duelist (\`Duelist.cpp\`):** Blade master with critical-strike \`Lunge\` and \`Riposte\`.
-- **Warden (\`ExpansionHero.cpp\`):** Sylvan protector commanding \`Thornwhip\` and \`Root Snare\`.
-- **Tinkerer (\`ExpansionHero.cpp\`):** Clockwork artificer deploying \`Clockwork Mine\` and \`Flash Grenade\`.
-- **Oracle (\`ExpansionHero.cpp\`):** Astral seer wielding \`Prophecy Ray\` and \`Fate Wheel\`.
-- **Corsair (\`ExpansionHero.cpp\`):** High-seas raider firing \`Chain Shot\` and \`Riptide\` vortices.
+In \`v0.5.13–0.5.14+\`, every one of the 12 playable classes was expanded into a standalone class file with **2 class-exclusive weapons (both evolvable), 3 class skills, a class passive, and class talents**, alongside **8 general skills** (\`War Cry\`, \`Bandage\`, \`Tumble\`, \`Whirlwind\`, \`Ground Slam\`, \`Fire Ring\`, \`Lodestar\`, \`Snare Net\`) that any hero can draft from level 4:
+- **Knight (\`Knight.cpp\`):** *Lionheart Cleave* (\`Kingsbane Cleave\`) & *Bastion Shields*; skills *Shield Wall*, *Shield Charge*, *War Banner*.
+- **Mage (\`Mage.cpp\`):** 7 evolvable spell weapons (*Ember Lance* → *Sunspear*, *Flame Ring* → *Phoenix Ring*, etc.); *Blink* & arcane arts.
+- **Ranger (\`Ranger.cpp\`):** *Hawk Talon* (\`Falcon's Return\`) & *Bear Trap*; skills *Volley*, *Arrow Storm*, *Hunter's Mark*.
+- **Alchemist (\`Alchemist.cpp\`):** *Caustic Flask* & *Witchfire Phial*; skills *Acid Bomb*, *Miasma*, *Flask Barrage*.
+- **Stormcaller (\`Stormcaller.cpp\`):** *Ball Lightning* & *Arc Lance*; skills *Thunder Call*, *Chain Storm*, *Tempest*.
+- **Reaper (\`Reaper.cpp\`):** *Soul Harvest* & *Bone Wheel*; skills *Soul Siphon*, *Death Grip*, *Blood Pact*.
+- **Priestess (\`Priestess.cpp\`):** *Lance of Dawn* & *Seraph Wings*; skills *Sanctuary*, *Sacred Light*, *Hallowed Ground*.
+- **Duelist (\`Duelist.cpp\`):** *Crescent Cut* & *Flicker Darts*; skills *Riposte*, *Lunge*, *Flash Step*.
+- **Warden (\`Warden.cpp\`):** *Thornwhip* & *Root Snare*; skills *Nature's Wrath*, *Brambles*, *Overgrowth*; passive *Deep Roots*; talent *Heartwood*.
+- **Tinkerer (\`Tinkerer.cpp\`):** *Clockwork Mine* & *Flash Grenade*; skills *Overclock*, *Minefield*, *Scrap Barrage*; passive *Fine Gearing*; talent *Shrapnel*.
+- **Oracle (\`Oracle.cpp\`):** *Prophecy Ray* & *Fate Wheel*; skills *Astral Nova*, *Comet*, *Eclipse*; passive *Farsight*; talent *Starsight*.
+- **Corsair (\`Corsair.cpp\`):** *Chain Shot* & *Riptide*; skills *Broadside*, *Powder Keg*, *Whirlpool*; passive *Sea Legs*; talent *Plunder*.
 
-### Elite \`TraitSet\` & Multi-Phase Boss Enrages (\`Boss.cpp\`)
+---
 
-- **Elite Affixes (\`Trait.cpp\`):** Elites spawn with bit-packed \`TraitSet\` modifiers (\`Hasted\`, \`Vampiric\`, \`Warded\`, \`Splitting\`, \`Volatile\`, \`Frosted\`), scaling HP, speed, and on-hit/on-death triggers (\`traits.landed(*this, dmg)\`).
-- **3-Phase Boss Enrage Thresholds:** In \`Enemy::tick()\`, bosses check \`if (def && phase < 2 && hp < maxHp * float(2 - phase) / 3) enrage();\`. At **66% HP** (Phase 1) and **33% HP** (Phase 2), the boss triggers \`enrage()\`, accelerating attack cadence, radial 10-orb bullet patterns, and shockwave telegraphs!
+### 39 \`EnemyKind\` Species: Mimics, Renegades & Greenwood Foes (\`Enemy.hpp\`)
+
+Beyond the 16 classic monsters and 10 regional expansion monsters, \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) now spans **39 distinct species**:
+1. **Disguised Chest \`Mimic\` (\`EnemyKind::Mimic\`):** Waits motionless in the grass (\`Lurk\` goal with \`buried = true\` so player weapons ignore it), rattles when approached, springs at close range, and bursts into a shower of coins, items, and potions on death.
+2. **4 Renegade Adventurers (\`Outlaw\`, \`Berserker\`, \`PitFighter\`, \`Deserter\`):** Announced by *"RENEGADES ON YOUR TRAIL"* from 3 minutes onward. They wield real player weapons and telegraph special class skills with glowing warning rings.
+3. **8 Greenwood & Woodland Foes (\`Thornling\`, \`Boar\`, \`GoblinArcher\`, \`GoblinShaman\`, \`Sapling\`, \`Treant\`, \`MothWisp\`, \`Cutthroat\`):**
+   - \`Thornling\`: Leaves slowing bramble patches behind it.
+   - \`Boar\`: High-speed wild boar charges.
+   - \`GoblinArcher\` & \`GoblinShaman\`: Archers loose arrow volleys while Shamans heal nearby goblins (\`Mend\`) and inflict \`StatusKind::Weaken\`.
+   - \`Sapling\` → \`Treant\`: Saplings mature and grow into towering \`Treant\` brutes if not slain quickly!
+   - \`MothWisp\`: Circles (\`Circle\`), dives, and dims the player's light radius (\`Player::dim\`).
+   - \`Cutthroat\`: Ambushes from behind, dealing bonus backstab contact damage (\`contactBonus\`).
+
+---
+
+### All 20 Elite & Champion \`Trait\` Modifiers (\`src/entity/Trait.hpp\`)
+
+Elites roll 1 trait and **Named Procedural Champions** (e.g., *"A CHAMPION STALKS: MORGRA THE HOLLOW"*, carrying a crown ring, 2 traits, 1 skill, and 1 player weapon) roll 2 traits from a 20-bit \`Traits::bits\` pool:
+- **Original 6 (\`0.5.12\`):** \`Hasted\` (+40% speed), \`Vampiric\` (leech on hit), \`Warded\` (5-hit shield + burst), \`Splitting\` (splits into 2 copies on death), \`Volatile\` (delayed death explosion), \`Frosted\` (chilling trail).
+- **Wave 2 (\`0.5.13\`):** \`Thorned\` (reflects melee hits), \`Regenerating\` (heals when unhit), \`Blinking\` (teleports when struck), \`Phasing\` (\`veiled()\` untouchable 1s every 4s), \`Brooding\` (spawns weak copies every 8s), \`Gravitic\` (pulls player inward).
+- **Wave 3 (\`Unreleased\`):** \`Cursed\` (inflicts \`Weaken\`/\`Marked\`), \`Silencing\` (delays skill cooldown), \`FireEnchanted\`, \`ColdEnchanted\`, \`StormEnchanted\` (elemental hits + death novas), \`StoneSkin\` (-15% speed, high physical mitigation), \`Multishot\` (extra projectiles), and \`AuraBearer\` (buffs nearby allies).
+
+---
+
+### 9 Three-Phase Bosses & 10 Towering Landmarks
+
+- **9 Three-Phase Bosses (\`Boss.cpp\`):** In addition to the classic **Cyclops**, **Pack Lord**, and **Lich**, six biome-family bosses now stalk the world: **Frost Colossus**, **Glass Tyrant**, **Spore Mother**, **Cinder King**, **Bog Witch**, and **Storm Herald**. Every boss fights across **3 phases** (enraging at **66.7% HP** and **33.3% HP** with boss-bar notch markers, minion summons, brief wards, and telegraphed skill casts).
+- **10 Towering Landmarks (\`Landmarks.cpp\`):** *Ancient Tree*, *Fallen Star*, *The Colossus*, *The Monolith*, *Crystal Spire*, *Great Mushroom*, *Shipwreck*, *Ancient Gate*, *Ember Forge*, and *Frozen Giant*—each placed on level dry ground in every second \`80×80\` region with off-screen compass markers and permanent first-visit rewards.
 `,
     mermaidCharts: [
       {
@@ -2413,47 +2453,53 @@ flowchart TD
   },
   {
     id: 'combat-status-draft',
-    title: '23. Status Bitmasks, 0.5s DoT Ticks, Knockback & Weighted Level-Up Draft',
+    title: '23. 7 Status Afflictions, 0.5s DoT Ticks, Bleed Stacking & Level-Up Draft',
     category: 'gameplay',
-    summary: 'Exact math behind Status.hpp afflictions, lossless 0.5-second damage-over-time ticks, immunity bitmasks, and LevelUpMenu weighted card drafting.',
+    summary: 'Exact math behind all 7 StatusKind afflictions in Status.hpp (including Bleed 1.6x moving damage, Weaken, and Fear), lossless 0.5-second DoT ticks, and LevelUpMenu weighted card drafting.',
     sourceFiles: ['src/entity/Status.hpp', 'src/entity/Mob.cpp', 'src/menu/LevelUpMenu.cpp', 'src/entity/pickup/Chest.cpp'],
     content: `
-### Fixed-Slot Status Afflictions (\`src/entity/Status.hpp\`)
+### Fixed-Slot 7-Status Affliction Array (\`src/entity/Status.hpp\`)
 
-Every \`Mob\` (both \`Player\` and \`Enemy\`) embeds a compact \`StatusEffects\` struct containing a 4-element array \`Slot slots[STATUS_COUNT]\` (\`Burn\`, \`Chill\`, \`Poison\`, \`Marked\`) and a 32-bit immunity mask \`uint32_t immune = 0\`. Because the array is fixed-size and inline, applying or ticking status effects never allocates heap memory.
+Every \`Mob\` (both \`Player\` and \`Enemy\`) embeds a compact \`Status\` object containing a 7-element inline array \`std::array<StatusEffect, int(StatusKind::Count)> effects{}\` (\`Burn\`, \`Chill\`, \`Poison\`, \`Marked\`, \`Bleed\`, \`Weaken\`, \`Fear\`), a 32-bit immunity mask \`uint32_t immune = 0\`, and a \`bool moving = false\` locomotion flag. Because the array is fixed-size and inline, applying or ticking status effects never allocates heap memory.
 
-#### Immunity Bitmasks & Hard Caps (\`StatusEffects::apply\`)
-When a weapon or hazard calls \`status.apply(k, power, duration, source)\`:
-1. **Immunity Check:** If \`immune & (1u << int(k))\` is non-zero (or \`power <= 0\` / \`duration <= 0\`), the affliction is ignored.
-2. **Safety Clamping:**
+#### Immunity Bitmasks, Hard Caps & Additive Bleed Stacking (\`Status::apply\`)
+When a weapon or hazard calls \`status.apply(kind, duration, power, source)\`:
+1. **Immunity Check:** If \`immune & (1u << int(kind))\` is non-zero (or \`power <= 0\` / \`duration <= 0\`), the affliction is ignored.
+2. **Safety Clamping (\`Status::cap\`):**
    - \`StatusKind::Chill\` power is clamped to **\`0.65f\`** (\`65%\` maximum slow), so \`movement() = 1.0f - power(Chill)\` never freezes a mob below \`35%\` base speed.
-   - \`StatusKind::Marked\` power is clamped to **\`1.0f\`** (\`+100%\` maximum vulnerability), so \`incoming() = 1.0f + power(Marked)\` caps at \`2.0×\` damage amplification.
-   - \`duration\` is clamped to \`60.0f\` seconds.
-3. **Max-Envelope Stacking:** Re-applying an active status takes \`std::max(s.power, power)\` and \`std::max(s.time, duration)\` while updating \`s.source\` for kill-credit attribution.
+   - \`StatusKind::Marked\` and \`StatusKind::Fear\` power are clamped to **\`1.0f\`**, so \`incoming() = 1.0f + power(Marked)\` caps at \`2.0×\` vulnerability and \`afraid() = power(Fear) > 0\` causes afflicted enemies to flee!
+   - \`StatusKind::Weaken\` power is clamped to **\`0.5f\`** (\`-50%\` maximum outgoing damage reduction via \`outgoing() = 1.0f - power(Weaken)\`).
+   - \`Burn\`, \`Poison\`, and \`Bleed\` cap at \`1000.0f\` DPS, and \`duration\` is clamped to \`60.0f\` seconds.
+3. **Additive \`Bleed\` Stacking vs Max-Envelope Stacking:**
+   - Re-applying **\`StatusKind::Bleed\`** while active **stacks additively**: \`e.power = std::min(cap(kind), e.power + power)\`.
+   - Re-applying any other status takes the max envelope: \`if (e.time <= 0 || power > e.power) e.power = power\`.
 
 ---
 
-### Lossless 0.5-Second DoT Ticks (\`StatusEffects::tick\`)
+### Lossless 0.5-Second DoT Ticks & 1.6× Moving Bleed Multiplier (\`Status::tick\`)
 
-Damage-over-time effects (\`Burn\` and \`Poison\`) do not deal tiny sub-point damage on every 60 Hz frame (which would flood floating combat text and audio). Instead, \`StatusEffects::tick(dt, damage)\` accumulates \`e.elapsed += step\` and fires discrete **0.5-second ticks**, plus a **lossless fractional remainder tick** on the exact frame the affliction expires:
+Damage-over-time effects (\`Burn\`, \`Poison\`, and \`Bleed\`, checked via \`Status::ticks(i)\`) do not deal tiny sub-point damage on every 60 Hz frame. Instead, \`Status::tick(dt, damage)\` accumulates \`e.elapsed += step\`, scales \`Bleed\` by **\`1.6×\` if the target is moving** (\`float k = i == int(StatusKind::Bleed) && moving ? 1.6f : 1.0f\`), and fires discrete **0.5-second ticks** plus a **lossless fractional remainder tick** on expiry:
 
 \`\`\`cpp
-float step = std::min(dt, e.time);
-e.time -= dt;
-if (k == StatusKind::Burn || k == StatusKind::Poison) {
+if (ticks(i)) {
+  float k = i == int(StatusKind::Bleed) && moving ? 1.6f : 1.0f;
   e.elapsed += step;
-  while (e.elapsed >= 0.5f) {
-    e.elapsed -= 0.5f;
-    damage(e.power * 0.5f, e.source);
+  while (e.elapsed + 1e-6f >= 0.5f) {
+    e.elapsed = std::max(0.0f, e.elapsed - 0.5f);
+    if (!damage(e.power * 0.5f * k, e.source)) {
+      clear();
+      return;
+    }
   }
-  if (e.time <= 0 && e.elapsed > 0) {
-    damage(e.power * e.elapsed, e.source);
-    e.elapsed = 0;
-  }
+  if (e.time <= 0 && e.elapsed > 1e-6f)
+    if (!damage(e.power * e.elapsed * k, e.source)) {
+      clear();
+      return;
+    }
 }
 \`\`\`
 
-This guarantees that an affliction with \`power = 10\` and \`duration = 1.3s\` deals two \`5.0\` ticks at \`0.5s\` and \`1.0s\`, followed by an exact \`3.0\` remainder tick at \`1.3s\` (\`13.0\` total damage).
+This guarantees that an affliction with \`power = 10\` and \`duration = 1.3s\` deals two \`5.0\` ticks at \`0.5s\` and \`1.0s\`, followed by an exact \`3.0\` remainder tick at \`1.3s\` (\`13.0\` total damage, or \`20.8\` if bleeding while moving).
 
 ---
 
@@ -2473,30 +2519,30 @@ auto weight = [&](const Upgrade *u) {
 };
 \`\`\`
 
-- **\`3× Weight\` (\`u->owner != nullptr\`):** Exclusive class talents belonging to the player's hero class are three times as likely to appear.
-- **\`2× Weight\` (\`p.hero->favours(u->name)\`):** Weapons and passives listed in the hero's 3-item \`affinity[3]\` array are twice as likely to appear, steering builds toward class-synergistic loadouts without forcing rigid predetermination.
+- **\`3× Weight\` (\`u->owner != nullptr\`):** Exclusive class weapons and talents belonging to the player's hero class are three times as likely to appear.
+- **\`2× Weight\` (\`p.hero->favours(u->name)\`):** Weapons and passives listed in the hero's \`affinity[]\` array are twice as likely to appear.
 - **\`1× Weight\`:** All other eligible upgrades in the general pool.
 
 #### 3. The Bonus 4th Card Slot (\`MAX_CHOICES = 4\`)
 After drawing up to 3 standard upgrade cards, \`LevelUpMenu::roll\` checks whether a **4th special card** should appear:
-1. **Active Class Skill (\`25%\` chance at \`lvl >= 4\`):** On normal level-ups (\`!treasure\`) once \`p.lvl >= 4\`, if the hero has unlearned class skills (\`skillPool\`), there is a \`25%\` chance to offer a class \`Skill\` card in the 4th slot.
+1. **Active Skill Offer (\`25%\` chance at \`lvl >= 4\`):** On normal level-ups (\`!treasure\`) once \`p.lvl >= 4\`, there is a **1-in-4 (\`25%\`)** chance to offer an unlearned class skill or one of the 8 general skills in the 4th slot.
 2. **Weapon Evolution (\`evolveSlot\` on Treasure Chests):** When opening a \`treasure\` chest, if any owned weapon satisfies \`u->canEvolve(p)\` (max weapon level + required catalyst passive), the 4th slot deterministically offers the **Evolution** (\`evolveSlot = count++\`).
 3. **Relic Offering (\`treasure || 3%\` wild roll):** If no Evolution occupied the 4th slot, opening a \`treasure\` chest (or rolling a \`3%\` lucky proc on a normal level-up) offers an unowned \`Relic\` via \`pickRelic(p, g.rng)\`.
 `,
     mermaidCharts: [
       {
-        title: 'StatusEffects::apply() Clamping & Lossless 0.5s DoT Tick State Machine',
+        title: 'Status::apply() Clamping, Bleed Stacking & Lossless 0.5s DoT Tick State Machine',
         chart: `
 flowchart TD
     classDef apply fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef tick fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
     classDef mod fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Apply["StatusEffects::apply(k, power, dur, src)<br/>Check immune & (1u << k)"]:::apply
-    Clamp["Clamp Envelopes<br/>• Chill <= 0.65 (Min 35% Speed)<br/>• Marked <= 1.00 (Max 2.0x Dmg)<br/>• duration <= 60.0s"]:::apply
-    DotTick["StatusEffects::tick(dt) (Burn / Poison)<br/>e.elapsed += min(dt, e.time)"]:::tick
-    HalfSec["While e.elapsed >= 0.5f:<br/>damage(e.power * 0.5f, e.source)"]:::tick
-    Tail["On Expiry (e.time <= 0 && e.elapsed > 0):<br/>Flush Remainder damage(e.power * e.elapsed)"]:::mod
+    Apply["Status::apply(kind, duration, power, src)<br/>Check immune & (1u << kind)"]:::apply
+    Clamp["Clamp Envelopes & Stack<br/>• Chill <= 0.65 | Weaken <= 0.50 | Marked/Fear <= 1.0<br/>• Bleed: Additive (e.power += power) | Others: Max Envelope"]:::apply
+    DotTick["Status::tick(dt) (Burn / Poison / Bleed)<br/>k = (Bleed && moving) ? 1.6f : 1.0f"]:::tick
+    HalfSec["While e.elapsed >= 0.5f:<br/>damage(e.power * 0.5f * k, e.source)"]:::tick
+    Tail["On Expiry (e.time <= 0 && e.elapsed > 0):<br/>Flush Remainder damage(e.power * e.elapsed * k)"]:::mod
 
     Apply --> Clamp --> DotTick --> HalfSec --> Tail
 `,
@@ -2512,8 +2558,8 @@ flowchart TD
     Filter["Filter UPGRADES Registry<br/>u->eligible(p) && (owned || slots < Upgrade::SLOTS)"]:::pool
     Draw3["Draw 3 Cards Without Replacement<br/>weight(u) = owner ? 3 : hero->favours ? 2 : 1"]:::weight
     Slot4Check{"Bonus 4th Card Roll<br/>(count < MAX_CHOICES)"}:::bonus
-    SkillCard["Normal Level-Up (lvl >= 4 & 25% Roll)<br/>Offer Unlearned Class Skill"]:::bonus
-    EvolveCard["Treasure Chest + u->canEvolve(p)<br/>Guaranteed Weapon Evolution Card"]:::bonus
+    SkillCard["Normal Level-Up (lvl >= 4 & 25% Roll)<br/>Offer Class Skill or General Skill"]:::bonus
+    EvolveCard["Treasure Chest + u->canEvolve(p)<br/>Guaranteed Weapon Evolution Card (29 Evolutions)"]:::bonus
     RelicCard["Treasure Fallback or 3% Wild Roll<br/>Offer Unowned Relic (pickRelic)"]:::bonus
 
     Filter --> Draw3 --> Slot4Check
@@ -2676,5 +2722,116 @@ flowchart TD
       },
     ],
     interactiveComponent: 'goalai',
+  },
+  {
+    id: 'diablo-loot-runrules',
+    title: '25. Diablo-Style Item System, 30 Affix Families, Treasure Classes & RunRules',
+    category: 'gameplay',
+    summary: 'Deep dive into v0.5.14+ item bases, 30 five-tier affix families, diminishing-returns Magic Find, Night-Touched cursed items, ItemDrop physics, RunRules, and BiomeViewer.',
+    sourceFiles: ['src/item/loot/Item.hpp', 'src/item/loot/Affix.cpp', 'src/item/loot/Loot.cpp', 'src/entity/pickup/ItemDrop.cpp', 'src/level/RunRules.hpp', 'tools/biome_viewer/main.cpp'],
+    content: `
+### Diablo-Style Item System Architecture (\`src/item/loot/\`)
+
+Introduced in \`v0.5.14+\` (and testable via \`--loot\` in gameplay or \`--loot-sim <COUNT> [MLVL]\` from the CLI), \`src/item/loot/\` implements a complete, deterministic ARPG itemization engine modeled after classic *Diablo II* prefix/suffix generation, treasure classes, and diminishing-returns Magic Find.
+
+#### 1. Item Bases & 3 Quality Tiers (\`ItemBase.hpp\`, \`ItemBase.cpp\`)
+Every weapon in the arsenal—plus dedicated **Off-hands**, **Armour**, and **Charms**—is registered in \`itemBases()\` with a slot bitmask (\`slot::Weapon\`, \`slot::Offhand\`, \`slot::Armour\`, \`slot::Charm\`, \`slot::AreaWeapon\`, \`slot::ShotWeapon\`), base quality level \`qlvl\`, spawn \`weight\`, gold \`value\`, and an implicit \`Stat\`.
+- Each base exists across **3 progression tiers** (\`TIER_COUNT = 3\`) with quality offsets \`TIER_LEVEL[3] = {0, 18, 36}\`.
+- When \`pickBase(ilvl, tier, rng)\` selects a base for an item of level \`ilvl\`, any \`(base, tier)\` pair whose effective quality \`q = b.qlvl + TIER_LEVEL[t]\` is within \`10\` levels of \`ilvl\` (\`ilvl - q <= 10\`) receives a **\`3×\` freshness weight bonus**:
+  \`\`\`cpp
+  auto weight = [&](const ItemBase &b, int t) {
+    int q = b.qlvl + TIER_LEVEL[t];
+    return q > ilvl ? 0 : b.weight * (ilvl - q <= 10 ? 3 : 1);
+  };
+  \`\`\`
+
+---
+
+### 2. 30 Affix Families Across 5 Tiers (\`src/item/loot/Affix.cpp\`)
+
+\`AFFIXES[30]\` defines **14 Prefix families** and **16 Suffix families**, each containing up to **5 progressive \`AffixTier\` brackets** (\`qlvl = 1, 12, 24, 36, 48\`):
+- **14 Prefix Families (\`prefix = true\`):**
+  \`damage\` (*Sharp* → *Merciless*, \`+6%..+70%\`), \`burn\` (*Smoldering* → *Infernal*), \`chill\` (*Chilling* → *Arctic*), \`poison\` (*Noxious* → *Pestilent*), \`shock\` (*Charged* → *Thunderous*), \`bleed\` (*Jagged* → *Butchering*), \`count\` (*Twin* / *Triple* / *Legion*, \`+1..+2\` projectiles on \`ShotWeapon\`), \`area\` (*Wide* → *Titanic*, \`+6%..+40%\` on \`AreaWeapon | Offhand\`), \`crit\` (*Keen* → *Fatal*), \`leech\` (*Thirsty* → *Sanguine*), \`armour\` (*Sturdy* → *Impregnable*), \`life\` (*Hale* → *Titan's*, \`+8..+80\` HP), \`fortune\` (*Lucky* → *Divine*, \`+6%..+58%\` Magic Find), and \`gleaming\` (*Gleaming* → *Radiant*, Gold Find).
+- **16 Suffix Families (\`prefix = false\`):**
+  \`speed\` (*of the Fox* → *of the Gale*), \`haste\` (*of Haste* → *of Quickening*), \`regen\` (*of Mending* → *of Life Eternal*), \`reach\` (*of the Magnet* → *of Attraction*), \`wisdom\` (*of the Pupil* → *of the Archmage*), \`thorns\` (*of Thorns* → *of Razors*), \`resist burn/chill/poison\`, \`kindling\`, \`night\` (*of Dusk* → *of the Long Night*), \`dawn\` (*of Daybreak* → *of the Sun*, boss damage), \`slaying\` (*of Slaying* → *of the Executioner*, elite damage), and class-item skill tree boosters \`arms\`, \`arts\`, and \`instincts\` (\`+1..+2\` levels).
+
+#### Family Exclusion & Prefix/Suffix Caps (\`Item::addAffix\`)
+An \`Item\` holds up to \`MAX_AFFIXES = 6\` rolls (\`Roll rolls[6]\`). \`Item::hasFamily(affix)\` prevents two rolls from the same affix family from appearing on the same item:
+- **\`Rarity::Magic\` (\`affixMagic\`):** Rolls \`1..2\` affixes (at most 1 prefix and 1 suffix) and names the item dynamically, e.g., *"Searing Standard Ember Lance of Alacrity"*.
+- **\`Rarity::Rare\` (\`affixRare\`):** Rolls \`3..5\` affixes (up to \`6\` if a Unique roll upgrades a Rare via \`extra = 1\`), enforcing at most **3 prefixes and 3 suffixes**, and generates a deterministic two-word title from \`hash2(seed, 17)\` and \`hash2(seed, 91)\` (e.g., *"Dusk Fang"*, *"Storm Aegis"*).
+
+---
+
+### 3. Diminishing-Returns Magic Find & Night-Touched Curses (\`Loot.cpp\`)
+
+\`rarityOdds(int ilvl, float magicFind)\` scales base drop rates by \`scale = 1 + ilvl / 40.0f\` and applies a hyperbolic diminishing-returns curve \`diminish(mf, k) = (mf * k) / (mf + k)\` to Rare (\`k = 600\`) and Unique (\`k = 250\`) rolls while keeping Magic rolls linear:
+
+\`\`\`cpp
+float diminish(float mf, float k) { return mf * k / (mf + k); }
+
+RarityOdds rarityOdds(int ilvl, float magicFind) {
+  float scale = 1 + ilvl / 40.0f;
+  return {std::min(1.0f, scale / 700 * (1 + diminish(magicFind, 250) / 100)),
+          std::min(1.0f, scale / 90 * (1 + diminish(magicFind, 600) / 100)),
+          std::min(1.0f, scale / 7 * (1 + magicFind / 100))};
+}
+\`\`\`
+
+#### Night-Touched Items (\`touch(Item &item, Rng &rng)\`)
+When an item is rolled at night (\`night == true\`), Magic and Rare items have a **\`1-in-25\` (\`4%\`)** chance to become **Night-Touched**:
+1. Picks one existing affix roll on the item at random and **boosts its tier by \`+2\`** (\`r.tier = std::min(AFFIXES[r.affix].tiers - 1, r.tier + 2)\`), rerolling its numeric value in the higher tier!
+2. Assigns one of 5 permanent **\`CURSES\`** (\`Frail: -10% max health\`, \`Leaden: -5% movement speed\`, \`Hunted: foes deal 5% more damage\`, \`Bleeding: lose 1 health/s\`, or \`Dimmed: -20% light radius\`).
+
+---
+
+### 4. Treasure Classes & \`ItemDrop\` Parabolic Spill (\`ItemDrop.cpp\`)
+
+\`TREASURE[8]\` maps each \`Source\` (\`Swarm\`, \`Line\`, \`Brute\`, \`Elite\`, \`Champion\`, \`Boss\`, \`Chest\`, \`Mimic\`) to a \`TreasureClass\` with guaranteed \`floored\` drops (e.g., \`Champion\` guarantees \`1× Magic+\`, \`Boss\` guarantees \`2× Rare+\`, \`Mimic\` guarantees \`1× Magic+\`) plus \`picks\` weighted draws across \`{none, gold, potion, material, item}\` where \`itemWeight = tc.item * (roll.night ? 2 : 1)\`.
+- When an enemy dies or chest opens in \`--loot\` mode, \`ItemDrop::spill\` launches each drop along a \`0.35s\` (\`FLY\`) parabolic arc \`z = std::sin(k * PI) * 14\`.
+- Rare and Night-Touched items emit vertical light beams (\`ItemDrop::beams()\`) and burst 8 colored sparks on landing.
+
+---
+
+### 5. \`RunRules\` Mode Parameterization & Standalone \`BiomeViewer\`
+
+- **\`RunRules\` (\`src/level/RunRules.hpp\`):** Decouples run rules from hardcoded Dawn constants so future campaign/endless modes can configure \`nightLength\`, \`dawnPull\`, \`dayLength\`, \`endsAtDawn\`, \`spawnRate\`, \`hordeScale\`, fixed \`omen\`, circular sanctuary zones \`std::vector<SafeZone> safe\` (\`safeAt(x, y)\`), and a spatial difficulty callback \`float (*threat)(double x, double y)\`.
+- **Standalone \`BiomeViewer\` (\`tools/biome_viewer/main.cpp\`):** Built via \`cmake --build <dir> --target BiomeViewer\`, this tool streams a \`768×768\` world preview at 6 zoom scales (\`1, 2, 4, 8, 16, 32\` tiles/pixel), overlays all regional \`Structure\` and \`Landmark\` sites, and exports PNGs directly to disk or the OS clipboard.
+`,
+    mermaidCharts: [
+      {
+        title: 'Diablo-Style Loot Pipeline: TreasureClass -> rollItem() -> Night-Touched Touch()',
+        chart: `
+flowchart TD
+    classDef tc fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef roll fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef curse fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    Spill["ItemDrop::spill(level, x, y, Source, mlvl)<br/>Lookup TREASURE[Source] (itemWeight * 2 at Night)"]:::tc
+    Floored["Emit tc.floored Guaranteed Drops<br/>(Champion: 1x Magic+ | Boss: 2x Rare+ | Mimic: 1x Magic+)"]:::tc
+    PickBase["pickBase(ilvl, tier, rng)<br/>q = b.qlvl + TIER_LEVEL[t] <= ilvl (3x Weight if ilvl - q <= 10)"]:::roll
+    RarityRoll["rollRarity(ilvl, magicFind, ownRng)<br/>diminish(mf, k) = mf * k / (mf + k)<br/>Magic: 1-2 Affixes | Rare: 3-6 Affixes (<=3 Pre, <=3 Suf)"]:::roll
+    NightTouch{"night && (Magic || Rare)<br/>&& 1-in-25 Roll?"}:::curse
+    Touch["touch(item, ownRng)<br/>Boost Random Affix Tier by +2 & Reroll<br/>Attach CURSES[0..4] + Emit Vertical Light Beam"]:::curse
+
+    Spill --> Floored --> PickBase --> RarityRoll --> NightTouch
+    NightTouch -- "Yes" --> Touch
+`,
+      },
+      {
+        title: 'RunRules Campaign Parameterization & SafeZone / Threat Evaluation',
+        chart: `
+flowchart TD
+    classDef rules fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef sys fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+
+    RR["struct RunRules (src/level/RunRules.hpp)<br/>nightLength=900, dayLength=0, endsAtDawn=true<br/>spawnRate=1, hordeScale=1, loot=false, omen=ROLL_OMEN"]:::rules
+    Safe["SafeZone Vector (safeAt(x, y))<br/>xd² + yd² < radius² -> Suppresses Spawns & Hostile Aggro"]:::sys
+    Threat["Spatial Threat Function Pointer<br/>float (*threat)(double x, double y)<br/>Scales Monster Level (mlvl) by World Distance / Region"]:::sys
+
+    RR --> Safe & Threat
+`,
+      },
+    ],
+    interactiveComponent: 'loot',
   },
 ];
