@@ -6,13 +6,13 @@ export interface MermaidDiagramDef {
 export interface WikiSection {
   id: string;
   title: string;
-  category: 'core' | 'graphics' | 'simulation' | 'world' | 'gameplay';
+  category: 'core' | 'graphics' | 'simulation' | 'world' | 'gameplay' | 'contribute';
   summary: string;
   sourceFiles: string[];
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -1006,6 +1006,309 @@ flowchart LR
 
     CLI --> Suite & Bench & Stage
     Stage --> Readback
+`,
+      },
+    ],
+  },
+  {
+    id: 'contribute-basics',
+    title: '12. Contribution Basics: Toolchain, Build, House Rules & --dev',
+    category: 'contribute',
+    summary: 'Step-by-step onboarding from cloning submodules and building with CMake/slangc to house rules and --dev hotkeys.',
+    sourceFiles: ['CMakeLists.txt', 'NOTES.md', 'README.md', 'src/main.cpp', 'src/DevStart.cpp'],
+    content: `
+### Welcome Contributor! Start with the Basics
+
+Contributing to **Mellangan** is straightforward once you understand its build pipeline, strict house rules, and built-in developer sandbox. This tutorial walks you through the fundamentals step by step before diving into adding weapons, enemies, and biomes.
+
+#### Step 1: Prerequisites & Submodule Clone
+Mellangan requires:
+- **CMake 3.21+** and a **C++20 / C11** compiler (MSVC 2022 on Windows, Clang on macOS, GCC/Clang on Linux).
+- **LunarG Vulkan SDK:** Provides the Vulkan headers/loader and **\`slangc\`**, which compiles \`res/shaders/*.slang\` into SPIR-V (\`.spv\`) at build time. On Windows, \`CMakeLists.txt\` automatically detects \`C:/VulkanSDK/*\` even if \`VULKAN_SDK\` is not set in your environment.
+- **Python 3 + Pillow 13.0.0:** Used only when regenerating or verifying the deterministic sprite atlas (\`tools/make_assets.py\`).
+
+\`\`\`cpp
+git clone --recurse-submodules https://github.com/soulwax/Mellangan.git
+cd Mellangan
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug --parallel
+\`\`\`
+
+#### Step 2: The Golden House Rules (\`NOTES.md\`)
+Every pull request or task packet must obey five non-negotiable conventions:
+1. **No Code Comments:** Never write \`//\` or \`/* */\` comments inside \`.cpp\`, \`.hpp\`, \`.c\`, or \`.h\` files. Code should be self-explanatory with concise identifiers; architectural rationale belongs in \`NOTES.md\`, \`README.md\`, or \`CHANGELOG.md\`.
+2. **Pragmatic "C with Classes":** Use plain structs, fixed arrays, and direct loops where they fit; use classes for clear ownership and virtual extension points (\`SpriteObject\`, \`Entity\`, \`Mob\`, \`Upgrade\`, \`Goal\`, \`Biome\`).
+3. **Submodule Boundaries:** Only \`extern/Vulkan2D\` and \`extern/wiki\` may be modified when needed. Treat \`extern/entt\`, \`extern/spdlog\`, and \`extern/stb\` as strictly read-only.
+4. **Append-Only Enums (Save Compatibility):** \`EnemyKind\`, \`BiomeId\`, and \`HeroId\` indices are serialized in player saves, charts, and Codex progress. Always append new enum values at the end—never reorder or insert in the middle.
+5. **No Unverified Commits:** Always run \`--test\` in a Debug build (so \`assert()\` checks are compiled in) and inspect visual changes at 1x native scale before considering a task complete.
+
+#### Step 3: Fast Iteration with \`--dev\` and Startup Flags
+Never play for 10 minutes manually just to reach a test case! \`src/main.cpp\` and \`src/DevStart.cpp\` provide instant teleports and loadouts:
+- **Hotkeys in \`--dev\` mode:**
+  - \`F5\`: Instant Level-Up menu.
+  - \`F6\`: Skip +30 seconds on the night clock.
+  - \`F7\`: Toggle God Mode (invulnerability).
+  - \`F8\`: Toggle World Debug HUD (tile coordinates, biome blend weights, \`Prof.c\` timings).
+  - \`F9\`: Warp to the nearest generated structure or shrine.
+  - \`F10\`: Cycle to the next weather front (\`Rain\`, \`Snow\`, \`Storm\`, \`Sand\`).
+- **Command-Line Warp Flags:**
+  - \`--arm "Ember Lance!,Bastion Shields"\`: Starts the run pre-equipped with those upgrades (append \`!\` to start at Level 5 Evolved).
+  - \`--biome 12\`: Spawns directly inside Biome ID 12 (\`CrystalFields\`).
+  - \`--at -220,-192\`: Spawns at exact tile coordinates \`(-220, -192)\`.
+  - \`--cliff\`, \`--ramp\`, \`--peak\`, \`--lake\`, \`--landmark N\`: Teleports directly to the nearest matching terrain feature.
+`,
+    mermaidCharts: [
+      {
+        title: 'CMake Build, Slang Shader Compilation & Asset Bundling Pipeline',
+        chart: `
+flowchart LR
+    classDef src fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef tool fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef bin fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    CPP["src/*.cpp (C++20 + src/pch.hpp)<br/>src/*.c (C11, SKIP_PRECOMPILE_HEADERS)"]:::src
+    Slang["res/shaders/*.slang<br/>(flash.slang, post.slang...)"]:::src
+    Sub["Vendor Submodules<br/>Vulkan2D, SDL3 (Static), EnTT, spdlog, stb"]:::src
+
+    SlangC["Vulkan SDK slangc<br/>-target spirv -profile glsl_450<br/>-entry PixelShader -stage fragment"]:::tool
+    Compiler["MSVC (/W4 /MP) or Clang/GCC<br/>Static CRT + Version.hpp Gen"]:::tool
+
+    App["build/bin/MellanganApp<br/>+ Post-Build Copy of res/ & *.spv"]:::bin
+
+    Slang --> SlangC --> App
+    CPP --> Compiler
+    Sub --> Compiler
+    Compiler --> App
+`,
+      },
+      {
+        title: 'Contributor Development & Verification Loop',
+        chart: `
+flowchart TD
+    classDef step fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef gate fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    S1["1. Inspect Module & Callers<br/>Read NOTES.md & Shared Registry Contracts"]:::step
+    S2["2. Implement Focused Change<br/>C-with-Classes Style, Zero Code Comments"]:::step
+    S3["3. Build Debug Target<br/>cmake --build build --config Debug"]:::step
+    G1["4. Run Headless & Graphical Assertions<br/>MellanganApp --test (All Tests Pass)"]:::gate
+    G2["5. Visual Sandbox Verification<br/>MellanganApp --dev --arm / --biome / --test-*-view"]:::gate
+    G3["6. Performance Check & Changelog<br/>MellanganApp --bench & Update CHANGELOG.md"]:::gate
+
+    S1 --> S2 --> S3 --> G1 --> G2 --> G3
+`,
+      },
+    ],
+    interactiveComponent: 'contribute',
+  },
+  {
+    id: 'tutorial-weapon',
+    title: '13. Tutorial 1: Adding a New Weapon, Recipe & Evolution',
+    category: 'contribute',
+    summary: 'Hands-on beginner tutorial: create a 16x16 icon, add a combinatorial Recipe or custom Upgrade, and test it in --dev.',
+    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/Upgrade.cpp', 'src/Atlas.hpp', 'src/test/ArsenalTest.cpp'],
+    content: `
+### Hands-On Tutorial 1: Creating a New Weapon Step by Step
+
+There are two ways to add a weapon in Mellangan:
+1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the 12 existing \`Form\` trajectories (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`) with any combination of \`pay::Payload\` bitflags (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`).
+2. **The Custom \`Upgrade\` Subclass Path (\`src/item/weapon/*.cpp\`):** Ideal when your weapon introduces brand-new projectile physics or custom rendering.
+
+---
+
+#### Path A: Adding a Data-Driven Weapon in \`Recipe.cpp\` (5 Minutes)
+
+Suppose we want to add a new Stormcaller weapon called **\`Tempest Chakram\`** that throws a boomerang disc that both **Chains** lightning and **Marks** enemies:
+
+##### Step 1: Add the \`Recipe\` Entry in \`src/item/weapon/Recipe.cpp\`
+Each entry in \`const std::vector<Recipe> RECIPES\` defines:
+\`{ name, ownerClass, pitch, unitName, iconIndex, form, payloadMask, baseDamage, cooldown, reach, speed, count, tintColor, particleSprite }\`:
+
+\`\`\`cpp
+{"Tempest Chakram", "STORMCALLER", "A charged disc arcs out and chains lightning",
+ "disc", 13, Form::Boomerang, pay::Chain | pay::Mark, 15, 1.9f, 175, 230, 1,
+ {0.55f, 0.85f, 1.0f, 1.0f}, atlas::pt::ArcaneStar}
+\`\`\`
+
+##### Step 2: How \`RecipeWeapon\` Automatically Wires Level 1–5 & Evolution
+You do not even need to write level-up strings! \`RecipeWeapon::RecipeWeapon(const Recipe &r)\` inspects \`FormBehavior::of(r.form).area()\` and automatically synthesizes all 5 upgrade tiers:
+- **Level 1:** Base weapon unlocked (\`r.pitch\`).
+- **Level 2:** \`+50% base damage\`.
+- **Level 3:** \`+1 disc\` (since \`Form::Boomerang\` is a projectile count form) or \`+30% radius\` (if area form).
+- **Level 4:** \`25% faster\` (\`cooldown * 0.75f\`).
+- **Level 5:** \`+50% base damage\` and \`+1 disc\` (or \`+30% radius\`).
+
+---
+
+#### Path B: Writing a Custom Weapon Class (\`src/item/weapon/\`)
+
+When you need custom mechanics beyond \`FormBehavior\`, follow these 4 steps:
+
+##### Step 1: Reserve an Icon in \`src/Atlas.hpp\`
+Every weapon card displays a \`16×16\` icon from \`res/atlas.png\`. Check \`tools/atlas_layout.py\` for the reserved weapon band (row \`y = 624\`, cells \`14..21\`) and expose a \`constexpr Sprite\` in \`src/Atlas.hpp\`.
+
+##### Step 2: Subclass \`Upgrade\` in \`src/item/weapon/\`
+Override \`tick(Mob &p)\` to decrement your cooldown timer by \`DT\` and spawn your \`Projectile\` or \`Effect\` entity via \`p.level->add<MyProjectile>(...)\`:
+
+\`\`\`cpp
+void MyWeapon::tick(Mob &p) {
+  if ((cd -= DT) > 0 || p.dead())
+    return;
+  cd = 1.8f * (level >= 4 ? 0.75f : 1.0f) * p.haste * pace;
+  float dmg = (16.0f + 8.0f * (at(level, 2) + at(level, 5))) * p.might * power;
+  p.level->add<MyProjectile>(p.x, p.bodyY(), p.xAim, p.yAim, dmg, this);
+}
+\`\`\`
+
+##### Step 3: Register in \`Upgrade::all()\` (\`src/item/Upgrade.cpp\`)
+Add your weapon factory to \`Upgrade::all()\` and optionally pair it with a passive catalyst item to enable **Reforged Evolution** when picking up boss chests (\`Chest.cpp\`).
+
+##### Step 4: Test Immediately via CLI
+Run both the interactive dev loadout and the automated arsenal verification view:
+
+\`\`\`cpp
+./build/bin/Debug/MellanganApp.exe --dev --arm "Tempest Chakram!"
+./build/bin/Debug/MellanganApp.exe --test-arsenal-view "Tempest Chakram"
+./build/bin/Debug/MellanganApp.exe --test
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: 'Step-by-Step Weapon & Evolution Registration Flow',
+        chart: `
+flowchart TD
+    classDef art fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef code fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef reg fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef qa fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    A1["Step 1: 16x16 Icon in res/atlas.png<br/>tools/atlas_layout.py & src/Atlas.hpp"]:::art
+    C1["Option A: Add Recipe Row<br/>src/item/weapon/Recipe.cpp"]:::code
+    C2["Option B: Subclass Upgrade & Projectile<br/>src/item/weapon/MyWeapon.cpp"]:::code
+    R1["Step 3: Register in Upgrade::all()<br/>src/item/Upgrade.cpp + Catalyst Pairing"]:::reg
+    Q1["Step 4: Verify with CLI & ArsenalTest<br/>--dev --arm 'Weapon!' & --test-arsenal-view"]:::qa
+
+    A1 --> C1 & C2
+    C1 & C2 --> R1 --> Q1
+`,
+      },
+      {
+        title: 'Projectile Lifecycle & Slab Memory Reclamation',
+        chart: `
+sequenceDiagram
+    autonumber
+    participant Wpn as Upgrade::tick(Mob &p)
+    participant Lvl as Level::add<T>()
+    participant Pool as Pool.c (pool_alloc)
+    participant Shot as Projectile::tick()
+    participant Enemy as Enemy::strike()
+
+    Wpn->>Pool: operator new(sizeof(MyProjectile))
+    Pool-->>Wpn: O(1) Slot from freeList[c]
+    Wpn->>Lvl: level->add(unique_ptr<Entity>)
+    Lvl->>Lvl: flush() -> reg.emplace<Owned>(id)
+    loop Every 60Hz Tick while age < life
+        Lvl->>Shot: shot->tick()
+        Shot->>Lvl: level->foes(hostile, x, y, r) [CSR Grid]
+        Shot->>Enemy: e.afflict(StatusKind) + e.strike(dmg)
+    end
+    Shot->>Shot: remove() (removed = true)
+    Lvl->>Pool: flush() -> virtual ~SpriteObject -> pool_free(p, size)
+`,
+      },
+    ],
+  },
+  {
+    id: 'tutorial-enemy-biome',
+    title: '14. Tutorial 2: Adding a Monster, AI Plan & Biome Niche',
+    category: 'contribute',
+    summary: 'Advanced tutorial: append save-safe EnemyKind enums, compose zero-allocation GoalQueue plans, and register a new Biome.',
+    sourceFiles: ['src/entity/enemy/Enemy.hpp', 'src/entity/enemy/Roster.cpp', 'src/entity/enemy/ai/Plans.cpp', 'src/level/biome/Biome.cpp'],
+    content: `
+### Hands-On Tutorial 2: Adding a New Monster & Biome Rule
+
+Adding a monster or biome touches multiple subsystems (Atlas, AI Plans, Spawner masks, Codex save serialization, and World climate classification). Following the exact integration order prevents save corruption and thread-safety bugs.
+
+---
+
+#### Part 1: Step-by-Step Monster Creation
+
+##### Step 1: Append \`EnemyKind\` at the End (\`src/entity/enemy/Enemy.hpp\`)
+**CRITICAL SAVE RULE:** Player save files store Codex kill counts as a positional array indexed by \`int(EnemyKind)\`, and \`Night::strongestUnlocked\` assumes all classic monsters precede \`EnemyKind::Cyclops\`.
+- Always append your new monster **after** existing kinds at the bottom of \`enum class EnemyKind\`.
+
+##### Step 2: Paint the 16×16 Silhouette & Verify the Atlas
+1. Add the procedural pixel-art generator for your creature's \`16×16\` cell in \`tools/make_expansion.py\` (using \`Canvas\` contour, cluster, and highlight primitives from \`tools/sprite_kit.py\`).
+2. Run \`python tools/make_assets.py --verify\` to rebuild \`res/atlas.png\` and verify deterministic RGBA/PNG hashes and 1px transparent gutters.
+
+##### Step 3: Compose a Zero-Allocation \`Plan\` in \`src/entity/enemy/ai/Plans.cpp\`
+Combine existing static \`Goal\` primitives (\`Approach\`, \`Flank\`, \`Stalk\`, \`Howl\`, \`Burrow\`, \`Raise\`, \`Melee\`, \`Ranged\`) and an interrupt (\`FALTER\` or \`HIDE\`) inside \`PLANS[]\`:
+
+\`\`\`cpp
+const Approach DART_IN{42, {0.8, 1.1, 3, 0, 0, true}};
+const Melee STING{0.22f, 0.20f, 3.1, 1.3f};
+
+const Plan PLANS[] = {
+  {{&STALK, &DART_IN, &STING}, {&FALTER}},
+};
+\`\`\`
+
+remembering that \`Goal::tick(Enemy &e, const Sense &s, double &xs, double &ys)\` runs **concurrently across worker threads** during \`PROF_THINK\` Barrier 1! Never spawn entities or mutate global \`Level\` vectors inside \`Goal::tick\`; instead, set a boolean intent flag on \`Enemy\` (such as \`e.wantsFire = true;\`) and execute the spawn on the main thread inside \`Enemy::act()\` during \`PROF_ENTITIES\`!
+
+##### Step 4: Register Stats in \`Roster.cpp\` & Biome \`foes\` Bitmask
+Add the \`EnemyType\` row (name, sprite, radius, speed, HP, contact damage, XP value, death effect style) and include \`1ULL << int(EnemyKind::MyMonster)\` in its home biome's \`foes\` mask.
+
+---
+
+#### Part 2: Step-by-Step Biome Creation (\`src/level/biome/\`)
+
+1. **Append \`BiomeId\`:** Add your new biome ID at the end of \`BiomeId\` in \`src/level/biome/Biome.hpp\` and increment \`BIOME_COUNT\`.
+2. **Define Climate Niche & Props:** Subclass \`Biome\` (or configure an \`ExpansionBiome\` entry in \`src/level/biome/ExpansionBiome.cpp\`) with:
+   - Ground tint and transition surface (\`transitionGround(int kind)\`).
+   - Three characteristic 16×16 props (trees, rocks, flora) with collision radii.
+   - Regional \`foes\` spawn bitmask and structure weights.
+   - A distinct **gameplay rule** (e.g., conductive storm water, fracturing salt crust, or healing grove breeze) rather than a mere palette swap.
+3. **Verify Reachability in \`WorldTest.cpp\` & \`BiomeTransitionTest.cpp\`:**
+   Run \`./build/bin/Debug/MellanganApp.exe --test\` to verify that the bounded multi-seed survey reaches all biomes and that \`world::groundBlend(x, y)\` produces smooth 3-biome barycentric transitions across every boundary!
+`,
+    mermaidCharts: [
+      {
+        title: 'Thread-Safe Monster AI Intent vs Main-Thread Action Contract',
+        chart: `
+flowchart LR
+    classDef worker fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef main fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef danger fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+
+    subgraph Parallel_Phase ["PROF_THINK (Worker Threads - Read-Only World)"]
+        Sense["Compute Sense<br/>(xd, yd, dist, seen)"]:::worker
+        GoalTick["Goal::tick(Enemy &e, Sense &s, xs, ys)<br/>Writes e.xWant, e.yWant, e.wantsFire = true"]:::worker
+        Forbidden["NEVER Call level->add() or Sound::play()<br/>Directly Inside Goal::tick()!"]:::danger
+        Sense --> GoalTick
+    end
+
+    subgraph Serial_Phase ["PROF_ENTITIES (Main Thread - Safe Mutation)"]
+        EntTick["Enemy::tick() -> Enemy::act()"]:::main
+        Spawn["If (wantsFire):<br/>level->add<Orb>(...) & Enemy::voice()"]:::main
+        EntTick --> Spawn
+    end
+
+    GoalTick ==>|Barrier Sync| EntTick
+`,
+      },
+      {
+        title: 'Deterministic Asset Pipeline & Save-Safe Registration Checklist',
+        chart: `
+flowchart TD
+    classDef step fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef verify fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+
+    P1["1. Reserve 18x18 Cells in tools/atlas_layout.py<br/>Paint 16x16 Sprite in tools/make_expansion.py"]:::step
+    P2["2. Run python tools/make_assets.py --verify<br/>Byte-Identical Dual-Run RGBA & PNG Hash Check"]:::verify
+    P3["3. Append EnemyKind / BiomeId at Enum End<br/>Preserves Codex & Chart Save Compatibility"]:::step
+    P4["4. Wire Plans.cpp, Roster.cpp & Biome.cpp<br/>Verify Reachability in --test & --test-biome-view"]:::verify
+
+    P1 --> P2 --> P3 --> P4
 `,
       },
     ],

@@ -8,6 +8,7 @@ import { SpatialGridVisualizer } from './components/SpatialGridVisualizer';
 import { RadixDepthSorter } from './components/RadixDepthSorter';
 import { OuroborosBitLab } from './components/OuroborosBitLab';
 import { RecipeArsenalExplorer } from './components/RecipeArsenalExplorer';
+import { ContributorTutorialWizard } from './components/ContributorTutorialWizard';
 import {
   Cpu,
   Layers,
@@ -20,6 +21,7 @@ import {
   Activity,
   Terminal,
   FileCode2,
+  Wrench,
 } from 'lucide-react';
 
 const CATEGORY_MAP: Record<string, { label: string; icon: React.ElementType; color: string }> = {
@@ -28,6 +30,7 @@ const CATEGORY_MAP: Record<string, { label: string; icon: React.ElementType; col
   simulation: { label: 'Memory, CSR & AI', icon: Activity, color: 'text-purple-400' },
   world: { label: 'World & Atmosphere', icon: Compass, color: 'text-sky-400' },
   gameplay: { label: 'Arsenal & Combat', icon: Swords, color: 'text-rose-400' },
+  contribute: { label: 'Contribute & Tutorials', icon: Wrench, color: 'text-gold-400' },
 };
 
 export const App: React.FC = () => {
@@ -98,7 +101,18 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-1 max-w-md justify-end">
+        <div className="flex items-center gap-3 flex-1 max-w-lg justify-end">
+          <button
+            onClick={() => {
+              setSelectedCategory('contribute');
+              setActiveSectionId('contribute-basics');
+            }}
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/25 border border-gold-500/40 text-xs font-mono text-gold-300 font-semibold transition-colors shrink-0"
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            <span>How to Contribute</span>
+          </button>
+
           <div className="relative flex-1 max-w-xs">
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -253,6 +267,7 @@ export const App: React.FC = () => {
           {activeSection.interactiveComponent === 'ouroboros' && <OuroborosBitLab />}
           {activeSection.interactiveComponent === 'noise' && <BiomeNoiseMap />}
           {activeSection.interactiveComponent === 'arsenal' && <RecipeArsenalExplorer />}
+          {activeSection.interactiveComponent === 'contribute' && <ContributorTutorialWizard />}
 
           {diagrams.map((d, idx) => (
             <MermaidChart
@@ -270,6 +285,8 @@ export const App: React.FC = () => {
                 __html: activeSection.content
                   .replace(/```cpp\n([\s\S]*?)```/g, (_m, code) => `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
                   .replace(/```c\n([\s\S]*?)```/g, (_m, code) => `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
+                  .replace(/\n---\n/g, '<hr class="border-dark-800 my-6" />')
+                  .replace(/##### (.*?)\n/g, '<h5 class="text-sm font-bold text-emerald-400 mt-4 mb-1.5 font-mono">$1</h5>')
                   .replace(/### (.*?)\n/g, '<h3 class="text-xl font-bold text-slate-100 mt-6 mb-3 font-display">$1</h3>')
                   .replace(/#### (.*?)\n/g, '<h4 class="text-base font-bold text-gold-400 mt-4 mb-2">$1</h4>')
                   .replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>')
@@ -317,7 +334,7 @@ export const App: React.FC = () => {
       <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono">
         <p>Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT • SDL3</p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 11 Chapters • 22 Architecture Diagrams • 7 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 14 Chapters • 28 Architecture Diagrams • 8 Interactive Simulators
         </p>
       </footer>
     </div>
