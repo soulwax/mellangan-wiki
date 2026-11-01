@@ -4,10 +4,10 @@
 
 @layer base {
   body {
-    @apply bg-dark-950 text-slate-300 antialiased font-sans;
+    @apply bg-dark-950 text-slate-200 antialiased font-sans;
     background-image: 
-      radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.04) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, rgba(246, 195, 36, 0.03) 0px, transparent 50%);
+      radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.035) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(246, 195, 36, 0.025) 0px, transparent 50%);
     background-attachment: fixed;
   }
 
@@ -36,6 +36,47 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* Readable documentation measure and list styling */
+.wiki-prose {
+  font-size: 0.96875rem; /* 15.5px */
+  line-height: 1.82;
+  color: #e2e8f0;
+  max-width: 66ch;
+}
+
+.wiki-prose p {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  color: #cbd5e1;
+}
+
+.wiki-prose ul {
+  margin-top: 0.85rem;
+  margin-bottom: 1.15rem;
+  padding-left: 1.35rem;
+  list-style-type: disc;
+}
+
+.wiki-prose ol {
+  margin-top: 0.85rem;
+  margin-bottom: 1.15rem;
+  padding-left: 1.45rem;
+  list-style-type: decimal;
+}
+
+.wiki-prose li {
+  margin-top: 0.45rem;
+  margin-bottom: 0.45rem;
+  padding-left: 0.25rem;
+  line-height: 1.75;
+  color: #cbd5e1;
+}
+
+.wiki-prose li::marker {
+  color: #f6c324;
+  font-weight: 600;
+}
+
 /* Mermaid SVG diagram styling */
 .mermaid svg {
   max-width: 100% !important;
@@ -50,4 +91,3 @@
 .glow-purple {
   box-shadow: 0 0 20px -3px rgba(168, 85, 247, 0.2);
 }
-

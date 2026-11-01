@@ -12,7 +12,7 @@ export interface WikiSection {
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -2028,5 +2028,365 @@ flowchart LR
       },
     ],
     interactiveComponent: 'renderer',
+  },
+  {
+    id: 'night-spawner-director',
+    title: '21. Night Clock, Wave Director, Shrine Kindling & Omen Modifiers',
+    category: 'gameplay',
+    summary: 'How Night.cpp and Spawner.cpp orchestrate the 15-minute nocturnal survival arc, quadratic sunrise, shrine kindling retaliation rings, and 7 concurrent spawn streams.',
+    sourceFiles: ['src/level/Night.cpp', 'src/level/Spawner.cpp', 'src/entity/enemy/Rank.cpp', 'src/level/Flavour.cpp'],
+    content: `
+### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\`)
+
+Every run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`), which tracks the countdown to dawn (\`duration = 900.0f\` seconds by default), the active nocturnal omen (\`Portent\`), and the kindling state of the three sacred Shrines scattered across the map.
+
+#### Deterministic Omen Selection (\`PORTENTS[]\`)
+At the start of a run, \`Night::init(Level &level)\` seeds a dedicated local PRNG by XORing the world seed with the ASCII constant \`'NIGH'\` (\`0x4E494748u\`):
+
+\`\`\`cpp
+void Night::init(Level &level) {
+  RNG rng(level.seed() ^ 0x4E494748u);
+  omen = rng.range(0, PORTENT_COUNT - 1);
+  banner = 4.5f;
+}
+\`\`\`
+
+The selected \`Portent\` globally scales three core pacing multipliers read by \`Spawner\` and \`Enemy\`:
+- \`portent().rate\`: Multiplies the time between trickle spawns (values \`< 1.0f\` accelerate spawns).
+- \`portent().hp\`: Multiplies enemy maximum health at spawn time.
+- \`portent().xp\`: Multiplies experience gem values dropped across the night.
+
+---
+
+### Quadratic Sunrise & Shrine Kindling Mechanics
+
+#### 1. The Final 150 Seconds (\`Night::daylight()\`)
+Rather than switching abruptly from night to day, \`Night::daylight()\` begins warming the ambient lightmap during the final **150 seconds** (\`2.5 minutes\`) before dawn using a smooth quadratic curve:
+
+\`\`\`cpp
+float Night::daylight() const {
+  float d = clampf(1.0f - left() / 150.0f, 0.0f, 1.0f);
+  return d * d;
+}
+\`\`\`
+
+When \`left() <= 0\`, \`Night::strikeDawn(level)\` triggers once: it plays \`Assets::sfxDawn\`, awards the player \`+30% maxHp\` healing, and sweeps every surviving enemy in \`level.enemies()\` with \`9999.0f\` radiant damage while spawning golden \`HealDebris\` bursts across the screen.
+
+#### 2. Shrine Kindling & The Guard Retaliation Ring
+To survive the night and unlock shrine boons, the player seeks out up to 3 unlit \`StructureKind::Shrine\` landmarks (revealed on the HUD compass by \`Night::nearestUnlitShrine\`).
+- Standing within \`KINDLE_RADIUS\` of an unlit shrine charges \`kindling\` at \`DT * level.kindleRate / KINDLE\`.
+- Stepping outside the circle decays \`kindling\` at half speed (\`DT * 0.5f\`).
+- Once \`kindling >= 1.0f\`, \`Night::kindle(level, *active)\` executes:
+  1. Marks \`s.lit = true\`, increments \`lit\`, sets \`offering = true\` (which opens \`ShrineMenu\` for a blessing/curse choice), and records the shrine's biome bit in \`level.litBiomes |= 1u << int(level.biomeUnder(s.x, s.y))\`.
+  2. Restores \`35% maxHp\` and emits an expanding golden \`Nova\`.
+  3. Spawns a **retaliation ring** of \`8 + 3 * lit\` enemies of the highest currently unlocked tier (\`strongestUnlocked(level.time)\`) evenly spaced around a \`170 px\` circle!
+
+---
+
+### The 7-Stream Wave Director (\`src/level/Spawner.cpp\`)
+
+\`Spawner::tick(Level &level)\` runs during \`PROF_HOUSEKEEP\` and coordinates **seven independent spawn streams**, all bounded by the difficulty's \`enemyCap\` and positioned just outside the camera viewport via \`Screen::reach() + 28.0f\`:
+
+1. **Dynamic Trickle Stream (\`Spawner::trickle\`):**
+   The trickle interval decays linearly with elapsed time \`t\` down to \`b.spawnFloor\`:
+   \`\`\`cpp
+   float interval = std::max(b.spawnFloor, b.spawnInterval - t * b.spawnRamp) *
+                    level.night.portent().rate;
+   int batch = 1 + int(t / b.batchEvery);
+   \`\`\`
+   Each enemy in the batch is chosen by \`Spawner::pick(level, r, x, y)\`:
+   - \`1.5%\` chance (after \`70s\`): \`EnemyKind::Thief\` treasure goblin.
+   - \`b.localChance\`: A biome-native specialist from \`localFoes(level.biomeUnder(x, y))\`.
+   - \`b.strongChance\`: One of the top 2 most recently unlocked monster tiers.
+   - Otherwise: Uniform draw from \`r.common\`, with an elite promotion roll after \`b.eliteStart\`.
+2. **Named Horde Waves (\`Spawner::horde\`):**
+   Every \`b.hordeEvery\` seconds, the director selects from 6 structured \`WAVE_DEFS\` (\`Bat Swarm\`, \`Wolf Pack\`, \`Bone March\`, \`Grave Tide\`, \`Covenant Host\`, \`Golem Siege\`) and spawns an arc cluster of \`min(b.hordeMax, (b.hordeBase + wave * b.hordeRamp) * def.scale)\` monsters around a shared approach angle.
+3. **Disguised Chest Mimics (\`Spawner::mimics\`):**
+   Seeds dormant \`EnemyKind::Mimic\` ambushes near landmarks.
+4. **Renegade Outlaw Hunting Parties (\`Spawner::renegades\`):**
+   Spawns coordinated bands of \`2..4\` \`Outlaw\` enemies wearing randomized procedural armor palettes (\`outlawVariant\`).
+5. **Named Epithet Champions (\`Spawner::champions\`):**
+   Spawns high-threat miniboss elites assigned procedural titles and rank modifiers via \`Rank.cpp\`.
+6. **Explosive Powder Barrels (\`Spawner::barrel\`):**
+   Places destructible \`Barrel\` hazards every \`20s\` along the player's perimeter.
+7. **Landmark & Timed Bosses (\`Spawner::boss\`):**
+   Every \`b.bossEvery\` seconds, spawns the cycling 3-phase boss (\`Golem\`, \`Lich\`, \`Broodmother\`, \`Reaper\`, \`Titan\`) scaled by \`1.0f + bossCount * b.bossHpStep\`.
+`,
+    mermaidCharts: [
+      {
+        title: 'Night Clock, Shrine Kindling & 7-Stream Spawner Director Pipeline',
+        chart: `
+flowchart TD
+    classDef clock fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef shrine fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef stream fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
+
+    Seed["Night::init(level)<br/>RNG(seed ^ 0x4E494748u) -> Pick Portent Omen (rate, hp, xp)"]:::clock
+    Tick["Night::tick(level) @ 60 Hz<br/>left() = duration - level.time"]:::clock
+    DawnCheck{"left() <= 150s?"}:::clock
+    Daylight["Quadratic Sunrise Ramp<br/>d = clamp(1 - left/150, 0, 1); daylight = d * d"]:::clock
+    StrikeDawn["left() <= 0: Night::strikeDawn()<br/>Heal +30% HP + 9999 Radiant Damage Sweep"]:::clock
+
+    ShrineProx["Player Inside Unlit Shrine Radius?<br/>kindling += DT * kindleRate / KINDLE"]:::shrine
+    Kindle["Night::kindle() @ kindling >= 1.0<br/>offering = true + litBiomesBit + Ring of (8 + 3*lit) Foes @ r=170"]:::shrine
+
+    Spawner["Spawner::tick(level) (7 Concurrent Streams)<br/>Spawn Radius = Screen::reach() + 28px"]:::stream
+    Streams["1. trickle(t)  2. horde(t) (WAVE_DEFS)  3. mimics()<br/>4. renegades(t)  5. champions()  6. barrel()  7. boss()"]:::stream
+
+    Seed --> Tick --> DawnCheck
+    DawnCheck -- "Yes" --> Daylight --> StrikeDawn
+    Tick --> ShrineProx --> Kindle
+    Tick --> Spawner --> Streams
+`,
+      },
+      {
+        title: 'Spawner::pick() Decision Tree & Biome Specialist Routing',
+        chart: `
+flowchart LR
+    classDef roll fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+
+    Start["Spawner::pick(level, roster, x, y)"]:::roll
+    ThiefRoll{"t > 70s &&<br/>chance(0.015)?"}:::roll
+    LocalRoll{"chance(b.localChance)<br/>&& localFoes(biome)?"}:::roll
+    StrongRoll{"chance(b.strongChance)<br/>&& common.size >= 3?"}:::roll
+
+    Thief["EnemyKind::Thief<br/>(Treasure Goblin)"]:::out
+    BiomeFoe["Biome-Native Specialist<br/>localFoes(level.biomeUnder(x, y))"]:::out
+    TopTwo["Top-2 Newest Unlocked Tier<br/>r.common[size - 1 - range(0, 1)]"]:::out
+    Uniform["Uniform Common Pool<br/>+ Elite Promotion Roll (after b.eliteStart)"]:::out
+
+    Start --> ThiefRoll
+    ThiefRoll -- "Yes" --> Thief
+    ThiefRoll -- "No" --> LocalRoll
+    LocalRoll -- "Yes" --> BiomeFoe
+    LocalRoll -- "No" --> StrongRoll
+    StrongRoll -- "Yes" --> TopTwo
+    StrongRoll -- "No" --> Uniform
+`,
+      },
+    ],
+    interactiveComponent: 'director',
+  },
+  {
+    id: 'persistence-codex-balance',
+    title: '22. Persistence, World History LRU, Codex Unlocks & Balance INI',
+    category: 'core',
+    summary: 'How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 8-slot binary map charts, meta-progression bitmasks, and pointer-to-member INI reflection.',
+    sourceFiles: ['src/meta/Saves.cpp', 'src/meta/Codex.cpp', 'src/meta/Balance.cpp', 'src/Game.cpp'],
+    content: `
+### Cross-Platform Persistence & World Chart LRU (\`src/meta/Saves.cpp\`)
+
+All persistent player state in **Mellangan** is managed by \`Saves\` (\`src/meta/Saves.cpp\`), which resolves the OS-native application preference directory via SDL3's \`SDL_GetPrefPath("soulwax", "Mellangan")\` and performs atomic file reads/writes through \`SDL_LoadFile\` and \`SDL_SaveFile\`.
+
+#### Saved Files in the Preference Directory
+- \`world.txt\`: Stores the active \`WorldMode\` (\`classic\`, \`random\`, \`daily\`, or \`custom <12-char-code>\`).
+- \`worlds.txt\`: Maintains a most-recently-used (LRU) table of up to \`HISTORY = 8\` past world codes along with best survival time, total runs, and whether dawn was achieved (\`<code> <best> <runs> <dawn>\`).
+- \`chart-<code>.bin\`: Binary fog-of-war exploration charts for each world code in the 8-slot history.
+- \`codex.txt\`: Human-readable key-value meta-progression ledger managed by \`Codex\`.
+- \`controls.txt\`: Custom keyboard and gamepad bindings.
+
+#### Automatic Binary Chart Garbage Collection
+Whenever a run ends, \`Saves::record(code, time, dawn)\` updates or inserts the world entry at the front of \`history\`. If \`history.size() > HISTORY (8)\`, it automatically deletes the oldest world's binary fog-of-war chart from disk before popping the entry:
+
+\`\`\`cpp
+history.insert(history.begin(), w);
+while (int(history.size()) > HISTORY) {
+  SDL_RemovePath((path + "chart-" + history.back().code + ".bin").c_str());
+  history.pop_back();
+}
+\`\`\`
+
+---
+
+### Meta-Progression & Class Unlocks (\`src/meta/Codex.cpp\`)
+
+\`Codex\` (\`src/meta/Codex.cpp\`) tracks lifetime career statistics (\`runs\`, \`dawns\`, \`kills\`, \`bestTime\`), per-monster kill counts (\`bestiary[ENEMY_COUNT]\`), discovered combinations (\`recipes\`, \`relics\`, \`biomes\`, \`trials\`), and the \`classes\` unlock bitmask.
+
+#### Deterministic Unlock Predicates (\`Codex::recordRun\`)
+At the conclusion of every run (victory or death), \`Codex::recordRun(const Level &level, bool dawn)\` aggregates the run's discoveries and evaluates five milestone unlock conditions for the core hero roster:
+1. **Knight (\`HeroClass::Knight\`):** Unlocked by default (\`bit(HeroClass::Knight)\` is always set in \`Codex::reset()\`).
+2. **Mage (\`HeroClass::Mage\`):** Unlocked upon lighting at least one Shrine (\`level.night.lit > 0\`).
+3. **Rogue (\`HeroClass::Rogue\`):** Unlocked upon surviving at least **5 minutes** (\`level.time >= 300.0f\`).
+4. **Cleric (\`HeroClass::Cleric\`):** Unlocked upon reaching Dawn (\`dawn == true\`) or slaying **250+ enemies** in a single run (\`level.player->kills >= 250\`).
+5. **Warden (\`HeroClass::Warden\`):** Unlocked upon discovering a **Weapon Evolution** during the run (\`level.player->evolutions > 0\`).
+
+---
+
+### Pointer-to-Member INI Reflection (\`src/meta/Balance.cpp\`)
+
+Rather than hardcoding difficulty multipliers or pulling in a heavy configuration library, \`Balance::load\` (\`src/meta/Balance.cpp\`) parses \`assets/balance.ini\` using a zero-overhead C++ **pointer-to-member table** (\`float Balance::*member\`):
+
+\`\`\`cpp
+struct Field {
+  const char *key;
+  float Balance::*member;
+};
+
+const Field FIELDS[] = {
+    {"spawn_interval", &Balance::spawnInterval},
+    {"spawn_ramp",     &Balance::spawnRamp},
+    {"spawn_floor",    &Balance::spawnFloor},
+    {"batch_every",    &Balance::batchEvery},
+    {"enemy_cap",      &Balance::enemyCap},
+    {"horde_every",    &Balance::hordeEvery},
+    // ... 28 total tunable float members
+};
+\`\`\`
+
+#### Two-Layer Section Cascade (\`[all]\` → \`[<difficulty>]\`)
+\`Balance::load(text, tier)\` streams \`assets/balance.ini\` in a single pass:
+- Keys under \`[all]\` establish the baseline tuning across all 28 fields.
+- Keys under the active difficulty section (\`[too_young]\`, \`[not_too_rough]\`, \`[hurt_me_plenty]\`, \`[ultra_violence]\`, or \`[nightmare]\`) selectively override only the fields that differ for that tier via \`this->*f.member = std::strtof(value.c_str(), nullptr)\`.
+- Any unrecognized key triggers a non-fatal \`spdlog::warn("balance: unknown key {}", key)\` diagnostic so designers immediately catch typos during \`--dev\` hot-testing.
+`,
+    mermaidCharts: [
+      {
+        title: 'Saves Preference Directory, 8-World LRU History & Chart Eviction',
+        chart: `
+flowchart LR
+    classDef io fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef file fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef gc fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
+
+    Pref["Saves::open()<br/>SDL_GetPrefPath('soulwax', 'Mellangan')"]:::io
+    Files["Persistent Files<br/>• world.txt (WorldMode + Seed)<br/>• worlds.txt (LRU History <= 8)<br/>• codex.txt (Meta Unlock Ledger)<br/>• chart-<code>.bin (Fog-of-War)"]:::file
+    Record["Saves::record(code, time, dawn)<br/>Move/Insert World at history.begin()"]:::io
+    Evict["history.size() > 8?<br/>SDL_RemovePath('chart-' + back.code + '.bin')<br/>history.pop_back()"]:::gc
+
+    Pref --> Files --> Record --> Evict
+`,
+      },
+      {
+        title: 'Balance::load() Pointer-to-Member INI Reflection Cascade',
+        chart: `
+flowchart TD
+    classDef ini fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef reflect fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    File["assets/balance.ini<br/>[all] Baseline + 5 Difficulty Sections"]:::ini
+    Filter{"section == 'all' ||<br/>section == difficultyName(tier)?"}:::ini
+    Bind["Lookup Key in FIELDS[28]<br/>this->*f.member = strtof(value)"]:::reflect
+    Systems["Consumed by Spawner, Night, Player & Enemy<br/>(spawnInterval, enemyCap, hordeMax, xpGrowth...)"]:::reflect
+
+    File --> Filter -- "Match" --> Bind --> Systems
+`,
+      },
+    ],
+    interactiveComponent: 'director',
+  },
+  {
+    id: 'combat-status-draft',
+    title: '23. Status Bitmasks, 0.5s DoT Ticks, Knockback & Weighted Level-Up Draft',
+    category: 'gameplay',
+    summary: 'Exact math behind Status.hpp afflictions, lossless 0.5-second damage-over-time ticks, immunity bitmasks, and LevelUpMenu weighted card drafting.',
+    sourceFiles: ['src/entity/Status.hpp', 'src/entity/Mob.cpp', 'src/menu/LevelUpMenu.cpp', 'src/entity/pickup/Chest.cpp'],
+    content: `
+### Fixed-Slot Status Afflictions (\`src/entity/Status.hpp\`)
+
+Every \`Mob\` (both \`Player\` and \`Enemy\`) embeds a compact \`StatusEffects\` struct containing a 4-element array \`Slot slots[STATUS_COUNT]\` (\`Burn\`, \`Chill\`, \`Poison\`, \`Marked\`) and a 32-bit immunity mask \`uint32_t immune = 0\`. Because the array is fixed-size and inline, applying or ticking status effects never allocates heap memory.
+
+#### Immunity Bitmasks & Hard Caps (\`StatusEffects::apply\`)
+When a weapon or hazard calls \`status.apply(k, power, duration, source)\`:
+1. **Immunity Check:** If \`immune & (1u << int(k))\` is non-zero (or \`power <= 0\` / \`duration <= 0\`), the affliction is ignored.
+2. **Safety Clamping:**
+   - \`StatusKind::Chill\` power is clamped to **\`0.65f\`** (\`65%\` maximum slow), so \`movement() = 1.0f - power(Chill)\` never freezes a mob below \`35%\` base speed.
+   - \`StatusKind::Marked\` power is clamped to **\`1.0f\`** (\`+100%\` maximum vulnerability), so \`incoming() = 1.0f + power(Marked)\` caps at \`2.0×\` damage amplification.
+   - \`duration\` is clamped to \`60.0f\` seconds.
+3. **Max-Envelope Stacking:** Re-applying an active status takes \`std::max(s.power, power)\` and \`std::max(s.time, duration)\` while updating \`s.source\` for kill-credit attribution.
+
+---
+
+### Lossless 0.5-Second DoT Ticks (\`StatusEffects::tick\`)
+
+Damage-over-time effects (\`Burn\` and \`Poison\`) do not deal tiny sub-point damage on every 60 Hz frame (which would flood floating combat text and audio). Instead, \`StatusEffects::tick(dt, damage)\` accumulates \`e.elapsed += step\` and fires discrete **0.5-second ticks**, plus a **lossless fractional remainder tick** on the exact frame the affliction expires:
+
+\`\`\`cpp
+float step = std::min(dt, e.time);
+e.time -= dt;
+if (k == StatusKind::Burn || k == StatusKind::Poison) {
+  e.elapsed += step;
+  while (e.elapsed >= 0.5f) {
+    e.elapsed -= 0.5f;
+    damage(e.power * 0.5f, e.source);
+  }
+  if (e.time <= 0 && e.elapsed > 0) {
+    damage(e.power * e.elapsed, e.source);
+    e.elapsed = 0;
+  }
+}
+\`\`\`
+
+This guarantees that an affliction with \`power = 10\` and \`duration = 1.3s\` deals two \`5.0\` ticks at \`0.5s\` and \`1.0s\`, followed by an exact \`3.0\` remainder tick at \`1.3s\` (\`13.0\` total damage).
+
+---
+
+### Weighted Level-Up Draft & Bonus 4th Card (\`src/menu/LevelUpMenu.cpp\`)
+
+When the player levels up or opens a \`Chest\` (\`treasure = true\`), \`LevelUpMenu::roll(Game &g, bool treasure)\` builds the draft hand from the global \`UPGRADES\` registry without replacement.
+
+#### 1. Slot Cap Filtering (\`Upgrade::SLOTS\`)
+First, \`LevelUpMenu::roll\` counts how many passive upgrades (\`owned[0]\`) and active weapons (\`owned[1]\`) the player already owns. Any unowned upgrade whose category has already reached \`Upgrade::SLOTS\` is excluded from the pool so the player can only level up existing items in that category.
+
+#### 2. 3× / 2× / 1× Weighted Sampling Without Replacement
+For each of the 3 primary card slots (\`k < 3\`), every eligible upgrade \`u\` in \`pool\` is assigned an integer draft weight:
+
+\`\`\`cpp
+auto weight = [&](const Upgrade *u) {
+  return u->owner ? 3 : (p.hero && p.hero->favours(u->name)) ? 2 : 1;
+};
+\`\`\`
+
+- **\`3× Weight\` (\`u->owner != nullptr\`):** Exclusive class talents belonging to the player's hero class are three times as likely to appear.
+- **\`2× Weight\` (\`p.hero->favours(u->name)\`):** Weapons and passives listed in the hero's 3-item \`affinity[3]\` array are twice as likely to appear, steering builds toward class-synergistic loadouts without forcing rigid predetermination.
+- **\`1× Weight\`:** All other eligible upgrades in the general pool.
+
+#### 3. The Bonus 4th Card Slot (\`MAX_CHOICES = 4\`)
+After drawing up to 3 standard upgrade cards, \`LevelUpMenu::roll\` checks whether a **4th special card** should appear:
+1. **Active Class Skill (\`25%\` chance at \`lvl >= 4\`):** On normal level-ups (\`!treasure\`) once \`p.lvl >= 4\`, if the hero has unlearned class skills (\`skillPool\`), there is a \`25%\` chance to offer a class \`Skill\` card in the 4th slot.
+2. **Weapon Evolution (\`evolveSlot\` on Treasure Chests):** When opening a \`treasure\` chest, if any owned weapon satisfies \`u->canEvolve(p)\` (max weapon level + required catalyst passive), the 4th slot deterministically offers the **Evolution** (\`evolveSlot = count++\`).
+3. **Relic Offering (\`treasure || 3%\` wild roll):** If no Evolution occupied the 4th slot, opening a \`treasure\` chest (or rolling a \`3%\` lucky proc on a normal level-up) offers an unowned \`Relic\` via \`pickRelic(p, g.rng)\`.
+`,
+    mermaidCharts: [
+      {
+        title: 'StatusEffects::apply() Clamping & Lossless 0.5s DoT Tick State Machine',
+        chart: `
+flowchart LR
+    classDef apply fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef tick fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
+    classDef mod fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Apply["StatusEffects::apply(k, power, dur, src)<br/>Check immune & (1u << k)"]:::apply
+    Clamp["Clamp Envelopes<br/>• Chill <= 0.65 (Min 35% Speed)<br/>• Marked <= 1.00 (Max 2.0x Dmg)<br/>• duration <= 60.0s"]:::apply
+    DotTick["StatusEffects::tick(dt) (Burn / Poison)<br/>e.elapsed += min(dt, e.time)"]:::tick
+    HalfSec["While e.elapsed >= 0.5f:<br/>damage(e.power * 0.5f, e.source)"]:::tick
+    Tail["On Expiry (e.time <= 0 && e.elapsed > 0):<br/>Flush Remainder damage(e.power * e.elapsed)"]:::mod
+
+    Apply --> Clamp --> DotTick --> HalfSec --> Tail
+`,
+      },
+      {
+        title: 'LevelUpMenu::roll() 3x/2x/1x Weighted Draft & 4th Bonus Card Resolution',
+        chart: `
+flowchart TD
+    classDef pool fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef weight fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef bonus fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Filter["Filter UPGRADES Registry<br/>u->eligible(p) && (owned || slots < Upgrade::SLOTS)"]:::pool
+    Draw3["Draw 3 Cards Without Replacement<br/>weight(u) = owner ? 3 : hero->favours ? 2 : 1"]:::weight
+    Slot4Check{"Bonus 4th Card Roll<br/>(count < MAX_CHOICES)"}:::bonus
+    SkillCard["Normal Level-Up (lvl >= 4 & 25% Roll)<br/>Offer Unlearned Class Skill"]:::bonus
+    EvolveCard["Treasure Chest + u->canEvolve(p)<br/>Guaranteed Weapon Evolution Card"]:::bonus
+    RelicCard["Treasure Fallback or 3% Wild Roll<br/>Offer Unowned Relic (pickRelic)"]:::bonus
+
+    Filter --> Draw3 --> Slot4Check
+    Slot4Check -- "!treasure && lvl >= 4 (25%)" --> SkillCard
+    Slot4Check -- "treasure && canEvolve" --> EvolveCard
+    Slot4Check -- "treasure || 3% chance" --> RelicCard
+`,
+      },
+    ],
+    interactiveComponent: 'director',
   },
 ];
