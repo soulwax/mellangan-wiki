@@ -1,22 +1,22 @@
 import React, { useState } from 'react';
-import { Database, Plus, Trash2, RotateCcw, Cpu } from 'lucide-react';
+import { Database, Plus, Trash2, RotateCcw } from 'lucide-react';
 
 interface Slot {
   id: number;
   entityName?: string;
   type?: 'Player' | 'Enemy' | 'Orb' | 'Projectile' | 'Gem';
-  hp?: number;
+  byteSize?: number;
   free: boolean;
   nextFree?: number;
 }
 
 const INITIAL_SLOTS: Slot[] = [
-  { id: 0, entityName: 'Player', type: 'Player', hp: 100, free: false },
-  { id: 1, entityName: 'Wolf #12', type: 'Enemy', hp: 45, free: false },
-  { id: 2, entityName: 'Orb (Staff)', type: 'Orb', hp: 10, free: false },
-  { id: 3, entityName: 'Slime #04', type: 'Enemy', hp: 20, free: false },
-  { id: 4, entityName: 'Gem (5 XP)', type: 'Gem', hp: 0, free: false },
-  { id: 5, entityName: 'Bolt (Flame)', type: 'Projectile', hp: 5, free: false },
+  { id: 0, entityName: 'Player', type: 'Player', byteSize: 384, free: false },
+  { id: 1, entityName: 'Wolf #12', type: 'Enemy', byteSize: 368, free: false },
+  { id: 2, entityName: 'Orb (Staff)', type: 'Orb', byteSize: 144, free: false },
+  { id: 3, entityName: 'Slime #04', type: 'Enemy', byteSize: 368, free: false },
+  { id: 4, entityName: 'Gem (5 XP)', type: 'Gem', byteSize: 128, free: false },
+  { id: 5, entityName: 'Bolt (Flame)', type: 'Projectile', byteSize: 160, free: false },
   { id: 6, free: true, nextFree: 7 },
   { id: 7, free: true, nextFree: 8 },
   { id: 8, free: true, nextFree: 9 },
@@ -29,11 +29,13 @@ export const SlabMemoryVisualizer: React.FC = () => {
   const [slots, setSlots] = useState<Slot[]>(INITIAL_SLOTS);
   const [freeHead, setFreeHead] = useState<number>(6);
   const [allocCount, setAllocCount] = useState<number>(6);
+  const [inspectSize, setInspectSize] = useState<number>(368);
 
   const allocate = (type: 'Enemy' | 'Projectile' | 'Gem') => {
     if (freeHead === -1) return;
     const targetId = freeHead;
     const nextFreeId = slots[targetId].nextFree ?? -1;
+    const byteSize = type === 'Enemy' ? 368 : type === 'Projectile' ? 160 : 128;
 
     setSlots((prev) =>
       prev.map((s) => {
@@ -42,7 +44,7 @@ export const SlabMemoryVisualizer: React.FC = () => {
             id: targetId,
             entityName: `${type} #${Math.floor(10 + Math.random() * 89)}`,
             type,
-            hp: type === 'Enemy' ? 35 : 1,
+            byteSize,
             free: false,
           };
         }
@@ -55,7 +57,7 @@ export const SlabMemoryVisualizer: React.FC = () => {
   };
 
   const freeSlot = (id: number) => {
-    if (id === 0) return; // protect player
+    if (id === 0) return;
     setSlots((prev) =>
       prev.map((s) => {
         if (s.id === id) {
@@ -78,6 +80,11 @@ export const SlabMemoryVisualizer: React.FC = () => {
     setAllocCount(6);
   };
 
+  const sizeClass = Math.max(1, (inspectSize + 15) >> 4);
+  const slotStride = sizeClass << 4;
+  const nodesPer64KBSlab = Math.floor(65536 / slotStride);
+  const usesSlab = sizeClass < 32;
+
   const typeColors: Record<string, string> = {
     Player: '#f6c324',
     Enemy: '#ef4444',
@@ -92,18 +99,18 @@ export const SlabMemoryVisualizer: React.FC = () => {
         <div className="flex items-center gap-2">
           <Database className="w-4 h-4 text-arcane-400" />
           <span className="font-mono text-sm font-semibold text-slate-200">
-            Pool.c Slab Allocator Architecture
+            Pool.c 32-Class Slab Allocator &amp; Intrusive Free List
           </span>
           <span className="text-[11px] px-2 py-0.5 rounded bg-dark-750 text-slate-400 font-mono">
-            Zero Heap Allocations
+            GRAIN_SHIFT = 4 (16B)
           </span>
         </div>
         <div className="flex items-center gap-2">
           <div className="px-2.5 py-1 rounded bg-dark-800 border border-dark-700 text-xs font-mono text-slate-300">
-            Active: <span className="text-gold-400 font-bold">{allocCount}</span> / 12 slots
+            Active: <span className="text-gold-400 font-bold">{allocCount}</span> / 12 nodes
           </div>
           <div className="px-2.5 py-1 rounded bg-dark-800 border border-dark-700 text-xs font-mono text-slate-300">
-            Free Head: <span className="text-arcane-400 font-bold">{freeHead === -1 ? 'FULL' : `#${freeHead}`}</span>
+            freeList[c]: <span className="text-arcane-400 font-bold">{freeHead === -1 ? 'NULL (refill)' : `Node #${freeHead}`}</span>
           </div>
           <button
             onClick={resetSlab}
@@ -115,38 +122,80 @@ export const SlabMemoryVisualizer: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-6">
-        <p className="text-sm text-slate-300 mb-4 leading-relaxed">
-          Mellangan avoids standard <code className="text-gold-400">malloc</code>/<code className="text-gold-400">free</code> overhead and heap fragmentation during gameplay using a custom 64-byte slab allocator (<code className="text-arcane-400">extern/entt</code> & <code className="text-arcane-400">src/entity/Pool.c</code>). Slots are recycled via an intrusive singly-linked free list with guaranteed <code className="text-emerald-400">O(1)</code> allocation and reclamation.
-        </p>
+      <div className="p-6 space-y-6">
+        <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center font-mono text-xs">
+          <div className="lg:col-span-5 space-y-2">
+            <div className="text-slate-200 font-bold">
+              Size-Class Quantizer: <code className="text-gold-300">classOf(size) = (size + 15) &gt;&gt; 4</code>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-slate-400">sizeof(Derived):</span>
+              <input
+                type="range"
+                min={16}
+                max={560}
+                step={8}
+                value={inspectSize}
+                onChange={(e) => setInspectSize(Number(e.target.value))}
+                className="flex-1 accent-gold-400"
+              />
+              <span className="text-gold-300 font-bold w-14 text-right">{inspectSize} B</span>
+            </div>
+          </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <span className="text-xs text-slate-400 font-mono mr-2">Simulate Spawn:</span>
+          <div className="lg:col-span-7 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="p-2 rounded bg-dark-900 border border-dark-750">
+              <div className="text-[10px] text-slate-500">Size Class c</div>
+              <div className="text-sm font-bold text-purple-300 mt-0.5">
+                freeList[{sizeClass}]
+              </div>
+            </div>
+            <div className="p-2 rounded bg-dark-900 border border-dark-750">
+              <div className="text-[10px] text-slate-500">Aligned Stride</div>
+              <div className="text-sm font-bold text-emerald-300 mt-0.5">
+                {slotStride} Bytes
+              </div>
+            </div>
+            <div className="p-2 rounded bg-dark-900 border border-dark-750">
+              <div className="text-[10px] text-slate-500">Nodes / 64KB Slab</div>
+              <div className="text-sm font-bold text-sky-300 mt-0.5">
+                {usesSlab ? `${nodesPer64KBSlab} Nodes` : 'Fallback'}
+              </div>
+            </div>
+            <div className="p-2 rounded bg-dark-900 border border-dark-750">
+              <div className="text-[10px] text-slate-500">Routing Path</div>
+              <div className={`text-sm font-bold mt-0.5 ${usesSlab ? 'text-gold-300' : 'text-rose-400'}`}>
+                {usesSlab ? 'O(1) Slab Pool' : 'malloc() >= 512B'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-400 font-mono mr-2">Simulate <code className="text-gold-300">pool_alloc(size)</code>:</span>
           <button
             onClick={() => allocate('Enemy')}
             disabled={freeHead === -1}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 text-red-300 text-xs font-mono transition-all disabled:opacity-30 disabled:pointer-events-none"
           >
-            <Plus className="w-3.5 h-3.5" /> Spawn Enemy (O(1))
+            <Plus className="w-3.5 h-3.5" /> new Enemy (368B → Class 23)
           </button>
           <button
             onClick={() => allocate('Projectile')}
             disabled={freeHead === -1}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-950/40 hover:bg-sky-900/60 border border-sky-500/40 text-sky-300 text-xs font-mono transition-all disabled:opacity-30 disabled:pointer-events-none"
           >
-            <Plus className="w-3.5 h-3.5" /> Fire Bolt (O(1))
+            <Plus className="w-3.5 h-3.5" /> new RecipeShot (160B → Class 10)
           </button>
           <button
             onClick={() => allocate('Gem')}
             disabled={freeHead === -1}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 text-xs font-mono transition-all disabled:opacity-30 disabled:pointer-events-none"
           >
-            <Plus className="w-3.5 h-3.5" /> Drop Gem (O(1))
+            <Plus className="w-3.5 h-3.5" /> new Gem (128B → Class 8)
           </button>
         </div>
 
-        {/* Slab Memory Slots Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {slots.map((slot) => {
             const isHead = slot.id === freeHead;
@@ -163,13 +212,13 @@ export const SlabMemoryVisualizer: React.FC = () => {
                 }`}
               >
                 <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-slate-400 font-semibold">Slot #{slot.id}</span>
+                  <span className="text-slate-400 font-semibold">Node #{slot.id}</span>
                   {slot.free ? (
                     <span className="text-[10px] text-slate-500 uppercase">FREE</span>
                   ) : (
                     <button
                       onClick={() => freeSlot(slot.id)}
-                      title="Deallocate entity"
+                      title="pool_free(p, sizeof(Derived))"
                       className="text-slate-400 hover:text-red-400 transition-colors p-0.5"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -181,11 +230,11 @@ export const SlabMemoryVisualizer: React.FC = () => {
                   <div className="text-center py-2">
                     {isHead && (
                       <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-arcane-500/20 text-arcane-300 border border-arcane-500/40 mb-1">
-                        HEAD
+                        freeList[c]
                       </span>
                     )}
                     <div className="text-[11px] font-mono text-slate-500">
-                      Next → {slot.nextFree === -1 ? 'NULL' : `#${slot.nextFree}`}
+                      n-&gt;next = {slot.nextFree === -1 ? 'NULL' : `#${slot.nextFree}`}
                     </div>
                   </div>
                 ) : (
@@ -209,8 +258,8 @@ export const SlabMemoryVisualizer: React.FC = () => {
                 )}
 
                 <div className="text-[10px] font-mono text-slate-500 border-t border-dark-750/60 pt-1 flex justify-between">
-                  <span>64 bytes</span>
-                  <span>{slot.free ? 'Recycled' : 'Active'}</span>
+                  <span>{slot.byteSize ? `${slot.byteSize}B` : '0B hdr'}</span>
+                  <span>{slot.free ? 'Intrusive' : 'Allocated'}</span>
                 </div>
               </div>
             );
@@ -220,4 +269,3 @@ export const SlabMemoryVisualizer: React.FC = () => {
     </div>
   );
 };
-
