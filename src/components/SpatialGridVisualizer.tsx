@@ -428,3 +428,4 @@ export const SpatialGridVisualizer: React.FC = () => {
     </div>
   );
 };
+
