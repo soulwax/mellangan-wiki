@@ -205,7 +205,7 @@ void radixSort(std::vector<uint64_t> &a, std::vector<uint64_t> &tmp) {
       {
         title: '64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture',
         chart: `
-flowchart LR
+flowchart TD
     classDef key fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef pass fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef draw fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -440,7 +440,7 @@ sequenceDiagram
       {
         title: '4-Barrier Race-Free Crowd Separation Architecture',
         chart: `
-flowchart LR
+flowchart TD
     classDef b1 fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef b2 fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef b3 fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -843,7 +843,7 @@ Every \`RecipeWeapon\` automatically generates its 5-level upgrade descriptions 
       {
         title: 'Combinatorial RecipeWeapon Dispatch & Payload Pipeline',
         chart: `
-flowchart LR
+flowchart TD
     classDef rec fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef form fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef pay fill:#181524,stroke:#ec4899,stroke-width:2px,color:#e2e8f0;
@@ -922,7 +922,7 @@ stateDiagram-v2
       {
         title: 'Enemy Damage, Status Affliction & Elite Trait Pipeline',
         chart: `
-flowchart LR
+flowchart TD
     classDef hit fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef stat fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef trait fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
@@ -1275,7 +1275,7 @@ Add the \`EnemyType\` row (name, sprite, radius, speed, HP, contact damage, XP v
       {
         title: 'Thread-Safe Monster AI Intent vs Main-Thread Action Contract',
         chart: `
-flowchart LR
+flowchart TD
     classDef worker fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef main fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
     classDef danger fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
@@ -1391,7 +1391,7 @@ void MyHero::cast(Mob &p) const {
       {
         title: 'Hero Class, Active Skill & Renegade Mirror-Symmetry Architecture',
         chart: `
-flowchart LR
+flowchart TD
     classDef hero fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef mob fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef target fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -1843,7 +1843,7 @@ flowchart TD
       {
         title: 'Morphological Patch Smoothing (solidCore -> smoothPatch) & 4-Bit RIM[16] Auto-Tiler',
         chart: `
-flowchart LR
+flowchart TD
     classDef raw fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
     classDef core fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef rim fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -2142,7 +2142,7 @@ flowchart TD
       {
         title: 'Spawner::pick() Decision Tree & Biome Specialist Routing',
         chart: `
-flowchart LR
+flowchart TD
     classDef roll fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef out fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
 
@@ -2244,7 +2244,7 @@ const Field FIELDS[] = {
       {
         title: 'Saves Preference Directory, 8-World LRU History & Chart Eviction',
         chart: `
-flowchart LR
+flowchart TD
     classDef io fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
     classDef file fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef gc fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
@@ -2351,7 +2351,7 @@ After drawing up to 3 standard upgrade cards, \`LevelUpMenu::roll\` checks wheth
       {
         title: 'StatusEffects::apply() Clamping & Lossless 0.5s DoT Tick State Machine',
         chart: `
-flowchart LR
+flowchart TD
     classDef apply fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef tick fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
     classDef mod fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
