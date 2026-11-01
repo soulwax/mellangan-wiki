@@ -1,15 +1,16 @@
-import React, { useState, useMemo } from 'react';
-import { WIKI_SECTIONS } from './data/wikiContent';
-import { MermaidChart } from './components/MermaidChart';
-import { InteractiveGameLoop } from './components/InteractiveGameLoop';
-import { SlabMemoryVisualizer } from './components/SlabMemoryVisualizer';
-import { BiomeNoiseMap } from './components/BiomeNoiseMap';
-import { SpatialGridVisualizer } from './components/SpatialGridVisualizer';
-import { RadixDepthSorter } from './components/RadixDepthSorter';
-import { OuroborosBitLab } from './components/OuroborosBitLab';
-import { RecipeArsenalExplorer } from './components/RecipeArsenalExplorer';
-import { ContributorTutorialWizard } from './components/ContributorTutorialWizard';
-import { PixelShaderStudio } from './components/PixelShaderStudio';
+import React, { useState, useMemo } from "react";
+import { WIKI_SECTIONS } from "./data/wikiContent";
+import { MermaidChart } from "./components/MermaidChart";
+import { InteractiveGameLoop } from "./components/InteractiveGameLoop";
+import { SlabMemoryVisualizer } from "./components/SlabMemoryVisualizer";
+import { BiomeNoiseMap } from "./components/BiomeNoiseMap";
+import { SpatialGridVisualizer } from "./components/SpatialGridVisualizer";
+import { RadixDepthSorter } from "./components/RadixDepthSorter";
+import { OuroborosBitLab } from "./components/OuroborosBitLab";
+import { RecipeArsenalExplorer } from "./components/RecipeArsenalExplorer";
+import { ContributorTutorialWizard } from "./components/ContributorTutorialWizard";
+import { PixelShaderStudio } from "./components/PixelShaderStudio";
+import { TerrainConstructionLab } from "./components/TerrainConstructionLab";
 import {
   Cpu,
   Layers,
@@ -23,26 +24,44 @@ import {
   Terminal,
   FileCode2,
   Wrench,
-} from 'lucide-react';
+} from "lucide-react";
 
-const CATEGORY_MAP: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-  core: { label: 'Core & Telemetry', icon: Cpu, color: 'text-amber-400' },
-  graphics: { label: 'Graphics & Radix', icon: Layers, color: 'text-emerald-400' },
-  simulation: { label: 'Memory, CSR & AI', icon: Activity, color: 'text-purple-400' },
-  world: { label: 'World & Atmosphere', icon: Compass, color: 'text-sky-400' },
-  gameplay: { label: 'Arsenal & Combat', icon: Swords, color: 'text-rose-400' },
-  contribute: { label: 'Contribute & Tutorials', icon: Wrench, color: 'text-gold-400' },
+const CATEGORY_MAP: Record<
+  string,
+  { label: string; icon: React.ElementType; color: string }
+> = {
+  core: { label: "Core & Telemetry", icon: Cpu, color: "text-amber-400" },
+  graphics: {
+    label: "Graphics & Radix",
+    icon: Layers,
+    color: "text-emerald-400",
+  },
+  simulation: {
+    label: "Memory, CSR & AI",
+    icon: Activity,
+    color: "text-purple-400",
+  },
+  world: { label: "World & Atmosphere", icon: Compass, color: "text-sky-400" },
+  gameplay: { label: "Arsenal & Combat", icon: Swords, color: "text-rose-400" },
+  contribute: {
+    label: "Contribute & Tutorials",
+    icon: Wrench,
+    color: "text-gold-400",
+  },
 };
 
 export const App: React.FC = () => {
-  const [activeSectionId, setActiveSectionId] = useState<string>(WIKI_SECTIONS[0].id);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [activeSectionId, setActiveSectionId] = useState<string>(
+    WIKI_SECTIONS[0].id,
+  );
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
   const filteredSections = useMemo(() => {
     return WIKI_SECTIONS.filter((sec) => {
-      const matchesCategory = selectedCategory === 'all' || sec.category === selectedCategory;
+      const matchesCategory =
+        selectedCategory === "all" || sec.category === selectedCategory;
       const q = searchQuery.toLowerCase();
       const matchesSearch =
         !q ||
@@ -55,12 +74,19 @@ export const App: React.FC = () => {
   }, [searchQuery, selectedCategory]);
 
   const activeSection = useMemo(() => {
-    return WIKI_SECTIONS.find((s) => s.id === activeSectionId) || WIKI_SECTIONS[0];
+    return (
+      WIKI_SECTIONS.find((s) => s.id === activeSectionId) || WIKI_SECTIONS[0]
+    );
   }, [activeSectionId]);
 
-  const currentIndex = WIKI_SECTIONS.findIndex((s) => s.id === activeSection.id);
+  const currentIndex = WIKI_SECTIONS.findIndex(
+    (s) => s.id === activeSection.id,
+  );
   const prevSection = currentIndex > 0 ? WIKI_SECTIONS[currentIndex - 1] : null;
-  const nextSection = currentIndex < WIKI_SECTIONS.length - 1 ? WIKI_SECTIONS[currentIndex + 1] : null;
+  const nextSection =
+    currentIndex < WIKI_SECTIONS.length - 1
+      ? WIKI_SECTIONS[currentIndex + 1]
+      : null;
 
   const diagrams = useMemo(() => {
     if (activeSection.mermaidCharts && activeSection.mermaidCharts.length > 0) {
@@ -80,7 +106,11 @@ export const App: React.FC = () => {
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="lg:hidden p-2 rounded-lg bg-dark-900 border border-dark-750 text-slate-300"
           >
-            {isMobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            {isMobileMenuOpen ? (
+              <X className="w-4 h-4" />
+            ) : (
+              <Menu className="w-4 h-4" />
+            )}
           </button>
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-gold-400 to-amber-600 flex items-center justify-center shadow-lg shadow-gold-500/20 font-display font-black text-dark-950 text-lg">
@@ -96,7 +126,8 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <p className="text-[10px] font-mono text-slate-400 hidden sm:block">
-                Systems Architecture, Bit-Level Algorithms &amp; Interactive Labs
+                Systems Architecture, Bit-Level Algorithms &amp; Interactive
+                Labs
               </p>
             </div>
           </div>
@@ -105,8 +136,8 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-3 flex-1 max-w-lg justify-end">
           <button
             onClick={() => {
-              setSelectedCategory('contribute');
-              setActiveSectionId('contribute-basics');
+              setSelectedCategory("contribute");
+              setActiveSectionId("contribute-basics");
             }}
             className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/25 border border-gold-500/40 text-xs font-mono text-gold-300 font-semibold transition-colors shrink-0"
           >
@@ -146,7 +177,9 @@ export const App: React.FC = () => {
       <div className="flex-1 flex max-w-[1720px] w-full mx-auto">
         <aside
           className={`fixed lg:sticky top-[61px] z-30 w-80 h-[calc(100vh-61px)] bg-dark-950/95 lg:bg-transparent border-r border-dark-800/80 p-4 overflow-y-auto transition-transform duration-200 ${
-            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+            isMobileMenuOpen
+              ? "translate-x-0"
+              : "-translate-x-full lg:translate-x-0"
           }`}
         >
           <div className="mb-4">
@@ -155,11 +188,11 @@ export const App: React.FC = () => {
             </div>
             <div className="flex flex-wrap gap-1">
               <button
-                onClick={() => setSelectedCategory('all')}
+                onClick={() => setSelectedCategory("all")}
                 className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
-                  selectedCategory === 'all'
-                    ? 'bg-gold-500/20 text-gold-300 border border-gold-500/50'
-                    : 'bg-dark-900 hover:bg-dark-850 text-slate-400 border border-transparent'
+                  selectedCategory === "all"
+                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/50"
+                    : "bg-dark-900 hover:bg-dark-850 text-slate-400 border border-transparent"
                 }`}
               >
                 All ({WIKI_SECTIONS.length})
@@ -170,11 +203,11 @@ export const App: React.FC = () => {
                   onClick={() => setSelectedCategory(key)}
                   className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
                     selectedCategory === key
-                      ? 'bg-dark-800 text-slate-200 border border-dark-600'
-                      : 'bg-dark-900/60 hover:bg-dark-850 text-slate-400 border border-transparent'
+                      ? "bg-dark-800 text-slate-200 border border-dark-600"
+                      : "bg-dark-900/60 hover:bg-dark-850 text-slate-400 border border-transparent"
                   }`}
                 >
-                  {item.label.split(' ')[0]}
+                  {item.label.split(" ")[0]}
                 </button>
               ))}
             </div>
@@ -186,7 +219,8 @@ export const App: React.FC = () => {
             </div>
             {filteredSections.map((section) => {
               const isActive = section.id === activeSection.id;
-              const catInfo = CATEGORY_MAP[section.category] || CATEGORY_MAP.core;
+              const catInfo =
+                CATEGORY_MAP[section.category] || CATEGORY_MAP.core;
               const Icon = catInfo.icon;
               return (
                 <button
@@ -197,14 +231,20 @@ export const App: React.FC = () => {
                   }}
                   className={`w-full text-left p-2.5 rounded-lg border transition-all duration-150 flex items-start gap-2.5 ${
                     isActive
-                      ? 'bg-dark-850 border-gold-500/60 text-slate-100 shadow-md shadow-gold-500/5'
-                      : 'bg-dark-900/30 hover:bg-dark-900 border-transparent text-slate-400 hover:text-slate-200'
+                      ? "bg-dark-850 border-gold-500/60 text-slate-100 shadow-md shadow-gold-500/5"
+                      : "bg-dark-900/30 hover:bg-dark-900 border-transparent text-slate-400 hover:text-slate-200"
                   }`}
                 >
-                  <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isActive ? catInfo.color : 'text-slate-500'}`} />
+                  <Icon
+                    className={`w-4 h-4 mt-0.5 shrink-0 ${isActive ? catInfo.color : "text-slate-500"}`}
+                  />
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium truncate">{section.title}</div>
-                    <div className="text-[10px] text-slate-500 truncate mt-0.5 font-mono">{section.summary}</div>
+                    <div className="text-xs font-medium truncate">
+                      {section.title}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
+                      {section.summary}
+                    </div>
                   </div>
                 </button>
               );
@@ -217,11 +257,26 @@ export const App: React.FC = () => {
               <span>Engine Telemetry Matrix</span>
             </div>
             <div className="text-[11px] text-slate-400 space-y-1 font-mono">
-              <div>Allocator: <span className="text-slate-200">Pool.c (32 Classes, 16B)</span></div>
-              <div>Spatial: <span className="text-emerald-400">CSR Prefix-Sum Grid</span></div>
-              <div>Depth Sort: <span className="text-sky-400">3-Pass 12b Radix O(3N)</span></div>
-              <div>AI Pool: <span className="text-purple-400">4-Barrier Atomic Stride</span></div>
-              <div>Audio: <span className="text-amber-300">SDL3 32-Voice LRU Stream</span></div>
+              <div>
+                Allocator:{" "}
+                <span className="text-slate-200">Pool.c (32 Classes, 16B)</span>
+              </div>
+              <div>
+                Spatial:{" "}
+                <span className="text-emerald-400">CSR Prefix-Sum Grid</span>
+              </div>
+              <div>
+                Depth Sort:{" "}
+                <span className="text-sky-400">3-Pass 12b Radix O(3N)</span>
+              </div>
+              <div>
+                AI Pool:{" "}
+                <span className="text-purple-400">4-Barrier Atomic Stride</span>
+              </div>
+              <div>
+                Audio:{" "}
+                <span className="text-amber-300">SDL3 32-Voice LRU Stream</span>
+              </div>
             </div>
           </div>
         </aside>
@@ -230,9 +285,13 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400 mb-3">
             <span>Wiki</span>
             <ChevronRight className="w-3 h-3 text-slate-600" />
-            <span className="uppercase text-gold-400 font-semibold">{CATEGORY_MAP[activeSection.category]?.label}</span>
+            <span className="uppercase text-gold-400 font-semibold">
+              {CATEGORY_MAP[activeSection.category]?.label}
+            </span>
             <ChevronRight className="w-3 h-3 text-slate-600" />
-            <span className="text-slate-200 truncate">{activeSection.title}</span>
+            <span className="text-slate-200 truncate">
+              {activeSection.title}
+            </span>
           </div>
 
           <div className="border-b border-dark-800 pb-5 mb-6">
@@ -261,15 +320,34 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {activeSection.interactiveComponent === 'gameloop' && <InteractiveGameLoop />}
-          {activeSection.interactiveComponent === 'radix' && <RadixDepthSorter />}
-          {activeSection.interactiveComponent === 'slab' && <SlabMemoryVisualizer />}
-          {activeSection.interactiveComponent === 'spatial' && <SpatialGridVisualizer />}
-          {activeSection.interactiveComponent === 'ouroboros' && <OuroborosBitLab />}
-          {activeSection.interactiveComponent === 'noise' && <BiomeNoiseMap />}
-          {activeSection.interactiveComponent === 'arsenal' && <RecipeArsenalExplorer />}
-          {activeSection.interactiveComponent === 'contribute' && <ContributorTutorialWizard />}
-          {activeSection.interactiveComponent === 'pixelshader' && <PixelShaderStudio />}
+          {activeSection.interactiveComponent === "gameloop" && (
+            <InteractiveGameLoop />
+          )}
+          {activeSection.interactiveComponent === "radix" && (
+            <RadixDepthSorter />
+          )}
+          {activeSection.interactiveComponent === "slab" && (
+            <SlabMemoryVisualizer />
+          )}
+          {activeSection.interactiveComponent === "spatial" && (
+            <SpatialGridVisualizer />
+          )}
+          {activeSection.interactiveComponent === "ouroboros" && (
+            <OuroborosBitLab />
+          )}
+          {activeSection.interactiveComponent === "noise" && <BiomeNoiseMap />}
+          {activeSection.interactiveComponent === "arsenal" && (
+            <RecipeArsenalExplorer />
+          )}
+          {activeSection.interactiveComponent === "contribute" && (
+            <ContributorTutorialWizard />
+          )}
+          {activeSection.interactiveComponent === "pixelshader" && (
+            <PixelShaderStudio />
+          )}
+          {activeSection.interactiveComponent === "terrain" && (
+            <TerrainConstructionLab />
+          )}
 
           {diagrams.map((d, idx) => (
             <MermaidChart
@@ -285,16 +363,45 @@ export const App: React.FC = () => {
               className="space-y-4"
               dangerouslySetInnerHTML={{
                 __html: activeSection.content
-                  .replace(/```cpp\n([\s\S]*?)```/g, (_m, code) => `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
-                  .replace(/```c\n([\s\S]*?)```/g, (_m, code) => `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`)
+                  .replace(
+                    /```cpp\n([\s\S]*?)```/g,
+                    (_m, code) =>
+                      `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>`,
+                  )
+                  .replace(
+                    /```c\n([\s\S]*?)```/g,
+                    (_m, code) =>
+                      `<pre class="p-4 my-4 rounded-xl bg-dark-900 border border-dark-750 overflow-x-auto text-xs font-mono text-slate-200 leading-relaxed">${code.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>`,
+                  )
                   .replace(/\n---\n/g, '<hr class="border-dark-800 my-6" />')
-                  .replace(/##### (.*?)\n/g, '<h5 class="text-sm font-bold text-emerald-400 mt-4 mb-1.5 font-mono">$1</h5>')
-                  .replace(/### (.*?)\n/g, '<h3 class="text-xl font-bold text-slate-100 mt-6 mb-3 font-display">$1</h3>')
-                  .replace(/#### (.*?)\n/g, '<h4 class="text-base font-bold text-gold-400 mt-4 mb-2">$1</h4>')
-                  .replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>')
-                  .replace(/\*(.*?)\*/g, '<em class="text-slate-300 italic">$1</em>')
-                  .replace(/`([^`\n]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-dark-900 text-gold-300 border border-dark-750 text-xs font-mono">$1</code>')
-                  .replace(/\n\n/g, '<p class="text-slate-300 text-sm leading-relaxed my-3"></p>'),
+                  .replace(
+                    /##### (.*?)\n/g,
+                    '<h5 class="text-sm font-bold text-emerald-400 mt-4 mb-1.5 font-mono">$1</h5>',
+                  )
+                  .replace(
+                    /### (.*?)\n/g,
+                    '<h3 class="text-xl font-bold text-slate-100 mt-6 mb-3 font-display">$1</h3>',
+                  )
+                  .replace(
+                    /#### (.*?)\n/g,
+                    '<h4 class="text-base font-bold text-gold-400 mt-4 mb-2">$1</h4>',
+                  )
+                  .replace(
+                    /\*\*(.*?)\*\*/g,
+                    '<strong class="text-slate-100 font-semibold">$1</strong>',
+                  )
+                  .replace(
+                    /\*(.*?)\*/g,
+                    '<em class="text-slate-300 italic">$1</em>',
+                  )
+                  .replace(
+                    /`([^`\n]+)`/g,
+                    '<code class="px-1.5 py-0.5 rounded bg-dark-900 text-gold-300 border border-dark-750 text-xs font-mono">$1</code>',
+                  )
+                  .replace(
+                    /\n\n/g,
+                    '<p class="text-slate-300 text-sm leading-relaxed my-3"></p>',
+                  ),
               }}
             />
           </article>
@@ -334,9 +441,13 @@ export const App: React.FC = () => {
       </div>
 
       <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono">
-        <p>Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT • SDL3</p>
+        <p>
+          Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT •
+          SDL3
+        </p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 18 Chapters • 36 Architecture Diagrams • 9 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 19
+          Chapters • 38 Architecture Diagrams • 10 Interactive Simulators
         </p>
       </footer>
     </div>
