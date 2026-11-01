@@ -11,6 +11,7 @@ import { RecipeArsenalExplorer } from "./components/RecipeArsenalExplorer";
 import { ContributorTutorialWizard } from "./components/ContributorTutorialWizard";
 import { PixelShaderStudio } from "./components/PixelShaderStudio";
 import { TerrainConstructionLab } from "./components/TerrainConstructionLab";
+import { RendererPipelineInspector } from "./components/RendererPipelineInspector";
 import {
   Cpu,
   Layers,
@@ -348,6 +349,9 @@ export const App: React.FC = () => {
           {activeSection.interactiveComponent === "terrain" && (
             <TerrainConstructionLab />
           )}
+          {activeSection.interactiveComponent === "renderer" && (
+            <RendererPipelineInspector />
+          )}
 
           {diagrams.map((d, idx) => (
             <MermaidChart
@@ -446,8 +450,8 @@ export const App: React.FC = () => {
           SDL3
         </p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 19
-          Chapters • 38 Architecture Diagrams • 10 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • 20
+          Chapters • 40 Architecture Diagrams • 11 Interactive Simulators
         </p>
       </footer>
     </div>
