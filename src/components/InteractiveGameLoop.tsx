@@ -202,3 +202,4 @@ export const InteractiveGameLoop: React.FC = () => {
     </div>
   );
 };
+
