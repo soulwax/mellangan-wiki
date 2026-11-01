@@ -12,7 +12,7 @@ export interface WikiSection {
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai' | 'loot';
+  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai' | 'loot' | 'gearevents';
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -2852,5 +2852,288 @@ flowchart TD
       },
     ],
     interactiveComponent: 'loot',
+  },
+  {
+    id: 'paper-doll-gear-combat',
+    title: '26. Paper-Doll Inventory (I), Reversible PlayerGear, ItemStats Combat Hooks & Loot Label Stacker',
+    category: 'gameplay',
+    summary: 'How the 37-slot InventoryMenu (5 paper-doll slots + 8x4 bag), reversible applyItem(±1) stat & upgrade-level accounting, (1-r)² quadratic DoT resistance, Enemy::hurt/onHit combat pipeline, and 12-pass Hud::lootLabels() AABB stacker operate.',
+    sourceFiles: [
+      'src/menu/InventoryMenu.cpp',
+      'src/entity/PlayerGear.cpp',
+      'src/item/loot/Equip.cpp',
+      'src/entity/ItemStats.hpp',
+      'src/entity/enemy/Enemy.cpp',
+      'src/gui/Tooltip.cpp',
+      'src/gui/Hud.cpp',
+    ],
+    content: `
+### 1. The 37-Slot Paper-Doll Inventory (\`src/menu/InventoryMenu.cpp\`)
+
+Pressing **\`I\`** (or \`Tab\` when configured) opens \`InventoryMenu\`, a full paper-doll equipment and bag interface built around \`SLOTS = GEAR + Player::BAG\` (\`5 + 32 = 37\` addressable slots):
+
+- **Left Paper-Doll Column (\`slot 0..4\`):**
+  1. \`GearWeapon (0)\`: Main-hand weapons (\`Slot::Weapon\`) that also grant or level up a passive \`UpgradeId\` (\`item.def().grants\`).
+  2. \`GearOffhand (1)\`: Shields, bucklers, tomes, lanterns, and thorny totems (\`Slot::Offhand\`).
+  3. \`GearArmour (2)\`: Tunics, mail, coats, and plate (\`Slot::Armour\`).
+  4. \`GearCharm (3)\` & \`GearCharm2 (4)\`: Dual charm slots (\`Slot::Charm\`). \`Player::equip(bagIndex)\` automatically routes a newly equipped charm to \`GearCharm2\` whenever \`worn[GearCharm]\` is occupied and \`!worn[GearCharm2]\`:
+     \`\`\`cpp
+     GearSlot slot = gearSlotFor(in.def().slot);
+     if (slot == GearCharm && worn[GearCharm] && !worn[GearCharm2])
+         slot = GearCharm2;
+     \`\`\`
+- **Center Hero & Live Stat Readout:** Renders the animated hero sprite at \`2×\` scale above 5 live totals (\`Health\`, \`Armour\`, \`Power %\`, \`Speed %\`, \`Magic Find %\`), plus active \`Potion\` (\`Q\`), \`Gold\`, and \`Scrap\` counters.
+- **Right \`8 × 4\` Bag Grid (\`slot 5..36\`, \`COLS = 8, ROWS = 4\`):**
+  - **2D Spatial D-Pad Navigation (\`InventoryMenu::move\`):** Evaluates candidate slot centroids \`(sx, sy)\` along the input direction vector \`(dx, dy)\` and selects the slot minimizing \`along + perp * 2.5f\`, seamlessly crossing between the paper-doll column and the \`8 × 4\` bag grid.
+  - **Direct Manipulation:** \`Enter / Space / Left-Click\` equips a bag item or unequips a paper-doll slot back into the bag; \`X / Right-Click\` drops the selected item onto the ground via \`ItemDrop::drop(level, x, y, out)\`.
+
+---
+
+### 2. Reversible \`applyItem(±1)\` & \`gearLevels[slot]\` Accounting (\`Equip.cpp\`, \`PlayerGear.cpp\`)
+
+Equipping and unequipping items in real time without floating-point drift or permanent upgrade-level corruption requires strict **signed reversibility**:
+
+1. **Signed Stat Application (\`applyItem(Mob &m, const Item &item, int sign)\` in \`src/item/loot/Equip.cpp\`):**
+   Every implicit base stat (\`base.stat1\`, \`base.stat2\`), rolled affix (\`item.rolls[0..affixCount-1]\`), and Night-Touched curse (\`item.curse\`) is routed through \`addStat(m, stat, val * sign)\` where \`sign = +1\` in \`Player::wear()\` and \`sign = -1\` in \`Player::shed()\`:
+   \`\`\`cpp
+   void Player::wear(GearSlot slot, const Item &item) {
+       if (!item) return;
+       applyItem(*this, item, +1);
+       UpgradeId id = item.def().grants;
+       if (id != UpgradeId::Count)
+           if (Upgrade *up = findUpgrade(id)) {
+               int before = up->level;
+               int target = std::min<int>(item.tier + 1, Upgrade::MAX_LEVEL);
+               while (up->level < target) up->levelUp();
+               gearLevels[slot] = static_cast<uint8_t>(up->level - before);
+           }
+   }
+   \`\`\`
+2. **Exact Upgrade-Level Delta Tracking (\`gearLevels[5]\`):**
+   - A weapon base specifies \`UpgradeId grants\` and \`tier\` (\`0 = Simple -> Lv.1\`, \`1 = Fine -> Lv.2\`, \`2 = Elite -> Lv.3\`).
+   - If the player already drafted \`Lv.1\` of that weapon during a level-up and equips a \`Tier 2 (Elite)\` weapon (target \`Lv.3\`), \`wear()\` calls \`up->levelUp()\` twice and records \`gearLevels[slot] = 2\`.
+   - When the weapon is unequipped in \`Player::shed(slot)\`, \`up->level = std::max(0, up->level - gearLevels[slot])\` subtracts only the \`2\` gear-contributed levels, preserving the player's drafted \`Lv.1\` intact!
+3. **Max-HP Ratio Preservation (\`recalcStats\`):**
+   Whenever gear modifies \`bonus.maxHealth\` or \`bonus.healthPct\` (including the Night-Touched \`Frail\` curse \`-10% maxHealth\`), \`Player::recalcStats()\` preserves the player's fractional health ratio \`health / prevMax\` (or adds flat max-HP gains directly during \`wear()\`) and clamps \`health\` to \`[1, maxHealth]\`.
+
+---
+
+### 3. Quadratic $(1 - r)^2$ DoT Resistance in \`Status::apply\` (\`src/entity/Status.hpp\`)
+
+Elemental and bleed resistances (\`Stat::FireResist\`, \`Stat::ColdResist\`, \`Stat::LightningResist\`, \`Stat::PoisonResist\`, \`Stat::BleedResist\`) are stored on \`Mob::resist[StatusKind::Count]\` and clamped to **\`75%\` (\`0.75f\`)**:
+
+\`\`\`cpp
+void apply(StatusKind kind, float duration, float power, uint32_t source = 0) {
+    auto i = static_cast<size_t>(kind);
+    float r = std::clamp(resist[i], 0.0f, 0.75f);
+    duration *= 1 - r;
+    power = std::min(power * (1 - r), cap(kind));
+    // ...
+}
+\`\`\`
+
+Because \`Status::apply\` multiplies **both** \`duration\` by $(1 - r)$ **and** \`power\` (damage per second / slow magnitude) by $(1 - r)$, total damage-over-time for \`Burn\`, \`Poison\`, and \`Bleed\` scales **quadratically**:
+
+$$\\text{Total DoT} = (\\text{power} \\cdot (1 - r)) \\times (\\text{duration} \\cdot (1 - r)) = \\text{Base DoT} \\cdot (1 - r)^2$$
+
+- At \`r = 0.50\` (\`50%\` resistance): DPS is halved and duration is halved $\\implies 25\\%$ total DoT taken (\`75%\` effective mitigation).
+- At the \`r = 0.75\` (\`75%\` resistance cap): DPS is $0.25\\times$ and duration is $0.25\\times$ $\\implies (0.25)^2 = 6.25\\%$ total DoT taken (**\`93.75%\` effective DoT mitigation**!).
+
+---
+
+### 4. \`Enemy::hurt\` & \`Enemy::onHit\` Combat Pipeline (\`src/entity/enemy/Enemy.cpp\`)
+
+When a player attack strikes an enemy, \`Enemy::hurt\` and \`Enemy::onHit\` execute a multi-stage pipeline combining terrain elevation, hero crit multipliers, \`ItemStats\` target-category bonuses, and 6 on-hit status/chain procs:
+
+1. **Elevation Advantage (\`+15%\`):** If the target is non-flying (\`!type.floats\`) and the attacker stands on higher terrain (\`level->heightAt(player->x, player->y) > level->heightAt(x, y)\`), damage is multiplied by **\`1.15f\`** and emits a golden spark.
+2. **Hero Critical Hit (\`8% + luck\`):** Rolls \`rng.chance(0.08f + player->luck)\`; on success, multiplies damage by \`hero->edge()\` (\`1.8f\` base, \`2.2f\` Corsair, \`2.5f\` Duelist).
+3. **Target-Category \`ItemStats\` Scaling:**
+   \`\`\`cpp
+   const auto &b = player->bonus;
+   float pct = (boss || def ? b.bossDamage : 0)
+             + (elite || title ? b.eliteDamage : 0)
+             + (level->isDawn() ? 0 : b.nightDamage);
+   if (pct > 0) damage *= 1 + pct / 100;
+   \`\`\`
+4. **6 On-Hit Item Procs (\`Enemy::onHit\`):**
+   - **\`burnChance\`:** Applies \`StatusKind::Burn\` for \`2.0s\` at \`damage * 0.20f\` DPS.
+   - **\`chillChance\`:** Applies \`StatusKind::Chill\` for \`1.2s\` at \`0.30f\` (\`30%\` slow).
+   - **\`poisonChance\`:** Applies \`StatusKind::Poison\` for \`3.0s\` at \`damage * 0.15f\` DPS.
+   - **\`bleedChance\`:** Applies \`StatusKind::Bleed\` for \`3.0s\` at \`damage * 0.12f\` DPS (stacks additively in \`Status::apply\`, and ticks at \`1.6×\` when the target moves!).
+   - **\`lifeOnHit\` (\`leech\`):** Heals the player by \`std::min(damage * leech / 100.0f, 0.5f)\` HP per hit.
+   - **\`shockChance\`:** Queries the nearest living enemy within \`80 px\` (\`level->findNearestEnemy(x, y, 80, this)\`), deals \`damage * 0.5f\` lightning damage, and spawns a visual \`Arc\` bolt.
+5. **Defensive Thorns & Emergency Ward (\`Player::hurt\` in \`src/entity/Player.cpp\`):**
+   - **\`thorns\`:** Reflects flat \`bonus.thorns\` damage back onto the melee attacker (\`from->hurt(bonus.thorns, x, y, false, id)\`).
+   - **\`ward\` (\`LowLifeWard\`):** When an incoming hit drops the player from \`>= 30%\` HP to \`< 30%\` HP and \`wardCooldown <= 0\`, triggers a \`3.0s\` \`StatusKind::Shield\` equal to \`bonus.ward\` with a **\`30.0s\`** cooldown (\`wardCooldown = 30\`).
+
+---
+
+### 5. Differential Item Comparison (\`Tooltip.cpp\`) & 12-Pass Loot Label Stacker (\`Hud.cpp\`)
+
+- **Differential Stat Comparison (\`gui::compare\` in \`src/gui/Tooltip.cpp\`):**
+  When hovering a ground \`ItemDrop\` or bag slot while holding an equipped item in the corresponding paper-doll slot, \`tally(item)\` sums all implicit and affix contributions across \`Stat::Damage .. Stat::Light\` into a 22-float array and prints green (\`BETTER\`) or red (\`"lose " + WORSE\`) delta rows for every stat where \`|delta| >= 0.05f\`.
+- **12-Pass Vertical AABB Loot Label De-Overlap (\`Hud::lootLabels\` in \`src/gui/Hud.cpp\`):**
+  When multiple items spill onto the same tile, their world-to-screen label boxes \`Tag { drop, name, x, y, w, h }\` would overlap. \`Hud::lootLabels()\` sorts visible tags bottom-to-top (\`a.y > b.y\`) and runs up to **12 iterative vertical sweep passes**, pushing any overlapping upper tag above the lower tag by \`1 * u\` pixel (\`t.y = hit->y - t.h - u\`) until reaching a fixed point!
+`,
+    mermaidCharts: [
+      {
+        title: 'Reversible PlayerGear::wear / shed & (1-r)² Status Resistance Pipeline',
+        chart: `
+flowchart TD
+    classDef gear fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef stat fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef combat fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+
+    Equip["Player::equip(bagIndex)<br/>Charm auto-routes to GearCharm2 if GearCharm occupied"]:::gear
+    Shed["Player::shed(slot)<br/>applyItem(*this, oldItem, -1)<br/>up->level -= gearLevels[slot]"]:::gear
+    Wear["Player::wear(slot, newItem)<br/>applyItem(*this, newItem, +1)<br/>Level grants up to min(tier + 1, 3) -> store gearLevels[slot]"]:::gear
+    Recalc["Player::recalcStats()<br/>Preserve health / prevMax ratio<br/>Clamp resist[0..6] to 75% (0.75f)"]:::stat
+    DotResist["Status::apply(kind, duration, power)<br/>duration *= (1 - r) AND power *= (1 - r)<br/>Quadratic Total DoT = Base * (1 - r)² (6.25% at 75% cap!)"]:::combat
+
+    Equip --> Shed --> Wear --> Recalc --> DotResist
+`,
+      },
+      {
+        title: 'Enemy::hurt & Enemy::onHit Multi-Stage Combat & Proc Pipeline',
+        chart: `
+flowchart TD
+    classDef hit fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#f8fafc;
+    classDef proc fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    BaseHit["Enemy::hurt(damage, fromX, fromY, knockback, by)<br/>1. High Ground (!floats && h_player > h_enemy): damage *= 1.15f<br/>2. Crit Roll (0.08 + luck): damage *= hero->edge()"]:::hit
+    CatMult["Target-Category ItemStats Multiplier<br/>damage *= 1 + (bossDamage + eliteDamage + nightDamage) / 100"]:::hit
+    OnHit["Enemy::onHit(player, damage)<br/>Rolls 6 Independent ItemStats Procs:"]:::proc
+    Procs["• Burn: 2.0s @ 20% dmg/s<br/>• Chill: 1.2s @ 30% slow<br/>• Poison: 3.0s @ 15% dmg/s<br/>• Bleed: 3.0s @ 12% dmg/s (Additive + 1.6x moving)<br/>• Leech: heal min(dmg * leech%, 0.5 HP)<br/>• Shock: 80px Arc chain for 50% dmg"]:::proc
+
+    BaseHit --> CatMult --> OnHit --> Procs
+`,
+      },
+    ],
+    interactiveComponent: 'gearevents',
+  },
+  {
+    id: 'biome-events-chart-hud',
+    title: '27. 26 Regional Biome Events, Paged RLE Fog-of-War Chart & HUD Ray-Clipped Edge Pointers',
+    category: 'world',
+    summary: 'Deterministic stateless Murmur3 scheduling for 26 regional BiomeEvents, sparse 32x32 paged fog-of-war Chart with horizontal scanline RLE coalescing, and asymmetric viewport ray-clipping in Hud::edge().',
+    sourceFiles: [
+      'src/level/BiomeEvents.hpp',
+      'src/level/BiomeEvents.cpp',
+      'src/level/Chart.hpp',
+      'src/level/Chart.cpp',
+      'src/gui/Hud.cpp',
+    ],
+    content: `
+### 1. Deterministic Stateless \`BiomeEvents\` across All 26 Biomes (\`src/level/BiomeEvents.cpp\`)
+
+Every one of the 26 biomes (\`BIOME_COUNT = 26\`) has a signature periodic environmental event defined in \`EVENTS[BIOME_COUNT]\` (\`src/level/BiomeEvents.cpp\`). Rather than storing active event timers per chunk on the heap, \`BiomeEvents::schedule(seed, biome, epoch, rx, ry)\` computes each \`20 × 20\`-tile region's event window **purely as a stateless function of \`(seed, biome, epoch, rx, ry)\`** via a 32-bit Murmur3-style avalanche mixer \`mix(x)\`:
+
+\`\`\`cpp
+uint32_t mix(uint32_t x) {
+    x ^= x >> 16;
+    x *= 0x7FEB352Du;
+    x ^= x >> 15;
+    x *= 0x846CA68Bu;
+    x ^= x >> 16;
+    return x;
+}
+\`\`\`
+
+#### Regional Event Cadence, Warning Phase & Sanctuary Suppression
+- **Region Grid (\`20 × 20\` tiles = \`320 × 320 px\`):** The player's current region is \`rx = floor(player.x / 16) / 20\`, \`ry = floor(player.y / 16) / 20\`.
+- **Epoch Cadence (\`def.every\`):**
+  - **Core Biomes (\`0..15\`, \`Grassland\` through \`Void\`):** \`every = 48.0s\` per epoch.
+  - **Sub-Biomes (\`16..25\`, \`Oasis\` through \`Caldera\`):** \`every = 28.0s\` per epoch (faster micro-biome cadence).
+- **Deterministic Window within Epoch:**
+  - \`begins = epoch * def.every + 8.0f + float(h % uint32_t(def.every - 17.0f))\`
+  - \`ends = begins + 5.0f\` (\`5.0s\` active duration)
+  - **\`3.0s\` Telegraph Warning (\`t >= begins - 3 && t < begins\`):** Draws a pulsing telegraph ring and displays a directional banner:
+    - Beneficial boons (\`good = true\`, e.g. \`FAIRY RING\`, \`OASIS BLOOM\`, \`SPRING THAW\`, \`GOLD RUSH\`, \`STARFALL\`): **\`"<NAME> - STEP INSIDE"\`**
+    - Environmental hazards (\`good = false\`, e.g. \`SANDSTORM\`, \`BLIZZARD\`, \`LAVA BOMB\`, \`SPORE CLOUD\`, \`VOID RIFT\`, \`LOCUST SWARM\`): **\`"<NAME> - MOVE TO SAFETY"\`**
+- **Shrine Sanctuary Suppression:** Standing within **2 tiles** of any \`Tile::Shrine\` sets \`sanctuary = true\`, immediately suppressing regional biome events so shrine kindling and prayers are never interrupted by unavoidable environmental hazards.
+
+---
+
+### 2. Sparse Paged Fog-of-War \`Chart\` & Scanline RLE Coalescing (\`src/level/Chart.hpp\`, \`src/level/Chart.cpp\`)
+
+Because the world is infinite (\`int32_t\` tile coordinates), the exploration map (\`M\` / \`Tab\` overlay and top-right minimap) cannot allocate a dense 2D array. \`Chart\` implements a **sparse 2-level paged grid** with a 1-entry MRU page cache and **horizontal scanline Run-Length Encoding (RLE)** during rendering:
+
+1. **Spatial Granularity & Memory Layout:**
+   - **Chart Cell (\`CELL = 4\` tiles = \`64 × 64 px\`):** Each byte in a page represents a \`4 × 4\`-tile square.
+   - **Page (\`PAGE = 32\` cells = \`128 × 128\` tiles = \`1024 B\`):** \`std::unordered_map<uint64_t, std::unique_ptr<Page>> pages\` maps a 64-bit \`key(px, py)\` to a 1 KB \`std::array<uint8_t, 1024>\`.
+   - **1-Entry MRU Cache (\`lastKey\`, \`lastPage\`):** Consecutive \`slot(cx, cy, create)\` lookups within the same \`32 × 32\`-cell page bypass the hash table in $O(1)$ time.
+   - **Bitwise Cell Encoding:**
+     - \`0x00\`: Unexplored fog-of-war.
+     - \`bits 0..6\`: \`(BiomeId + 1)\` (\`1..26\`), indexing \`BIOME_TINTS[26]\`.
+     - \`bit 7 (\`NOW = 0x80\`)\`: Currently inside the player's live vision radius (rendered at full brightness \`alpha = 235\` vs. \`175\` for previously explored memory).
+2. **Horizontal Scanline RLE Coalescing (\`Chart::draw\`):**
+   Rather than submitting $N \\times N$ individual quad draw calls for the minimap or full-screen map, \`Chart::draw\` scans each row \`cy\` and packs \`key = cellByte * 2 + isBorderCell\`. Consecutive cells along \`cx\` with identical \`key\` are merged into a single \`s.rect(x0 + (from - cx0) * step, ry, (cx - from) * step, step, col)\` call—cutting GPU vertex submissions by **80%–92%**!
+3. **Binary Persistence (\`chart-<code>.bin\`):**
+   \`Chart::save\` and \`Chart::load\` serialize explored pages with \`DISTANCE_MAGIC = 0x3543414Du\` (\`"MAC5"\`), stripping the transient \`NOW (0x80)\` bit on write (\`b & ~NOW\`) so reloaded worlds restore historical fog-of-war cleanly.
+
+---
+
+### 3. Asymmetric Viewport Ray-Clipping in \`Hud::edge\` (\`src/gui/Hud.cpp\`)
+
+Offscreen objectives (nearest unlit \`Shrine\`, active \`Boss\`, and distant \`Landmark\` pins) are projected onto the screen perimeter by \`Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag)\`:
+
+\`\`\`cpp
+void Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag) const {
+    float xd = static_cast<float>(wx - viewX) * k;
+    float yd = static_cast<float>(wy - viewY) * k;
+    float xh = vw * k * 0.5f - 18 * u;
+    float yh = vh * k * 0.5f - (yd < 0 ? 84 : bossIds.empty() ? 18 : 46) * u;
+    if (std::abs(xd) <= xh && std::abs(yd) <= yh) return;
+    float fit = std::min(1.0f, std::min(xh / std::max(1.0f, std::abs(xd)),
+                                        yh / std::max(1.0f, std::abs(yd))));
+    float px = vw * k * 0.5f + xd * fit;
+    float py = vh * k * 0.5f + yd * fit;
+    // ...
+}
+\`\`\`
+
+- **Why \`yh\` Is Asymmetric:**
+  - **Top Edge (\`yd < 0\`):** Insets by \`84 * u\` so edge pointers never collide with the top night-progress bar, omen banner, or minimap header.
+  - **Bottom Edge (\`yd >= 0\`):** Dynamically insets by \`46 * u\` when a boss health bar is active (\`!bossIds.empty()\`), or \`18 * u\` otherwise.
+- **Intersection Factor \`fit\`:** Computing \`fit = min(1.0f, xh / |xd|, yh / |yd|)\` projects any 2D ray \`(xd, yd)\` directly onto the exact perimeter of the safe HUD rectangle in branchless constant time, followed by a 3-layer concentric diamond marker and inward-offset distance label.
+`,
+    mermaidCharts: [
+      {
+        title: 'Stateless BiomeEvents::schedule() Murmur3 Hash & Sanctuary Pipeline',
+        chart: `
+flowchart TD
+    classDef hash fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef phase fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef fx fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+
+    Region["Player Tile (tx, ty) -> Region (rx = tx/20, ry = ty/20)<br/>Lookup Dominant Biome & EVENTS[biome] (every = 48s or 28s)"]:::hash
+    Sanctuary{"Within 2 Tiles of<br/>Tile::Shrine?"}:::hash
+    Suppress["sanctuary = true<br/>Suppress Regional Biome Event"]:::hash
+    Mix["BiomeEvents::schedule(seed, biome, epoch, rx, ry)<br/>32-Bit Murmur3 mix(0x7FEB352D, 0x846CA68B)<br/>begins = epoch*every + 8 + (h % (every - 17)), ends = begins + 5"]:::phase
+    Warn["Warning Phase (begins - 3s .. begins)<br/>Pulsing Ring + 'STEP INSIDE' (Boon) or 'MOVE TO SAFETY' (Hazard)"]:::fx
+    Active["Active Phase (begins .. ends)<br/>Apply Biome Effect (Heal/Haste/Gold or DoT/Chill/Wind/Suck)"]:::fx
+
+    Region --> Sanctuary
+    Sanctuary -- "Yes" --> Suppress
+    Sanctuary -- "No" --> Mix --> Warn --> Active
+`,
+      },
+      {
+        title: 'Sparse Paged Fog-of-War Chart, Scanline RLE Coalescer & Hud::edge Ray Clipper',
+        chart: `
+flowchart TD
+    classDef chart fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef rle fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef hud fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    Reveal["Chart::reveal(wx, wy, tileRadius, biomeAt)<br/>CELL = 4 Tiles (64px) | PAGE = 32x32 Cells (1 KB)<br/>1-Entry MRU Cache (lastKey, lastPage)<br/>Cell Byte = NOW (0x80) | (BiomeId + 1)"]:::chart
+    RLE["Chart::draw() Scanline RLE Coalescer<br/>key = cellByte * 2 + isBorderCell<br/>Merge consecutive matching [from .. cx) into 1 s.rect()"]:::rle
+    Edge["Hud::edge(wx, wy, col, tag)<br/>xh = vw*k*0.5 - 18*u<br/>yh = vh*k*0.5 - (yd < 0 ? 84 : boss ? 46 : 18)*u<br/>fit = min(1, xh/|xd|, yh/|yd|)"]:::hud
+
+    Reveal --> RLE --> Edge
+`,
+      },
+    ],
+    interactiveComponent: 'gearevents',
   },
 ];

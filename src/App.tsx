@@ -15,6 +15,7 @@ import { RendererPipelineInspector } from "./components/RendererPipelineInspecto
 import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
 import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
 import { LootAffixSimulator } from "./components/LootAffixSimulator";
+import { GearEventsHudLab } from "./components/GearEventsHudLab";
 import {
   Cpu,
   Layers,
@@ -162,6 +163,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         id: "weather-sky",
         shortTitle: "Diurnal Cycle, Weather & Footprints",
       },
+      {
+        id: "biome-events-chart-hud",
+        shortTitle: "26 BiomeEvents, RLE Chart & HUD Pins",
+      },
     ],
   },
   {
@@ -199,6 +204,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "diablo-loot-runrules",
         shortTitle: "Diablo Loot, 30 Affixes & RunRules",
+      },
+      {
+        id: "paper-doll-gear-combat",
+        shortTitle: "Paper-Doll Gear, (1-r)² Resist & Procs",
       },
       {
         id: "night-spawner-director",
@@ -705,7 +714,7 @@ export const App: React.FC = () => {
                     MELLANGAN DOCS
                   </span>
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.5.14+
+                    v0.5.15
                   </span>
                 </div>
               </div>
@@ -801,7 +810,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 25 chapters, files..."
+                placeholder="Filter 27 chapters, files..."
                 className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (
@@ -1153,6 +1162,9 @@ export const App: React.FC = () => {
                 )}
                 {activeSection.interactiveComponent === "loot" && (
                   <LootAffixSimulator />
+                )}
+                {activeSection.interactiveComponent === "gearevents" && (
+                  <GearEventsHudLab />
                 )}
               </div>
             )}
