@@ -35,6 +35,8 @@ import {
   Hash,
   GitBranch,
   Workflow,
+  Link2,
+  Check,
 } from "lucide-react";
 
 interface NavTreeItem {
@@ -343,8 +345,9 @@ function renderMarkdownToHtml(markdown: string): string {
       flushParagraph();
       closeLists();
       const h = line.slice(5).trim();
+      const slug = slugify(h);
       out.push(
-        `<h4 id="${slugify(h)}" class="scroll-mt-20 text-[17px] font-bold text-gold-400 mt-7 mb-2.5 leading-snug">${formatInlineMarkdown(h)}</h4>`,
+        `<h4 id="${slug}" class="group scroll-mt-20 text-[17px] font-bold text-gold-400 mt-7 mb-2.5 leading-snug flex items-center gap-2"><a href="#${slug}" class="hover:underline">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-xs font-mono text-slate-500 hover:text-gold-300 transition-opacity" title="Permalink to section">#</a></h4>`,
       );
       continue;
     }
@@ -353,8 +356,9 @@ function renderMarkdownToHtml(markdown: string): string {
       flushParagraph();
       closeLists();
       const h = line.slice(4).trim();
+      const slug = slugify(h);
       out.push(
-        `<h3 id="${slugify(h)}" class="scroll-mt-20 text-xl sm:text-[22px] font-bold text-slate-100 mt-9 mb-3.5 font-display border-b border-dark-800 pb-2 leading-snug">${formatInlineMarkdown(h)}</h3>`,
+        `<h3 id="${slug}" class="group scroll-mt-20 text-xl sm:text-[22px] font-bold text-slate-100 mt-9 mb-3.5 font-display border-b border-dark-800 pb-2 leading-snug flex items-center justify-between gap-2"><a href="#${slug}" class="hover:text-gold-300 transition-colors">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-sm font-mono text-slate-500 hover:text-gold-300 transition-opacity shrink-0" title="Permalink to section">#</a></h3>`,
       );
       continue;
     }
@@ -408,10 +412,45 @@ function renderMarkdownToHtml(markdown: string): string {
   return out.join("\n");
 }
 
+const VALID_SECTION_IDS = new Set<string>(WIKI_SECTIONS.map((s) => s.id));
+
+function parseLocationRoute(): { sectionId: string; hash: string } {
+  if (typeof window === "undefined") {
+    return { sectionId: WIKI_SECTIONS[0].id, hash: "" };
+  }
+
+  const rawPath = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  const rawHash = window.location.hash.replace(/^#/, "");
+  const params = new URLSearchParams(window.location.search);
+  const queryPage = params.get("page") || params.get("chapter") || "";
+
+  // Support /#/chapter-id or #chapter-id if pathname is root
+  if (!rawPath && rawHash) {
+    const cleanHashPath = rawHash.replace(/^\/+/, "");
+    if (VALID_SECTION_IDS.has(cleanHashPath)) {
+      return { sectionId: cleanHashPath, hash: "" };
+    }
+  }
+
+  if (rawPath && VALID_SECTION_IDS.has(rawPath)) {
+    return { sectionId: rawPath, hash: rawHash };
+  }
+
+  if (queryPage && VALID_SECTION_IDS.has(queryPage)) {
+    return { sectionId: queryPage, hash: rawHash };
+  }
+
+  return { sectionId: WIKI_SECTIONS[0].id, hash: rawHash };
+}
+
 export const App: React.FC = () => {
   const [activeSectionId, setActiveSectionId] = useState<string>(
-    WIKI_SECTIONS[0].id,
+    () => parseLocationRoute().sectionId,
   );
+  const [activeHash, setActiveHash] = useState<string>(
+    () => parseLocationRoute().hash,
+  );
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>("all");
@@ -464,6 +503,56 @@ export const App: React.FC = () => {
       );
     }
   }, [activeGroup]);
+
+  // Keep document title & canonical URL path synchronized
+  useEffect(() => {
+    document.title = `${activeSection.title} — Mellangan Docs`;
+    const currentPath = window.location.pathname.replace(/^\/+|\/+$/g, "");
+    if (!currentPath) {
+      const hashSuffix = window.location.hash || "";
+      window.history.replaceState(
+        { sectionId: activeSection.id },
+        "",
+        `/${activeSection.id}${hashSuffix}`,
+      );
+    }
+  }, [activeSection]);
+
+  // Listen to browser Back/Forward (popstate) and in-page hash navigation
+  useEffect(() => {
+    const onPopState = () => {
+      const { sectionId, hash } = parseLocationRoute();
+      setActiveSectionId(sectionId);
+      setActiveHash(hash);
+      setActiveDiagramTab("all");
+      if (hash) {
+        requestAnimationFrame(() => {
+          const el = document.getElementById(hash);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        });
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Scroll to hash anchor on initial page load if present
+  useEffect(() => {
+    if (activeHash) {
+      const timer = window.setTimeout(() => {
+        const el = document.getElementById(activeHash);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 60);
+      return () => window.clearTimeout(timer);
+    }
+  }, [activeSection.id, activeHash]);
 
   const activeHeadings = useMemo(() => {
     return extractHeadings(activeSection.content);
@@ -520,19 +609,62 @@ export const App: React.FC = () => {
     setExpandedGroups(next);
   };
 
-  const selectChapter = (id: string) => {
+  const selectChapter = (
+    id: string,
+    e?: React.MouseEvent<HTMLElement>,
+  ) => {
+    if (
+      e &&
+      (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
+    ) {
+      return;
+    }
+    if (e) {
+      e.preventDefault();
+    }
+    if (
+      window.location.pathname !== `/${id}` ||
+      window.location.hash !== ""
+    ) {
+      window.history.pushState({ sectionId: id }, "", `/${id}`);
+    }
     setActiveSectionId(id);
+    setActiveHash("");
     setActiveDiagramTab("all");
     setIsMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const scrollToAnchor = (slug: string) => {
+  const scrollToAnchor = (
+    slug: string,
+    e?: React.MouseEvent<HTMLElement>,
+  ) => {
+    if (
+      e &&
+      (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
+    ) {
+      return;
+    }
+    if (e) {
+      e.preventDefault();
+    }
+    const targetUrl = `/${activeSection.id}#${slug}`;
+    if (`${window.location.pathname}${window.location.hash}` !== targetUrl) {
+      window.history.pushState({ sectionId: activeSection.id }, "", targetUrl);
+    }
+    setActiveHash(slug);
     const el = document.getElementById(slug);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     setIsMobileMenuOpen(false);
+  };
+
+  const copyCanonicalUrl = () => {
+    const url = window.location.href;
+    navigator.clipboard?.writeText(url);
+    setCopiedUrl(true);
+    window.setTimeout(() => setCopiedUrl(false), 1800);
   };
 
   const formattedHtml = useMemo(() => {
@@ -554,8 +686,9 @@ export const App: React.FC = () => {
                 <Menu className="w-4 h-4" />
               )}
             </button>
-            <button
-              onClick={() => selectChapter("overview")}
+            <a
+              href="/overview"
+              onClick={(e) => selectChapter("overview", e)}
               className="flex items-center gap-2.5 text-left group"
             >
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-gold-400 to-amber-600 flex items-center justify-center shadow-lg shadow-gold-500/20 font-display font-black text-dark-950 text-base group-hover:scale-105 transition-transform">
@@ -571,41 +704,54 @@ export const App: React.FC = () => {
                   </span>
                 </div>
               </div>
-            </button>
+            </a>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => selectChapter("contribute-basics")}
+            <a
+              href="/contribute-basics"
+              onClick={(e) => selectChapter("contribute-basics", e)}
               className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/25 border border-gold-500/40 text-xs font-mono text-gold-300 font-semibold transition-colors"
             >
               <Wrench className="w-3.5 h-3.5" />
               <span>Contribute</span>
-            </button>
+            </a>
 
-            <button
-              onClick={() => selectChapter("renderer-in-context")}
+            <a
+              href="/goal-ai"
+              onClick={(e) => selectChapter("goal-ai", e)}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-xs font-mono text-purple-300 font-semibold transition-colors"
+            >
+              <Workflow className="w-3.5 h-3.5" />
+              <span>AI &amp; Goals</span>
+            </a>
+
+            <a
+              href="/renderer-in-context"
+              onClick={(e) => selectChapter("renderer-in-context", e)}
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/40 text-xs font-mono text-teal-300 font-semibold transition-colors"
             >
               <Layers className="w-3.5 h-3.5" />
               <span>Renderer</span>
-            </button>
+            </a>
 
-            <button
-              onClick={() => selectChapter("terrain-construction")}
+            <a
+              href="/terrain-construction"
+              onClick={(e) => selectChapter("terrain-construction", e)}
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-xs font-mono text-sky-300 font-semibold transition-colors"
             >
               <Compass className="w-3.5 h-3.5" />
               <span>Terrain</span>
-            </button>
+            </a>
 
-            <button
-              onClick={() => selectChapter("night-spawner-director")}
+            <a
+              href="/night-spawner-director"
+              onClick={(e) => selectChapter("night-spawner-director", e)}
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-xs font-mono text-rose-300 font-semibold transition-colors"
             >
               <Swords className="w-3.5 h-3.5" />
               <span>Director</span>
-            </button>
+            </a>
 
             <a
               href="https://github.com/soulwax/Mellangan"
@@ -641,7 +787,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 23 chapters, files..."
+                placeholder="Filter 24 chapters, files..."
                 className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (
@@ -733,8 +879,9 @@ export const App: React.FC = () => {
 
                         return (
                           <div key={item.id}>
-                            <button
-                              onClick={() => selectChapter(item.id)}
+                            <a
+                              href={`/${item.id}`}
+                              onClick={(e) => selectChapter(item.id, e)}
                               className={`w-full text-left px-2 py-1.5 rounded-lg text-xs transition-all flex items-center justify-between gap-1.5 ${
                                 isActive
                                   ? "bg-gold-500/15 text-gold-300 font-semibold border border-gold-500/40 shadow-sm"
@@ -750,28 +897,32 @@ export const App: React.FC = () => {
                                   Lab
                                 </span>
                               )}
-                            </button>
+                            </a>
 
                             {isActive && activeHeadings.length > 0 && (
                               <div className="ml-3 mt-1 mb-1.5 pl-2 border-l border-gold-500/30 space-y-0.5">
                                 {activeHeadings.map((h) => (
-                                  <button
+                                  <a
                                     key={h.slug}
-                                    onClick={() => scrollToAnchor(h.slug)}
+                                    href={`/${activeSection.id}#${h.slug}`}
+                                    onClick={(e) => scrollToAnchor(h.slug, e)}
                                     className={`w-full text-left py-1 px-1.5 rounded text-[11px] hover:text-gold-300 hover:bg-dark-850 transition-colors block truncate ${
-                                      h.level === 4
-                                        ? "pl-2.5 text-slate-400 font-mono text-[10px]"
-                                        : "text-slate-300 font-medium"
+                                      activeHash === h.slug
+                                        ? "text-gold-300 bg-dark-850/80 font-semibold"
+                                        : h.level === 4
+                                          ? "pl-2.5 text-slate-400 font-mono text-[10px]"
+                                          : "text-slate-300 font-medium"
                                     }`}
                                     title={h.text}
                                   >
                                     {h.text}
-                                  </button>
+                                  </a>
                                 ))}
                                 {sec.interactiveComponent && (
-                                  <button
-                                    onClick={() =>
-                                      scrollToAnchor("interactive-lab-anchor")
+                                  <a
+                                    href={`/${activeSection.id}#interactive-lab-anchor`}
+                                    onClick={(e) =>
+                                      scrollToAnchor("interactive-lab-anchor", e)
                                     }
                                     className="w-full text-left py-1 px-1.5 rounded text-[11px] font-mono text-emerald-300 hover:bg-dark-850 flex items-center gap-1.5 truncate"
                                   >
@@ -779,7 +930,7 @@ export const App: React.FC = () => {
                                     <span className="truncate">
                                       Interactive Simulator
                                     </span>
-                                  </button>
+                                  </a>
                                 )}
                               </div>
                             )}
@@ -820,12 +971,49 @@ export const App: React.FC = () => {
 
         <main className="flex-1 min-w-0 px-5 sm:px-8 lg:px-12 py-7">
           <div className="max-w-[680px] mx-auto">
-            <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400 mb-3">
-              <span>Docs</span>
-              <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
-              <span className={`uppercase font-semibold shrink-0 ${activeGroup.color}`}>
-                {activeGroup.label}
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <a
+                  href="/overview"
+                  onClick={(e) => selectChapter("overview", e)}
+                  className="hover:text-slate-200 transition-colors"
+                >
+                  Docs
+                </a>
+                <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
+                <span className={`uppercase font-semibold shrink-0 ${activeGroup.color}`}>
+                  {activeGroup.label}
+                </span>
+                <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
+                <a
+                  href={`/${activeSection.id}`}
+                  onClick={(e) => selectChapter(activeSection.id, e)}
+                  className="text-slate-300 hover:text-gold-300 truncate transition-colors"
+                >
+                  /{activeSection.id}
+                </a>
+              </div>
+
+              <button
+                onClick={copyCanonicalUrl}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-dark-900 hover:bg-dark-800 border border-dark-750 text-[11px] font-mono text-slate-300 hover:text-gold-300 transition-colors"
+                title="Copy direct page or section URL"
+              >
+                {copiedUrl ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span className="text-emerald-300">Copied URL</span>
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="w-3 h-3 text-gold-400" />
+                    <span>
+                      /{activeSection.id}
+                      {activeHash ? `#${activeHash.slice(0, 18)}` : ""}
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div className="border-b border-dark-800 pb-5 mb-6">
@@ -857,18 +1045,22 @@ export const App: React.FC = () => {
               {(activeSection.interactiveComponent || diagrams.length > 0) && (
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   {activeSection.interactiveComponent && (
-                    <button
-                      onClick={() => scrollToAnchor("interactive-lab-anchor")}
+                    <a
+                      href={`/${activeSection.id}#interactive-lab-anchor`}
+                      onClick={(e) =>
+                        scrollToAnchor("interactive-lab-anchor", e)
+                      }
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-xs font-mono text-emerald-300 transition-colors"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
                       <span>Jump to Interactive Simulator ↓</span>
-                    </button>
+                    </a>
                   )}
                   {diagrams.length > 0 && (
-                    <button
-                      onClick={() =>
-                        scrollToAnchor("architecture-diagrams-anchor")
+                    <a
+                      href={`/${activeSection.id}#architecture-diagrams-anchor`}
+                      onClick={(e) =>
+                        scrollToAnchor("architecture-diagrams-anchor", e)
                       }
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-xs font-mono text-sky-300 transition-colors"
                     >
@@ -876,7 +1068,7 @@ export const App: React.FC = () => {
                       <span>
                         Jump to Architecture Graphs ({diagrams.length}) ↓
                       </span>
-                    </button>
+                    </a>
                   )}
                 </div>
               )}
@@ -884,6 +1076,14 @@ export const App: React.FC = () => {
 
             <article
               className="wiki-prose"
+              onClick={(e) => {
+                const target = (e.target as HTMLElement).closest("a");
+                if (!target) return;
+                const href = target.getAttribute("href") || "";
+                if (href.startsWith("#") && href.length > 1) {
+                  scrollToAnchor(href.slice(1), e);
+                }
+              }}
               dangerouslySetInnerHTML={{ __html: formattedHtml }}
             />
 
@@ -1000,33 +1200,37 @@ export const App: React.FC = () => {
 
             <div className="mt-12 pt-6 border-t border-dark-800 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {prevSection ? (
-                <button
-                  onClick={() => selectChapter(prevSection.id)}
-                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-left transition-all group"
+                <a
+                  href={`/${prevSection.id}`}
+                  onClick={(e) => selectChapter(prevSection.id, e)}
+                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-left transition-all group block"
                 >
-                  <div className="text-[10px] uppercase font-mono text-slate-400 mb-1">
-                    ← Previous Chapter
+                  <div className="text-[10px] uppercase font-mono text-slate-400 mb-1 flex items-center justify-between">
+                    <span>← Previous Chapter</span>
+                    <span className="text-slate-600">/{prevSection.id}</span>
                   </div>
                   <div className="text-xs sm:text-sm font-semibold text-slate-200 group-hover:text-gold-300 transition-colors">
                     {prevSection.title}
                   </div>
-                </button>
+                </a>
               ) : (
                 <div />
               )}
 
               {nextSection && (
-                <button
-                  onClick={() => selectChapter(nextSection.id)}
-                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-right transition-all group sm:col-start-2"
+                <a
+                  href={`/${nextSection.id}`}
+                  onClick={(e) => selectChapter(nextSection.id, e)}
+                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-right transition-all group sm:col-start-2 block"
                 >
-                  <div className="text-[10px] uppercase font-mono text-slate-400 mb-1">
-                    Next Chapter →
+                  <div className="text-[10px] uppercase font-mono text-slate-400 mb-1 flex items-center justify-between">
+                    <span className="text-slate-600">/{nextSection.id}</span>
+                    <span>Next Chapter →</span>
                   </div>
                   <div className="text-xs sm:text-sm font-semibold text-slate-200 group-hover:text-gold-300 transition-colors">
                     {nextSection.title}
                   </div>
-                </button>
+                </a>
               )}
             </div>
           </div>
@@ -1040,35 +1244,42 @@ export const App: React.FC = () => {
 
           <div className="space-y-1 border-l border-dark-800 pl-2.5">
             {activeHeadings.map((h) => (
-              <button
+              <a
                 key={h.slug}
-                onClick={() => scrollToAnchor(h.slug)}
+                href={`/${activeSection.id}#${h.slug}`}
+                onClick={(e) => scrollToAnchor(h.slug, e)}
                 className={`w-full text-left py-1 transition-colors block truncate ${
-                  h.level === 4
-                    ? "pl-2.5 text-[11px] font-mono text-slate-400 hover:text-slate-200"
-                    : "text-xs text-slate-200 hover:text-gold-300 font-medium"
+                  activeHash === h.slug
+                    ? "text-gold-300 font-semibold"
+                    : h.level === 4
+                      ? "pl-2.5 text-[11px] font-mono text-slate-400 hover:text-slate-200"
+                      : "text-xs text-slate-200 hover:text-gold-300 font-medium"
                 }`}
                 title={h.text}
               >
                 {h.text}
-              </button>
+              </a>
             ))}
             {activeSection.interactiveComponent && (
-              <button
-                onClick={() => scrollToAnchor("interactive-lab-anchor")}
+              <a
+                href={`/${activeSection.id}#interactive-lab-anchor`}
+                onClick={(e) => scrollToAnchor("interactive-lab-anchor", e)}
                 className="w-full text-left py-1 text-xs font-mono text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 pt-2"
               >
                 <Sparkles className="w-3 h-3 shrink-0" />
                 <span className="truncate">Interactive Simulator</span>
-              </button>
+              </a>
             )}
             {diagrams.length > 0 && (
-              <button
-                onClick={() => scrollToAnchor("architecture-diagrams-anchor")}
+              <a
+                href={`/${activeSection.id}#architecture-diagrams-anchor`}
+                onClick={(e) =>
+                  scrollToAnchor("architecture-diagrams-anchor", e)
+                }
                 className="w-full text-left py-1 text-xs font-mono text-sky-400 hover:text-sky-300 block truncate"
               >
                 Architecture Graphs ({diagrams.length})
-              </button>
+              </a>
             )}
           </div>
         </aside>
