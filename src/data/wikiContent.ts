@@ -670,13 +670,29 @@ private:
 
 ---
 
-### Predictive Velocity Leading & Sight-Cone Math (\`Enemy::sense\`)
+### Predictive Velocity Leading, \`Enemy::quarry()\` Aggro & Sight-Cone Math (\`Enemy::sense\`)
 
-At the beginning of \`Enemy::think()\`, each enemy constructs a transient \`Sense\` packet (\`src/entity/enemy/Enemy.cpp\`) that combines **velocity-intercept target leading** with a **forward vision cone check**:
+At the beginning of \`Enemy::think()\`, each enemy first selects its target via \`Enemy::quarry()\` (\`src/entity/enemy/Enemy.cpp\`)—evaluating the player alongside any active summoned \`Ally\` companions (\`src/entity/Ally.cpp\`)—and then constructs a transient \`Sense\` packet combining **velocity-intercept target leading** with a **forward vision cone check**:
 
 \`\`\`cpp
+const Mob &Enemy::quarry() const {
+  const Mob *best = level->player;
+  double px = best->x - x, py = best->y - y, bd = px * px + py * py;
+  for (const Ally *a : level->allies) {
+    double xd = a->x - x, yd = a->y - y, d = xd * xd + yd * yd;
+    float reach = a->def.lure ? 220.0f : 110.0f;
+    if (a->removed || a->dead() || d > reach * reach)
+      continue;
+    if (a->def.lure)
+      d *= 0.2;
+    if (d < bd)
+      best = a, bd = d;
+  }
+  return *best;
+}
+
 Sense Enemy::sense() const {
-  const Player &p = *level->player;
+  const Mob &p = quarry();
   double rx = p.x - x, ry = p.y - y, raw = std::sqrt(rx * rx + ry * ry);
   double lead = std::min(0.7, raw / std::max(20.0, double(type.speed))) * 0.6;
   Sense s{rx + p.xa * lead, ry + p.ya * lead, 0, 0, 0, false};
@@ -688,12 +704,46 @@ Sense Enemy::sense() const {
 }
 \`\`\`
 
-1. **Predictive Intercept Vector (\`lead\`):**
-   Instead of steering naively toward the player's current position \`(p.x, p.y)\`, the enemy estimates time-to-intercept \`raw / max(20.0, type.speed)\` (clamped to \`0.7s\` and scaled by \`0.6\`, yielding up to \`0.42s\` of velocity lookahead) and offsets \`(s.xd, s.yd)\` by \`(p.xa * lead, p.ya * lead)\`.
-2. **The 113° Forward Sight Cone (\`s.seen\`):**
-   Since \`(s.xn, s.yn)\` points from the **enemy to the player**, its negation \`(-s.xn, -s.yn)\` points from the **player to the enemy**. Taking the dot product with the player's unit aim vector \`(p.xAim, p.yAim)\` yields $\\cos(\\theta)$:
+1. **Dynamic Ally & Decoy Aggro Redirection (\`Enemy::quarry\`):**
+   - Combat allies (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Drone\`, \`Crew\`) pull enemy aggro when they are within \`110 px\` of the monster and closer than the player (\`d < bd\`).
+   - A **\`Decoy\` (\`Mirror Image\`, \`def.lure == true\`)** has double the aggro capture radius (\`reach = 220.0f\`) and multiplies its squared distance by **\`0.2\`** (\`d *= 0.2\`), making it appear $\\sqrt{5} \\approx 2.236\\times$ closer than it physically is so nearby monsters aggressively peel off the player to attack the decoy!
+2. **Predictive Intercept Vector (\`lead\`):**
+   Instead of steering naively toward the target's current position \`(p.x, p.y)\`, the enemy estimates time-to-intercept \`raw / max(20.0, type.speed)\` (clamped to \`0.7s\` and scaled by \`0.6\`, yielding up to \`0.42s\` of velocity lookahead) and offsets \`(s.xd, s.yd)\` by \`(p.xa * lead, p.ya * lead)\`.
+3. **The 113° Forward Sight Cone (\`s.seen\`):**
+   Since \`(s.xn, s.yn)\` points from the **enemy to the target**, its negation \`(-s.xn, -s.yn)\` points from the **target to the enemy**. Taking the dot product with the target's unit aim vector \`(p.xAim, p.yAim)\` yields $\\cos(\\theta)$:
    \`-(p.xAim * s.xn + p.yAim * s.yn) > 0.55\`.
    Because $\\arccos(0.55) \\approx 56.6^\\circ$, \`s.seen\` is \`true\` whenever the enemy stands within \`300 px\` inside a **\`113.2°\` forward vision cone** centered on the player's aim!
+
+---
+
+### Summoned \`Ally\` Companions & Golden-Angle Phyllotaxis Orbit (\`src/entity/Ally.cpp\`)
+
+Allied companions (\`enum class AllyKind { Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy }\`, testable in any run via \`--allies N\` or summoned via \`SummonForm::fire\`) inherit from \`Mob\` and implement a tethered combat-and-escort state machine:
+
+\`\`\`cpp
+Mob *Ally::pick() const {
+  if (def.lure)
+    return nullptr;
+  const Player &p = *level->player;
+  double hx = x - p.x, hy = y - p.y;
+  if (hx * hx + hy * hy > LEASH * LEASH)
+    return nullptr;
+  for (Enemy *e : level->nearest(x, y, SIGHT, 1)) {
+    double ex = e->x - p.x, ey = e->y - p.y;
+    if (ex * ex + ey * ey < LEASH * LEASH && e->type.damage > 0)
+      return e;
+  }
+  return nullptr;
+}
+\`\`\`
+
+- **Leash & Sight Envelope (\`LEASH = 170 px\`, \`SIGHT = 150 px\`):** An ally only engages enemies within \`150 px\` of itself that are also within \`170 px\` of the player. If the player dashes away (\`hx² + hy² > LEASH²\`), \`pick()\` returns \`nullptr\` and the ally immediately breaks off combat to sprint back at \`1.2×\` speed!
+- **Golden-Angle Phyllotaxis Idle Orbit (\`2.39996 rad\`):** When no target is in range, allies do not clump onto a single point; each ally is assigned a monotonic \`slot = nextSlot++\` and orbits the player at \`HOME = 24 px\` using the **golden angle** ($2\\pi(1 - 1/\\varphi) \\approx 2.39996\\text{ rad} \\approx 137.5^\\circ$):
+  \`\`\`cpp
+  double a = slot * 2.39996 + age * 0.6;
+  stride(p.x + std::cos(a) * HOME, p.y + std::sin(a) * HOME * 0.7, def.speed * 1.2f);
+  \`\`\`
+- **Autonomous Weapon-Kit Allies (\`Clockwork Drone\`):** While melee allies (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Crew\`) strike with \`landHit(payload, *foe, ...)\` on a \`def.every\` bite cadence, \`Clockwork Drone\` specifies \`def.kit = "Arcane Staff"\`, calling \`grant(def.kit, 1)\` in \`Ally::onAdded()\` and \`tickKit()\` every frame to fire real \`RecipeShot\` bolts from \`70 px\` stand-off range!
 
 ---
 
@@ -936,14 +986,14 @@ flowchart LR
   },
   {
     id: 'weapon-synthesis',
-    title: '09. Combinatorial Weapon Synthesis (15 FormBehaviors & 16 Payloads)',
+    title: '09. Combinatorial Weapon Synthesis (16 FormBehaviors, 16 Payloads & SummonForm)',
     category: 'gameplay',
-    summary: 'Data-driven Recipe table, 15 polymorphic FormBehavior kinematic engines (including Whip, Wall & Spiral), 16 composable pay::Payload bitflags, and 41 weapon evolutions.',
-    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/Forms.hpp', 'src/item/weapon/form/Shape.cpp'],
+    summary: 'Data-driven Recipe table, 16 polymorphic FormBehavior kinematic engines (including Whip, Wall, Spiral & Summon), 16 composable pay::Payload bitflags, and 41 weapon evolutions.',
+    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/Forms.hpp', 'src/item/weapon/form/Shape.cpp', 'src/item/weapon/form/Summon.cpp', 'src/entity/Ally.cpp'],
     content: `
 ### Orthogonal Weapon Architecture: \`FormBehavior\` × \`pay::Payload\`
 
-Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any recipe weapon—including the 22 class-exclusive weapons and 7 Mage spells (29 \`RECIPES\` alongside 12 bespoke shared weapons = **41 evolvable weapons** in \`EVOLUTIONS[]\`)—is defined by pairing one of **15 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
+Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any recipe weapon—including the 22 class-exclusive weapons and 7 Mage spells (29 \`RECIPES\` alongside 12 bespoke shared weapons = **41 evolvable weapons** in \`EVOLUTIONS[]\`)—is defined by pairing one of **16 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
 
 \`\`\`cpp
 void RecipeShot::strike(Mob &e, double xd, double yd) {
@@ -968,26 +1018,73 @@ void RecipeShot::strike(Mob &e, double xd, double yd) {
 }
 \`\`\`
 
-#### All 15 Polymorphic \`FormBehavior\` Classes (\`src/item/weapon/form/Forms.hpp\`)
-In \`v0.5.14+\`, each \`Form\` enum maps to a dedicated stateless \`FormBehavior\` subclass:
+#### All 16 Polymorphic \`FormBehavior\` Classes (\`src/item/weapon/form/Forms.hpp\`)
+Each \`Form\` enum value maps to a dedicated stateless \`FormBehavior\` subclass:
 1. **Classic Projectile & Area Forms (\`BoltForm\`, \`VolleyForm\`, \`SeekerForm\`, \`OrbitForm\`, \`NovaForm\`, \`RainForm\`, \`FieldForm\`):** Linear bolts, fan volleys, homing seekers, orbital rings, expanding novas, sky bombardments, and persistent ground hazards.
-2. **Class-Kit Forms Added in \`v0.5.14\` (\`CleaveForm\`, \`BoomerangForm\`, \`LobForm\`, \`TrapForm\`, \`BeamForm\`):**
+2. **Class-Kit Forms (\`CleaveForm\`, \`BoomerangForm\`, \`LobForm\`, \`TrapForm\`, \`BeamForm\` in \`Strike.cpp\` & \`Flight.cpp\`):**
    - \`CleaveForm\`: Sweeps a wide melee arc in front of the wielder (\`Lionheart Cleave\`, \`Crescent Cut\`, \`Soul Harvest\`).
    - \`BoomerangForm\`: Flies outward and reverses velocity back to the wielder (\`Hawk Talon\`, \`Bone Wheel\`, \`Fate Wheel\`).
-   - \`LobForm\`: Arcs overhead (\`0.55s\`) and detonates on landing (\`Caustic Flask\`, \`Witchfire Phial\`, \`Flash Grenade\`).
-   - \`TrapForm\`: Arms on the ground for up to \`10s\` until a hostile steps across its trigger radius (\`Bear Trap\`, \`Root Snare\`, \`Clockwork Mine\`).
+   - \`LobForm\`: Arcs overhead (\`0.55s\`) with a shrinking ground target ring and detonates on landing (\`Caustic Flask\`, \`Witchfire Phial\`, \`Flash Grenade\`).
+   - \`TrapForm\`: Arms on the ground after \`0.6s\` for up to \`10s\` until a hostile steps across its trigger radius (\`Bear Trap\`, \`Root Snare\`, \`Clockwork Mine\`).
    - \`BeamForm\`: Instantaneous piercing line ray (\`0.28s\`) striking all foes along the beam (\`Arc Lance\`, \`Lance of Dawn\`, \`Prophecy Ray\`).
-3. **Shape Forms Added in Post-\`0.5.14\` (\`src/item/weapon/form/Shape.cpp\`):**
-   - **\`WhipForm\`:** Lashes an 8-segment sine-swaying line (\`CRACK = 0.08s\`) and calls \`strikeHarder(s, e, b > s.reach * 0.75 ? 1.5f : 1.0f)\` so the **outer 25% tip deals \`1.5×\` crack damage**!
-   - **\`WallForm\`:** Summons barrier segments at \`48 + 22 * i\` px ahead that pulse every \`0.5s\` and physically push enemies out of the wall (\`e.x += s.dx * push, e.y += s.dy * push\`).
-   - **\`SpiralForm\`:** Launches shots along an expanding Archimedean spiral (\`a = s.tx + s.age * 3.0f, r = speed * 0.8f * s.age\`).
+3. **Geometric Shape Forms (\`WhipForm\`, \`WallForm\`, \`SpiralForm\` in \`src/item/weapon/form/Shape.cpp\`):**
+   - **\`WhipForm\` (1.5× Tip-Sweetspot Crack):** Lashes an 8-segment sine-swaying line (\`CRACK = 0.08s\`), projects each nearby enemy onto the whip segment \`b = std::clamp(ex * s.dx + ey * s.dy, 0.0, double(s.reach))\`, and multiplies damage by **\`1.5×\`** when struck by the outer 25% tip (\`b > s.reach * 0.75\`):
+     \`\`\`cpp
+     void WhipForm::tick(RecipeShot &s, Mob &p, float) const {
+       s.ox = p.x, s.oy = p.bodyY();
+       if (s.age < CRACK || s.pulse != 0)
+         return;
+       s.pulse = 1;
+       s.level->foes(s.hostile(), s.ox + s.dx * s.reach / 2, s.oy + s.dy * s.reach / 2,
+                     s.reach / 2 + 24, [&](Mob &e) {
+                       double ex = e.x - s.ox, ey = e.bodyY() - s.oy;
+                       double b = std::clamp(ex * s.dx + ey * s.dy, 0.0, double(s.reach));
+                       double qx = ex - s.dx * b, qy = ey - s.dy * b;
+                       float rr = 8 + e.radius;
+                       if (qx * qx + qy * qy < rr * rr && !s.hitBefore(e.id))
+                         strikeHarder(s, e, b > s.reach * 0.75 ? 1.5f : 1.0f);
+                     });
+     }
+     \`\`\`
+   - **\`WallForm\` (Physical Barrier Displacement):** Summons barrier segments at \`48 + 22 * i\` px ahead for \`4.0s\` that pulse damage every \`0.5s\` and project enemies onto the wall's tangent/normal basis \`(along, across)\` to push them out of the barrier:
+     \`\`\`cpp
+     double along = ex * tx + ey * ty, across = ex * s.dx + ey * s.dy;
+     double edge = WALL_THICK + e.radius;
+     if (std::abs(along) <= half + e.radius && std::abs(across) <= edge) {
+       double push = (across < 0 ? -edge : edge) - across;
+       e.x += s.dx * push, e.y += s.dy * push;
+     }
+     \`\`\`
+   - **\`SpiralForm\`:** Launches shots with angular lead compensation along an expanding Archimedean spiral (\`a = s.tx + s.age * 3.0f, r = speed * 0.8f * s.age\`).
+4. **Companion Summoning (\`SummonForm\` in \`src/item/weapon/form/Summon.cpp\`):**
+   Resolves \`AllyKind kind = allyFor(c.r.name)\` across \`ALLIES[7]\` (\`Wolf Totem\`, \`Hawk Companion\`, \`Ghoul Pack\`, \`Raise Dead\`, \`Clockwork Drone\`, \`Powder Crew\`, \`Mirror Image\`). On each cooldown cycle, \`SummonForm::fire\` refreshes the lifetime and damage of living allies from the same \`Upgrade *source\` and only spawns missing companions up to \`c.count\`:
+   \`\`\`cpp
+   void SummonForm::fire(const FormCast &c) const {
+     if (c.p.hostile())
+       return;
+     Level &level = *c.p.level;
+     AllyKind kind = allyFor(c.r.name);
+     const AllyDef &def = allyDef(kind);
+     int alive = 0;
+     for (Ally *a : level.allies)
+       if (!a->removed && a->source == c.source && &a->def == &def) {
+         alive++;
+         a->life = std::max(a->life, def.life), a->damage = c.damage;
+       }
+     for (int i = alive; i < c.count; i++) {
+       double a = c.base + TAU * i / c.count;
+       summon(level, kind, c.p.x + std::cos(a) * 20, c.p.y + std::sin(a) * 14,
+              c.damage, def.life, c.r.payload, c.source)->might = c.p.might;
+     }
+   }
+   \`\`\`
 
 #### All 16 Composable \`pay::\` Payload Bitflags (\`Recipe.hpp\`)
 - **Status Payloads:** \`Burn (1)\`, \`Chill (2)\`, \`Poison (4)\`, \`Mark (8)\`, \`Bleed (2048)\`, \`Weaken (4096)\`, \`Fear (8192)\`.
 - **Kinematic & Finisher Payloads:** \`Pull (16)\`, \`Pierce (32)\`, \`Explode (64)\`, \`Split (128)\`, \`Leech (256)\` (heals wielder on hit), \`Chain (512)\` (arcs to nearby foe), \`Stagger (1024)\` (heavy knockback + brief pin), \`Shatter (16384)\` (bonus damage against \`Chilled\` targets), and \`Execute (32768)\` (instantly finishes low-health non-boss enemies).
 
-#### Mob-Symmetric Wielding & 29 Weapon Evolutions
-Every \`RecipeWeapon\` and \`RecipeShot\` operates on \`Mob &\` rather than \`Player &\` (\`s.hostile()\`), allowing **Renegade Adventurers** and **Named Champions** to wield player weapons against you while sparing other monsters! Maxing any of the 22 class weapons or 7 Mage spell weapons while holding its partner passive unlocks its **Evolution** (doubling damage, accelerating cooldown, and adding a bonus projectile or wider area).
+#### Mob-Symmetric Wielding & 41 Weapon Evolutions
+Every \`RecipeWeapon\` and \`RecipeShot\` operates on \`Mob &\` rather than \`Player &\` (\`s.hostile()\`), allowing **Renegade Adventurers**, **Named Champions**, and **Clockwork Drone Allies** to wield weapons through the exact same pipeline without friendly fire! Maxing any of the 41 evolvable weapons while holding its partner passive unlocks its **Evolution** (doubling damage, accelerating cooldown, and adding a bonus projectile or wider area).
 `,
     mermaidCharts: [
       {
@@ -1032,12 +1129,12 @@ flowchart TD
     id: 'classes-encounters',
     title: '10. 12 Hero Kits, 39 Foe Species, 20 Traits, Champions & 9 Bosses',
     category: 'gameplay',
-    summary: 'Complete v0.5.14+ breakdown of the 12 full hero kits, 8 general skills, 39 EnemyKind species (Greenwood, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.',
-    sourceFiles: ['src/hero/Hero.hpp', 'src/entity/Trait.hpp', 'src/entity/enemy/Enemy.hpp', 'src/entity/enemy/Boss.cpp', 'src/level/Encounter.cpp'],
+    summary: 'Complete v0.5.15 breakdown of the 12 standalone hero classes, 8 general skills, 39 EnemyKind species (WildFoe Greenwood table, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.',
+    sourceFiles: ['src/hero/Hero.hpp', 'src/entity/Trait.hpp', 'src/entity/enemy/Enemy.hpp', 'src/entity/enemy/WildFoe.cpp', 'src/entity/enemy/Boss.cpp', 'src/level/Encounter.cpp'],
     content: `
 ### The 12 Complete Playable Hero Kits (\`src/hero/\`)
 
-In \`v0.5.13–0.5.14+\`, every one of the 12 playable classes was expanded into a standalone class file with **2 class-exclusive weapons (both evolvable), 3 class skills, a class passive, and class talents**, alongside **8 general skills** (\`War Cry\`, \`Bandage\`, \`Tumble\`, \`Whirlwind\`, \`Ground Slam\`, \`Fire Ring\`, \`Lodestar\`, \`Snare Net\`) that any hero can draft from level 4:
+Every one of the 12 playable classes lives in its own dedicated class implementation file (\`src/hero/Knight.cpp\` through \`src/hero/Corsair.cpp\`) with **2 class-exclusive weapons (both evolvable), 3 class skills, a class passive, and class talents**, alongside **8 general skills** (\`War Cry\`, \`Bandage\`, \`Tumble\`, \`Whirlwind\`, \`Ground Slam\`, \`Fire Ring\`, \`Lodestar\`, \`Snare Net\`) that any hero can draft from level 4:
 - **Knight (\`Knight.cpp\`):** *Lionheart Cleave* (\`Kingsbane Cleave\`) & *Bastion Shields*; skills *Shield Wall*, *Shield Charge*, *War Banner*.
 - **Mage (\`Mage.cpp\`):** 7 evolvable spell weapons (*Ember Lance* → *Sunspear*, *Flame Ring* → *Phoenix Ring*, etc.); *Blink* & arcane arts.
 - **Ranger (\`Ranger.cpp\`):** *Hawk Talon* (\`Falcon's Return\`) & *Bear Trap*; skills *Volley*, *Arrow Storm*, *Hunter's Mark*.
@@ -1053,18 +1150,49 @@ In \`v0.5.13–0.5.14+\`, every one of the 12 playable classes was expanded into
 
 ---
 
-### 39 \`EnemyKind\` Species: Mimics, Renegades & Greenwood Foes (\`Enemy.hpp\`)
+### 39 \`EnemyKind\` Species: Mimics, Renegades & \`WildFoe\` Greenwood Table (\`WildFoe.cpp\`)
 
-Beyond the 16 classic monsters and 10 regional expansion monsters, \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) now spans **39 distinct species**:
+Beyond the 16 classic monsters and 10 regional expansion monsters (\`src/entity/enemy/ExpansionEnemy.cpp\`), \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) spans **39 distinct species**:
 1. **Disguised Chest \`Mimic\` (\`EnemyKind::Mimic\`):** Waits motionless in the grass (\`Lurk\` goal with \`buried = true\` so player weapons ignore it), rattles when approached, springs at close range, and bursts into a shower of coins, items, and potions on death.
 2. **4 Renegade Adventurers (\`Outlaw\`, \`Berserker\`, \`PitFighter\`, \`Deserter\`):** Announced by *"RENEGADES ON YOUR TRAIL"* from 3 minutes onward. They wield real player weapons and telegraph special class skills with glowing warning rings.
-3. **8 Greenwood & Woodland Foes (\`Thornling\`, \`Boar\`, \`GoblinArcher\`, \`GoblinShaman\`, \`Sapling\`, \`Treant\`, \`MothWisp\`, \`Cutthroat\`):**
-   - \`Thornling\`: Leaves slowing bramble patches behind it.
-   - \`Boar\`: High-speed wild boar charges.
-   - \`GoblinArcher\` & \`GoblinShaman\`: Archers loose arrow volleys while Shamans heal nearby goblins (\`Mend\`) and inflict \`StatusKind::Weaken\`.
-   - \`Sapling\` → \`Treant\`: Saplings mature and grow into towering \`Treant\` brutes if not slain quickly!
-   - \`MothWisp\`: Circles (\`Circle\`), dives, and dims the player's light radius (\`Player::dim\`).
-   - \`Cutthroat\`: Ambushes from behind, dealing bonus backstab contact damage (\`contactBonus\`).
+3. **8 Greenwood & Woodland Foes (\`WildFoe::DEFS[8]\` in \`src/entity/enemy/WildFoe.cpp\`):**
+   Driven by a compact data-driven behavior table \`WildFoe::DEFS[]\` across \`Thornling\`, \`Boar\`, \`GoblinArcher\`, \`GoblinShaman\`, \`Sapling\`, \`Treant\`, \`MothWisp\`, and \`Cutthroat\`:
+   \`\`\`cpp
+   void WildFoe::tick() {
+     Enemy::tick();
+     if (removed)
+       return;
+     life += DT;
+     Player &p = *level->player;
+     if (wild.grow > 0 && life >= wild.grow) {
+       level->spawner.spawn(EnemyKind::Treant, x, y);
+       level->add<Shockwave>(x, bodyY(), 4, 30, 0.4f, Color{0.45f, 0.8f, 0.35f, 1}, false);
+       return remove();
+     }
+     if (wild.mends && (mendTime -= DT) <= 0) {
+       mendTime = 1;
+       if (Enemy *ally = hurtAlly(*this, 90)) {
+         ally->hp = std::min(ally->maxHp, ally->hp + 4 * damageMul);
+         Spark::burst(*level, ally->x, ally->bodyY(), HEX, 4, 30, true);
+       }
+     }
+     if (wild.dims && !p.dead()) {
+       double xd = p.x - x, yd = p.y - y;
+       float reach = type.radius + p.radius + 4;
+       if (xd * xd + yd * yd < reach * reach)
+         p.dim = 4;
+     }
+   }
+
+   float WildFoe::contactBonus(const Player &p) const {
+     return wild.backstab && (x - p.x) * p.facing < 0 ? 1.5f : 1.0f;
+   }
+   \`\`\`
+   - **\`Sapling\` → \`Treant\` Metamorphosis (\`wild.grow = 25\`):** If a \`Sapling\` survives for \`25s\`, it transforms in-place into a towering \`EnemyKind::Treant\` brute!
+   - **\`Cutthroat\` Backstab (\`wild.backstab = true\`):** \`contactBonus(p)\` tests \`(x - p.x) * p.facing < 0\` and deals **\`1.5×\`** contact damage when striking from behind the player's facing direction!
+   - **\`GoblinShaman\` (\`wild.mends = true\`):** Heals the most injured nearby monster within \`90 px\` every \`1.0s\` and casts \`hex\` every \`6.5s\` to inflict \`StatusKind::Weaken\` (\`25%\` for \`3.0s\`).
+   - **\`MothWisp\` (\`wild.dims = true\`):** Sets \`p.dim = 4\` on contact, dimming the player's torch light radius.
+   - **\`Thornling\` (\`wild.bramble = true\`):** Spawns a slowing \`Bramble\` hazard patch on death in \`WildFoe::die()\`.
 
 ---
 
@@ -1140,8 +1268,14 @@ Instead of relying on external audio middleware, \`Sound.cpp\` builds a zero-all
 
 ### Automated Test Suites, Benchmarks & Visual QA (\`src/test/\`)
 
-Mellangan includes a built-in verification and visual regression harness:
-- **Deterministic Unit & Simulation Suites (\`Test.cpp\`):** Exercises \`CoreTest\`, \`WorldTest\`, \`CombatTest\`, \`ClassTest\`, \`ArsenalTest\`, \`BiomeTransitionTest\`, \`BiomeEncounterTest\`, and \`RunTest\`.
+Mellangan includes a built-in verification and visual regression harness across **13 test files** in \`src/test/\`:
+- **Deterministic Unit & Simulation Suites (\`src/test/Test.cpp\`):**
+  1. \`CoreTest.cpp\`: Slab allocator (\`testPoolAllocAndFree\`, \`testPoolConcurrency\`), level lifecycle, and multi-threaded AI passes.
+  2. \`CombatTest.cpp\` & \`PayloadTest.cpp\`: 7 statuses (\`testStatuses\`, \`testStatusDamage\`, \`testNewStatuses\`), 16 weapon payloads (\`testNewPayloads\`), and shape forms (\`testShapeForms\`).
+  3. \`ItemTest.cpp\`: 30 affix families, rarity rolls, treasure classes, paper-doll inventory (\`testInventory\`), and reversible gear stats (\`testEquipStats\`).
+  4. \`AllyTest.cpp\`: Summon cap refreshing, quarry aggro redirection, decoy lure weighting, and friendly-fire immunity (\`testAllies\`).
+  5. \`ClassTest.cpp\`, \`ArsenalTest.cpp\`, \`BestiaryTest.cpp\`, \`ExpansionEnemyTest.cpp\`, \`ExpansionTest.cpp\`: All 12 hero kits, 41 weapon evolutions, 39 foe species, and 20 traits.
+  6. \`WorldTest.cpp\`, \`BiomeTransitionTest.cpp\`, \`BiomeEncounterTest.cpp\`, \`RunTest.cpp\`, \`RunRulesTest.cpp\`: Voronoi determinism, hill/tarn constraints, shoreline dry moats, and \`RunRules\` parameterization.
 - **Headless GPU Screenshot & QA Views (\`Screenshots.cpp\`, \`QaViews.cpp\`, \`BiomeMap.cpp\`):** Programmatically stages combat encounters, boss fights, UI menus, and biome transitions, capturing uncompressed frames directly from Vulkan textures via \`vk2dTextureCopyPixels\`.
 `,
     mermaidCharts: [
@@ -1188,10 +1322,10 @@ flowchart LR
   },
   {
     id: 'contribute-basics',
-    title: '12. Contribution Basics: Toolchain, Build, House Rules & --dev',
+    title: '12. Contribution Basics: Toolchain, Build, House Rules, DevStart & WorldDebug',
     category: 'contribute',
-    summary: 'Step-by-step onboarding from cloning submodules and building with CMake/slangc to house rules and --dev hotkeys.',
-    sourceFiles: ['CMakeLists.txt', 'NOTES.md', 'README.md', 'src/main.cpp', 'src/DevStart.cpp'],
+    summary: 'Step-by-step onboarding from cloning submodules and building with CMake/slangc to house rules, DevStart::seek() feature warps, and the F8 WorldDebug inspector.',
+    sourceFiles: ['CMakeLists.txt', 'NOTES.md', 'src/main.cpp', 'src/DevStart.hpp', 'src/DevStart.cpp', 'src/level/WorldDebug.cpp'],
     content: `
 ### Welcome Contributor! Start with the Basics
 
@@ -1203,7 +1337,7 @@ Mellangan requires:
 - **LunarG Vulkan SDK:** Provides the Vulkan headers/loader and **\`slangc\`**, which compiles \`res/shaders/*.slang\` into SPIR-V (\`.spv\`) at build time. On Windows, \`CMakeLists.txt\` automatically detects \`C:/VulkanSDK/*\` even if \`VULKAN_SDK\` is not set in your environment.
 - **Python 3 + Pillow 13.0.0:** Used only when regenerating or verifying the deterministic sprite atlas (\`tools/make_assets.py\`).
 
-\`\`\`cpp
+\`\`\`bash
 git clone --recurse-submodules https://github.com/soulwax/Mellangan.git
 cd Mellangan
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -1218,20 +1352,35 @@ Every pull request or task packet must obey five non-negotiable conventions:
 4. **Append-Only Enums (Save Compatibility):** \`EnemyKind\`, \`BiomeId\`, and \`HeroId\` indices are serialized in player saves, charts, and Codex progress. Always append new enum values at the end—never reorder or insert in the middle.
 5. **No Unverified Commits:** Always run \`--test\` in a Debug build (so \`assert()\` checks are compiled in) and inspect visual changes at 1x native scale before considering a task complete.
 
-#### Step 3: Fast Iteration with \`--dev\` and Startup Flags
-Never play for 10 minutes manually just to reach a test case! \`src/main.cpp\` and \`src/DevStart.cpp\` provide instant teleports and loadouts:
+#### Step 3: Fast Iteration with \`DevStart\` (\`src/DevStart.cpp\`) & \`WorldDebug\` (\`F8\`)
+Never play for 10 minutes manually just to reach a test case! \`src/DevStart.cpp\` provides instant concentric-ring terrain feature warps (\`DevStart::seek\`), upgrade loadouts (\`DevStart::armPlayer\`), loot bag seeding (\`--give N\`), and ally pack summoning (\`--allies N\`):
+
+\`\`\`cpp
+template <class F> void DevStart::seek(F fits) {
+  for (int r = 0; r < 2000; r += 4)
+    for (int i = 0, n = std::max(1, r); i < n; i++) {
+      double a = TAU * i / n;
+      int tx = int(std::cos(a) * r), ty = int(std::sin(a) * r);
+      if (fits(tx, ty)) {
+        x = tx, y = ty, at = true;
+        return;
+      }
+    }
+}
+\`\`\`
+
 - **Hotkeys in \`--dev\` mode:**
   - \`F5\`: Instant Level-Up menu.
-  - \`F6\`: Skip +30 seconds on the night clock.
-  - \`F7\`: Toggle God Mode (invulnerability).
-  - \`F8\`: Toggle World Debug HUD (tile coordinates, biome blend weights, \`Prof.c\` timings).
+  - \`F6\`: Skip \`+30s\` on the night clock.
+  - \`F7\`: Toggle God Mode (\`p.god = !p.god\`).
+  - \`F8\`: Toggle **\`WorldDebug\` (\`src/level/WorldDebug.cpp\`)** — overlays the \`20 × 20\`-tile regional grid (\`R rx,ry\`), colour-coded \`Structure\` footprints with \`1\`-tile apron frames, pulsing target brackets (\`pulse = (2 + 2 * sin(t * 6)) * u\`), a dashed guide vector to the nearest unvisited structure, and live tile/biome/elevation telemetry panels!
   - \`F9\`: Warp to the nearest generated structure or shrine.
   - \`F10\`: Cycle to the next weather front (\`Rain\`, \`Snow\`, \`Storm\`, \`Sand\`).
-- **Command-Line Warp Flags:**
-  - \`--arm "Ember Lance!,Bastion Shields"\`: Starts the run pre-equipped with those upgrades (append \`!\` to start at Level 5 Evolved).
-  - \`--biome 12\`: Spawns directly inside Biome ID 12 (\`CrystalFields\`).
-  - \`--at -220,-192\`: Spawns at exact tile coordinates \`(-220, -192)\`.
-  - \`--cliff\`, \`--ramp\`, \`--peak\`, \`--lake\`, \`--landmark N\`: Teleports directly to the nearest matching terrain feature.
+- **Command-Line Warp & Loadout Flags (\`src/DevStart.hpp\`):**
+  - \`--arm "=Ember Lance!,Bastion Shields"\`: Prefixing with \`'='\` (\`stripsLevels()\`) zeroes out starting class weapons first; appending \`'!'\` levels the upgrade to \`MAX_LEVEL\` and immediately calls \`u.evolve()\`.
+  - \`--give 12 --loot\`: Rolls 12 \`ilvl = 30\` items at \`300%\` Magic Find directly into \`p.bag\` and enables ground loot drops.
+  - \`--allies 6\`: Summons a ring of 6 allied companions (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Drone\`, \`Crew\`) around the player at spawn.
+  - \`--biome N\`, \`--at X,Y\`, \`--cliff\`, \`--ramp\`, \`--peak\`, \`--lake\`, \`--landmark N\`: Teleports directly to the nearest matching terrain feature.
 `,
     mermaidCharts: [
       {

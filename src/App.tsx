@@ -16,6 +16,7 @@ import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
 import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
 import { LootAffixSimulator } from "./components/LootAffixSimulator";
 import { GearEventsHudLab } from "./components/GearEventsHudLab";
+import { highlightCodeToHtml } from "./utils/highlightCode";
 import {
   Cpu,
   Layers,
@@ -219,7 +220,7 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "weapon-synthesis",
-        shortTitle: "15 FormBehaviors, 16 Payloads & Evos",
+        shortTitle: "16 FormBehaviors, Payloads & Summons",
       },
       {
         id: "classes-encounters",
@@ -276,20 +277,22 @@ function renderMarkdownToHtml(markdown: string): string {
   const withPlaceholders = markdown.replace(
     /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g,
     (_m, lang, code) => {
-      const escaped = code
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .trimEnd();
+      const cleanCode = code.trimEnd();
+      const highlighted = highlightCodeToHtml(cleanCode, lang || "cpp", true);
+      const encodedRaw = encodeURIComponent(cleanCode);
       const label =
-        lang === "cpp"
+        lang === "cpp" || !lang
           ? "C++20"
           : lang === "c"
             ? "C11"
-            : lang
-              ? lang.toUpperCase()
-              : "CODE";
-      const html = `<div class="my-5 rounded-xl overflow-hidden border border-dark-750 bg-dark-900/95 shadow-md"><div class="px-3.5 py-1.5 bg-dark-950/80 border-b border-dark-800 flex items-center justify-between text-[10px] font-mono text-slate-400 uppercase tracking-wider"><span>${label}</span><span class="text-slate-600">Mellangan Source</span></div><pre class="p-4 overflow-x-auto text-[12.5px] font-mono text-slate-200 leading-[1.65]">${escaped}</pre></div>`;
+            : lang === "slang" || lang === "glsl"
+              ? "SLANG / SPIR-V"
+              : lang === "ini"
+                ? "INI CONFIG"
+                : lang === "bash" || lang === "sh" || lang === "shell"
+                  ? "SHELL / CLI"
+                  : lang.toUpperCase();
+      const html = `<div class="my-5 rounded-xl overflow-hidden border border-dark-750 bg-[#0a0811] shadow-lg"><div class="px-3.5 py-2 bg-dark-950/90 border-b border-dark-800 flex items-center justify-between text-[11px] font-mono text-slate-400"><div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gold-400/80"></span><span class="font-semibold text-gold-300 uppercase tracking-wider">${label}</span></span><span class="text-slate-600">•</span><span class="text-slate-500">Mellangan Source</span></div><button type="button" data-copy-code="${encodedRaw}" class="px-2 py-0.5 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-gold-500/40 text-[10px] font-mono text-slate-300 hover:text-gold-300 transition-colors">Copy Code</button></div><pre class="py-3.5 px-2 overflow-x-auto text-[13px] font-mono text-slate-200 leading-[1.68]">${highlighted}</pre></div>`;
       const idx = codeBlocks.length;
       codeBlocks.push(html);
       return `\n@@CODE_BLOCK_${idx}@@\n`;
@@ -465,6 +468,13 @@ export const App: React.FC = () => {
     () => parseLocationRoute().hash,
   );
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
+  const [proseFont, setProseFont] = useState<"sans" | "serif">(() => {
+    if (typeof window !== "undefined") {
+      const saved = window.localStorage.getItem("mellangan-wiki-font");
+      if (saved === "serif" || saved === "sans") return saved;
+    }
+    return "sans";
+  });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>("all");
@@ -710,11 +720,11 @@ export const App: React.FC = () => {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-display font-bold text-sm tracking-wider text-slate-100">
-                    MELLANGAN DOCS
+                  <span className="font-display font-bold text-base tracking-normal text-slate-100">
+                    Mellangan Docs
                   </span>
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.5.15
+                    v0.5.15+
                   </span>
                 </div>
               </div>
@@ -722,6 +732,39 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <div
+              className="hidden sm:flex items-center bg-dark-900 p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
+              title="Switch article reading typography between Plus Jakarta Sans and Source Serif 4"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setProseFont("sans");
+                  window.localStorage.setItem("mellangan-wiki-font", "sans");
+                }}
+                className={`px-2 py-1 rounded-md transition-colors ${
+                  proseFont === "sans"
+                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Sans
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProseFont("serif");
+                  window.localStorage.setItem("mellangan-wiki-font", "serif");
+                }}
+                className={`px-2 py-1 rounded-md font-serif transition-colors ${
+                  proseFont === "serif"
+                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Serif
+              </button>
+            </div>
             <a
               href="/contribute-basics"
               onClick={(e) => selectChapter("contribute-basics", e)}
@@ -1098,8 +1141,27 @@ export const App: React.FC = () => {
             </div>
 
             <article
-              className="wiki-prose"
+              className={`wiki-prose ${proseFont === "serif" ? "prose-serif" : ""}`}
               onClick={(e) => {
+                const copyBtn = (e.target as HTMLElement).closest(
+                  "[data-copy-code]",
+                ) as HTMLButtonElement | null;
+                if (copyBtn) {
+                  const raw = decodeURIComponent(
+                    copyBtn.getAttribute("data-copy-code") || "",
+                  );
+                  if (raw) {
+                    navigator.clipboard?.writeText(raw);
+                    const prevText = copyBtn.textContent;
+                    copyBtn.textContent = "Copied!";
+                    copyBtn.classList.add("text-emerald-300");
+                    window.setTimeout(() => {
+                      copyBtn.textContent = prevText || "Copy Code";
+                      copyBtn.classList.remove("text-emerald-300");
+                    }, 1500);
+                  }
+                  return;
+                }
                 const target = (e.target as HTMLElement).closest("a");
                 if (!target) return;
                 const href = target.getAttribute("href") || "";

@@ -187,6 +187,8 @@ export const ContributorTutorialWizard: React.FC = () => {
   const [armWeapon, setArmWeapon] = useState<string>("Ember Lance!");
   const [biomeId, setBiomeId] = useState<number>(12);
   const [spawnFeature, setSpawnFeature] = useState<string>("--cliff");
+  const [giveLootCount, setGiveLootCount] = useState<number>(8);
+  const [allyCount, setAllyCount] = useState<number>(4);
   const [viewX, setViewX] = useState<number>(-220);
   const [viewY, setViewY] = useState<number>(-192);
   const [viewSeed, setViewSeed] = useState<number>(0);
@@ -219,8 +221,10 @@ export const ContributorTutorialWizard: React.FC = () => {
     if (armWeapon.trim()) parts.push(`--arm "${armWeapon.trim()}"`);
     parts.push(`--biome ${biomeId}`);
     if (spawnFeature !== "none") parts.push(spawnFeature);
+    if (giveLootCount > 0) parts.push(`--give ${giveLootCount} --loot`);
+    if (allyCount > 0) parts.push(`--allies ${allyCount}`);
     return parts.join(" ");
-  }, [cliMode, armWeapon, biomeId, spawnFeature, viewX, viewY, viewSeed]);
+  }, [cliMode, armWeapon, biomeId, spawnFeature, giveLootCount, allyCount, viewX, viewY, viewSeed]);
 
   const atlasPixelX = atlasCol * 18 + 1;
   const atlasPixelY = atlasRow * 18 + 1;
@@ -527,6 +531,32 @@ export const ContributorTutorialWizard: React.FC = () => {
                   </option>
                   <option value="none">None (Default Origin)</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-1">
+                  --give N --loot (Random Items in Bag: {giveLootCount})
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={32}
+                  value={giveLootCount}
+                  onChange={(e) => setGiveLootCount(Number(e.target.value))}
+                  className="w-full accent-gold-400"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-1">
+                  --allies N (Summoned Companion Pack: {allyCount})
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={12}
+                  value={allyCount}
+                  onChange={(e) => setAllyCount(Number(e.target.value))}
+                  className="w-full accent-emerald-400"
+                />
               </div>
             </div>
           )}

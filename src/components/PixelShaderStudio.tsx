@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Palette, Sparkles, Grid, Eye, Copy, Check, RotateCcw } from 'lucide-react';
+import { highlightCodeToHtml } from '../utils/highlightCode';
 
 type Tone = 0 | 1 | 2 | 3;
 
@@ -384,9 +385,12 @@ ${hiRows.map((r) => `        "${r}",`).join('\n')}
                   )}
                 </button>
               </div>
-              <pre className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 text-[11px] font-mono text-emerald-300 overflow-x-auto leading-relaxed max-h-[310px]">
-                {pythonSnippet}
-              </pre>
+              <pre
+                className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-200 overflow-x-auto leading-relaxed max-h-[310px]"
+                dangerouslySetInnerHTML={{
+                  __html: highlightCodeToHtml(pythonSnippet, 'python', true),
+                }}
+              />
             </div>
 
             <div className="mt-4 p-3 rounded-xl bg-dark-950/90 border border-dark-800 text-xs font-mono text-slate-300 space-y-1">
@@ -529,12 +533,16 @@ ${hiRows.map((r) => `        "${r}",`).join('\n')}
               </div>
             </div>
 
-            <pre className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-200 overflow-x-auto leading-relaxed">
-{`float2 ca = n * (0.35 + post.hurt * 4.0); // = n * ${(0.35 + hurt * 4.0).toFixed(2)}
-float3 albedo = float3(albedoAt(uv + ca).r, albedoAt(uv).g, albedoAt(uv - ca).b);
-float3 col = aces((albedo * lightAt(uv) + min(bloom * 0.06, 0.2)) * 1.15);
-col *= 1.0 - smoothstep(0.55, 1.25, dist) * ${vignette.toFixed(2)};`}
-            </pre>
+            <pre
+              className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 text-[11px] font-mono text-slate-200 overflow-x-auto leading-relaxed"
+              dangerouslySetInnerHTML={{
+                __html: highlightCodeToHtml(
+                  `float2 ca = n * (0.35 + post.hurt * 4.0); // = n * ${(0.35 + hurt * 4.0).toFixed(2)}\nfloat3 albedo = float3(albedoAt(uv + ca).r, albedoAt(uv).g, albedoAt(uv - ca).b);\nfloat3 col = aces((albedo * lightAt(uv) + min(bloom * 0.06, 0.2)) * 1.15);\ncol *= 1.0 - smoothstep(0.55, 1.25, dist) * ${vignette.toFixed(2)};`,
+                  'slang',
+                  true,
+                ),
+              }}
+            />
           </div>
         </div>
       )}

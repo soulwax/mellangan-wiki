@@ -13,6 +13,7 @@ export default {
           900: '#0c0a13',
           850: '#12101b',
           800: '#181524',
+          750: '#1e1a2d',
           700: '#231f33',
           600: '#342f4c',
         },
@@ -39,12 +40,12 @@ export default {
         }
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
-        display: ['Cinzel', 'Trajan Pro', 'serif'],
+        sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        serif: ['"Source Serif 4"', 'Georgia', 'Cambria', 'serif'],
+        mono: ['"JetBrains Mono"', '"Fira Code"', 'Consolas', 'monospace'],
+        display: ['"Newsreader"', '"Plus Jakarta Sans"', 'Georgia', 'serif'],
       }
     },
   },
   plugins: [],
 }
-

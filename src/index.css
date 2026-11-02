@@ -5,6 +5,8 @@
 @layer base {
   body {
     @apply bg-dark-950 text-slate-200 antialiased font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
     background-image:
       radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.035) 0px, transparent 50%),
       radial-gradient(
@@ -33,7 +35,8 @@
 }
 
 .font-display {
-  font-family: "Cinzel", serif;
+  font-family: "Newsreader", "Plus Jakarta Sans", Georgia, serif;
+  letter-spacing: -0.012em;
 }
 
 .code-block {
@@ -42,38 +45,47 @@
 
 /* Readable documentation measure and list styling */
 .wiki-prose {
-  font-size: 0.96875rem; /* 15.5px */
-  line-height: 1.82;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 1rem; /* 16px */
+  line-height: 1.84;
+  letter-spacing: -0.006em;
   color: #e2e8f0;
-  max-width: 66ch;
+  max-width: 68ch;
+}
+
+.wiki-prose.prose-serif {
+  font-family: "Source Serif 4", Georgia, Cambria, serif;
+  font-size: 1.045rem; /* 16.7px */
+  line-height: 1.86;
+  letter-spacing: -0.003em;
 }
 
 .wiki-prose p {
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-  color: #cbd5e1;
+  margin-top: 1.05rem;
+  margin-bottom: 1.05rem;
+  color: #d6e0ec;
 }
 
 .wiki-prose ul {
-  margin-top: 0.85rem;
-  margin-bottom: 1.15rem;
-  padding-left: 1.35rem;
+  margin-top: 0.9rem;
+  margin-bottom: 1.2rem;
+  padding-left: 1.4rem;
   list-style-type: disc;
 }
 
 .wiki-prose ol {
-  margin-top: 0.85rem;
-  margin-bottom: 1.15rem;
-  padding-left: 1.45rem;
+  margin-top: 0.9rem;
+  margin-bottom: 1.2rem;
+  padding-left: 1.5rem;
   list-style-type: decimal;
 }
 
 .wiki-prose li {
-  margin-top: 0.45rem;
-  margin-bottom: 0.45rem;
+  margin-top: 0.48rem;
+  margin-bottom: 0.48rem;
   padding-left: 0.25rem;
-  line-height: 1.75;
-  color: #cbd5e1;
+  line-height: 1.78;
+  color: #d6e0ec;
 }
 
 .wiki-prose li::marker {
@@ -81,11 +93,80 @@
   font-weight: 600;
 }
 
+/* C++20 / Slang / INI Syntax Highlighting Tokens */
+.code-line {
+  display: flex;
+  align-items: baseline;
+  min-height: 1.55rem;
+}
+
+.code-line:hover {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+.code-ln {
+  user-select: none;
+  width: 2.25rem;
+  padding-right: 0.85rem;
+  text-align: right;
+  color: #475569;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.code-content {
+  flex: 1;
+  white-space: pre;
+}
+
+.tok-keyword {
+  color: #c084fc; /* purple-400 */
+  font-weight: 500;
+}
+
+.tok-type {
+  color: #38bdf8; /* sky-400 */
+}
+
+.tok-fn {
+  color: #fde68a; /* amber-200 */
+}
+
+.tok-string {
+  color: #6ee7b7; /* emerald-300 */
+}
+
+.tok-number {
+  color: #fb923c; /* orange-400 */
+}
+
+.tok-comment {
+  color: #64748b; /* slate-500 */
+  font-style: italic;
+}
+
+.tok-preproc {
+  color: #fb7185; /* rose-400 */
+  font-weight: 500;
+}
+
+.tok-const {
+  color: #facc15; /* yellow-400 */
+}
+
+.tok-namespace {
+  color: #a5b4fc; /* indigo-300 */
+}
+
+.tok-op {
+  color: #94a3b8; /* slate-400 */
+}
+
 /* Mermaid SVG diagram styling */
 .mermaid svg {
   max-width: 100% !important;
   height: auto !important;
-  font-family: "Inter", sans-serif !important;
+  font-family: "Plus Jakarta Sans", sans-serif !important;
 }
 
 .glow-border {
