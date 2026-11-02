@@ -101,6 +101,14 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         id: "tutorial-pixel-shader",
         shortTitle: "16×16 Pixel Art & Slang Shaders",
       },
+      {
+        id: "tutorial-loot-affixes-allies",
+        shortTitle: "Adding Loot Affixes, Allies & Forms",
+      },
+      {
+        id: "tutorial-traits-events-bounties",
+        shortTitle: "Adding Traits, Bounties & Field Tests",
+      },
     ],
   },
   {
@@ -853,7 +861,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 27 chapters, files..."
+                placeholder="Filter 29 chapters, files..."
                 className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (

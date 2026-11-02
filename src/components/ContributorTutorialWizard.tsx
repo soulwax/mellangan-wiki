@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { highlightCodeToHtml } from "../utils/highlightCode";
 import {
   Terminal,
   CheckCircle2,
@@ -9,6 +10,7 @@ import {
   Sparkles,
   Copy,
   Check,
+  Code2,
 } from "lucide-react";
 
 interface TutorialStep {
@@ -174,9 +176,9 @@ const BIOME_LIST = [
 ];
 
 export const ContributorTutorialWizard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"steps" | "cli" | "atlas">(
-    "steps",
-  );
+  const [activeTab, setActiveTab] = useState<
+    "steps" | "cli" | "atlas" | "templates"
+  >("steps");
   const [selectedStep, setSelectedStep] = useState<number>(0);
   const [completedSteps, setCompletedSteps] = useState<number[]>([1]);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
@@ -196,6 +198,17 @@ export const ContributorTutorialWizard: React.FC = () => {
   const [atlasCol, setAtlasCol] = useState<number>(14);
   const [atlasRow, setAtlasRow] = useState<number>(34);
   const [isTallTree, setIsTallTree] = useState<boolean>(false);
+
+  const [templateKind, setTemplateKind] = useState<
+    "recipe" | "ally" | "affix" | "foe" | "trait" | "test"
+  >("recipe");
+  const [customName, setCustomName] = useState<string>("Starlight Glaive");
+  const [customEvolutionName, setCustomEvolutionName] =
+    useState<string>("Supernova Halberd");
+  const [customCatalyst, setCustomCatalyst] = useState<string>("Might");
+  const [customDamage, setCustomDamage] = useState<number>(2.4);
+  const [customCooldown, setCustomCooldown] = useState<number>(1.35);
+  const [customReach, setCustomReach] = useState<number>(64);
 
   const toggleComplete = (id: number) => {
     setCompletedSteps((prev) =>
@@ -231,6 +244,247 @@ export const ContributorTutorialWizard: React.FC = () => {
   const atlasHeight = isTallTree ? 34 : 16;
   const linearCellIndex = atlasRow * 24 + atlasCol;
 
+  const generatedSnippet = useMemo(() => {
+    const cleanName = customName.trim() || "Starlight Glaive";
+    const cleanId = cleanName.replace(/[^a-zA-Z0-9]/g, "") || "StarlightGlaive";
+    const cleanEvo = customEvolutionName.trim() || "Supernova Halberd";
+    const dmg = customDamage.toFixed(1);
+    const cd = customCooldown.toFixed(2);
+    const rch = Math.round(customReach);
+
+    if (templateKind === "recipe") {
+      return {
+        files: "src/item/weapon/Recipe.cpp",
+        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --arm "${cleanName}!,${customCatalyst}"`,
+        code: `{
+    "${cleanName}",
+    "Sweeps a crescent of astral steel across nearby foes.",
+    Form::Sweep,
+    Aim::Nearest,
+    Motion::Linear,
+    Hit::Pierce,
+    Element::Arcane,
+    Atlas::BroadSword,
+    Atlas::SlashArc,
+    Color::rgb(0x88, 0xD4, 0xFF),
+    ${dmg}f,
+    ${cd}f,
+    0.24f,
+    180.0f,
+    ${rch}.0f,
+    1,
+    3,
+    18.0f,
+    0.0f,
+    8,
+    0.22f,
+    0.18f,
+    1,
+    12,
+    Evolution{
+        "${cleanEvo}",
+        "Unleashes twin astral crescents that shock and cleave the pack.",
+        "${customCatalyst}",
+        Atlas::BroadSword,
+        Color::rgb(0xE0, 0xB0, 0xFF),
+        ${(customDamage * 1.55).toFixed(1)}f,
+        ${Math.max(0.35, customCooldown * 0.78).toFixed(2)}f,
+        ${rch + 18}.0f,
+        2,
+        2,
+        Element::Lightning,
+    },
+},`,
+      };
+    }
+
+    if (templateKind === "ally") {
+      return {
+        files:
+          "src/entity/Ally.hpp, src/entity/Ally.cpp & src/item/weapon/Recipe.cpp",
+        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --arm "${cleanName}" --allies 4`,
+        code: `enum class AllyKind : uint8_t {
+    Skeleton,
+    Wolf,
+    Wisp,
+    Turret,
+    Totem,
+    Golem,
+    Decoy,
+    Fairy,
+    Crow,
+    Imp,
+    Beetle,
+    Banner,
+    Ancestor,
+    Mirror,
+    Bear,
+    Hawk,
+    Spiderling,
+    BoneMage,
+    EmberHound,
+    FrostSprite,
+    Gargoyle,
+    VineTendril,
+    Drone,
+    Valkyrie,
+    ${cleanId},
+    Count
+};
+
+{
+    "${cleanName}",
+    "${cleanName}",
+    EnemyKind::Wisp,
+    ${Math.round(customDamage * 12)}.0f,
+    82.0f,
+    ${cd}f,
+    ${rch}.0f,
+    18.0f,
+    1.0f,
+    true,
+    false,
+    Color::rgb(0x70, 0xE8, 0xFF),
+    "Arcane Staff"
+},`,
+      };
+    }
+
+    if (templateKind === "affix") {
+      const lo1 = Math.max(1, Math.round(customDamage));
+      const hi5 = Math.max(lo1 + 8, Math.round(customDamage * 7));
+      return {
+        files:
+          "src/item/loot/Affix.hpp, src/item/loot/Affix.cpp & src/item/loot/Equip.cpp",
+        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --give 16 --loot`,
+        code: `{
+    "${cleanId}",
+    true,
+    slot::Weapon | slot::Charm,
+    Stat::${cleanId},
+    0xFFF,
+    5,
+    {
+        {"Glimmering", 1, ${lo1}.0f, ${lo1 + 2}.0f},
+        {"Astral", 5, ${lo1 + 3}.0f, ${lo1 + 5}.0f},
+        {"Celestial", 10, ${lo1 + 6}.0f, ${lo1 + 9}.0f},
+        {"Starforged", 15, ${lo1 + 10}.0f, ${lo1 + 14}.0f},
+        {"Cosmic", 20, ${lo1 + 15}.0f, ${hi5}.0f},
+    }
+},
+
+case Stat::${cleanId}:
+    p.stats().might += v * 0.01f;
+    break;`,
+      };
+    }
+
+    if (templateKind === "foe") {
+      return {
+        files:
+          "src/entity/enemy/EnemyType.hpp, src/entity/enemy/ai/Plans.cpp & src/entity/enemy/WildFoe.cpp",
+        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --biome ${biomeId}`,
+        code: `const Plan PLAN_${cleanId.toUpperCase()}{
+    Gait::Hover,
+    ${rch}.0f,
+    0.35f,
+    {
+        {GoalKind::Dodge, 1, 0.25f, 36.0f, 1.85f},
+        {GoalKind::Pounce, 3, 0.55f, ${rch}.0f, 2.20f},
+        {GoalKind::Orbit, 5, 1.10f, ${Math.max(36, rch - 12)}.0f, 1.15f},
+        {GoalKind::March, 8, 1.00f, 0.0f, 1.00f},
+    }
+};
+
+case EnemyKind::${cleanId}: {
+    constexpr Type t{
+        "${cleanName}",
+        Atlas::Wisp,
+        Color::rgb(0x66, 0xE0, 0xFF),
+        ${Math.round(customDamage * 6)},
+        76.0f,
+        1.0f,
+        true,
+        2,
+        &PLAN_${cleanId.toUpperCase()}
+    };
+    return t;
+}`,
+      };
+    }
+
+    if (templateKind === "trait") {
+      return {
+        files: "src/entity/Trait.hpp & src/entity/Trait.cpp",
+        verifyCmd: `./build/bin/Debug/MellanganApp.exe --test-encounter-view`,
+        code: `enum class Trait : uint8_t {
+    Hasted,
+    Armored,
+    Regenerating,
+    Vampiric,
+    Thorns,
+    Molten,
+    Frozen,
+    Plagued,
+    Stormcaller,
+    Splitting,
+    Shielded,
+    Berserk,
+    Blinker,
+    Avenger,
+    Executioner,
+    Juggernaut,
+    Dampening,
+    Vortex,
+    Hexer,
+    Undying,
+    ${cleanId},
+    Count
+};
+
+float Traits::incoming(Mob &self, float damage) {
+    if (has(Trait::${cleanId}) && self.hp * 2 <= self.maxHp) {
+        damage *= 0.65f;
+    }
+    return damage;
+}
+
+void Traits::landed(Mob &self, float dealt) {
+    if (has(Trait::${cleanId}) && dealt > 0.0f && self.level) {
+        self.level->player()->applyChill(1.1f);
+    }
+}`,
+      };
+    }
+
+    return {
+      files: "src/test/AllyTest.cpp & src/test/Test.cpp",
+      verifyCmd: `./build/bin/Debug/MellanganApp.exe --test`,
+      code: `void test${cleanId}() {
+    Field f;
+    f.player->grant("${cleanName}", 1);
+    auto *foe = f.spawn(EnemyKind::Zombie, f.player->x + ${rch}.0, f.player->y);
+    int hpBefore = foe->hp;
+    f.step(180);
+    assert(foe->removed || foe->hp < hpBefore);
+}`,
+    };
+  }, [
+    templateKind,
+    customName,
+    customEvolutionName,
+    customCatalyst,
+    customDamage,
+    customCooldown,
+    customReach,
+    biomeId,
+  ]);
+
+  const highlightedSnippet = useMemo(
+    () => highlightCodeToHtml(generatedSnippet.code, "cpp", true),
+    [generatedSnippet.code],
+  );
+
   const currentStep = STEPS[selectedStep];
 
   return (
@@ -245,13 +499,13 @@ export const ContributorTutorialWizard: React.FC = () => {
           </div>
           <p className="text-xs text-slate-400 mt-1">
             Step-by-step walkthrough,{" "}
-            <code className="text-gold-300">--dev</code> CLI flag synthesizer,
-            and <code className="text-gold-300">18×18</code> Atlas cell
-            calculator
+            <code className="text-gold-300">--dev</code> CLI flag synthesizer,{" "}
+            <code className="text-gold-300">18×18</code> Atlas cell calculator,
+            and <code className="text-gold-300">C++20</code> code generator
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
           <button
             onClick={() => setActiveTab("steps")}
             className={`px-3 py-1.5 rounded-lg border transition-colors ${
@@ -281,6 +535,17 @@ export const ContributorTutorialWizard: React.FC = () => {
             }`}
           >
             3. Atlas Cell Calculator
+          </button>
+          <button
+            onClick={() => setActiveTab("templates")}
+            className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${
+              activeTab === "templates"
+                ? "bg-sky-500/20 border-sky-500/60 text-sky-300 font-bold"
+                : "bg-dark-950 border-dark-750 text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            <span>4. C++20 Code Generator</span>
           </button>
         </div>
       </div>
@@ -748,6 +1013,189 @@ export const ContributorTutorialWizard: React.FC = () => {
             <code className="text-emerald-300 font-bold">
               {`constexpr Sprite MySprite{${atlasPixelX}, ${atlasPixelY}, 16, ${atlasHeight}};`}
             </code>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "templates" && (
+        <div className="p-5 rounded-xl bg-dark-950 border border-dark-800 space-y-5 font-mono text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dark-800 pb-3">
+            <div>
+              <div className="text-sky-400 font-bold uppercase text-[10px]">
+                House-Rule Compliant C++20 Boilerplate Generator (Zero Comments)
+              </div>
+              <h5 className="text-base font-bold text-white mt-0.5">
+                Interactive Contribution Code Synthesizer
+              </h5>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { id: "recipe", label: "1. Recipe Weapon + Evo" },
+                { id: "ally", label: "2. Summoned Ally" },
+                { id: "affix", label: "3. 5-Tier Loot Affix" },
+                { id: "foe", label: "4. WildFoe + Goal Plan" },
+                { id: "trait", label: "5. Elite Trait" },
+                { id: "test", label: "6. Headless Unit Test" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTemplateKind(t.id as typeof templateKind)}
+                  className={`px-2.5 py-1 rounded border transition-colors ${
+                    templateKind === t.id
+                      ? "bg-sky-500/20 border-sky-500 text-sky-300 font-bold"
+                      : "bg-dark-900 border-dark-750 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">
+                Identifier / Display Name
+              </label>
+              <input
+                type="text"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                className="w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-slate-200"
+              />
+            </div>
+
+            {templateKind === "recipe" && (
+              <>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    Evolved Weapon Name
+                  </label>
+                  <input
+                    type="text"
+                    value={customEvolutionName}
+                    onChange={(e) => setCustomEvolutionName(e.target.value)}
+                    className="w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    Passive Catalyst Upgrade
+                  </label>
+                  <select
+                    value={customCatalyst}
+                    onChange={(e) => setCustomCatalyst(e.target.value)}
+                    className="w-full bg-dark-900 border border-dark-700 rounded-lg px-3 py-1.5 text-slate-200"
+                  >
+                    <option value="Might">Might</option>
+                    <option value="Haste">Haste</option>
+                    <option value="Swift Boots">Swift Boots</option>
+                    <option value="Toughness">Toughness</option>
+                    <option value="Magnet">Magnet</option>
+                    <option value="Vitality">Vitality</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">
+                Base Scale / Damage: {customDamage.toFixed(1)}
+              </label>
+              <input
+                type="range"
+                min={0.8}
+                max={6.0}
+                step={0.2}
+                value={customDamage}
+                onChange={(e) => setCustomDamage(Number(e.target.value))}
+                className="w-full accent-gold-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">
+                Cadence / Cooldown: {customCooldown.toFixed(2)}s
+              </label>
+              <input
+                type="range"
+                min={0.25}
+                max={3.5}
+                step={0.05}
+                value={customCooldown}
+                onChange={(e) => setCustomCooldown(Number(e.target.value))}
+                className="w-full accent-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-slate-400 mb-1">
+                Reach / Radius: {customReach} px
+              </label>
+              <input
+                type="range"
+                min={24}
+                max={140}
+                step={4}
+                value={customReach}
+                onChange={(e) => setCustomReach(Number(e.target.value))}
+                className="w-full accent-sky-400"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl overflow-hidden border border-dark-750 bg-[#0a0811] shadow-lg">
+            <div className="px-3.5 py-2 bg-dark-950/90 border-b border-dark-800 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+                  <span className="font-semibold text-sky-300 uppercase tracking-wider">
+                    C++20 Template
+                  </span>
+                </span>
+                <span className="text-slate-600">•</span>
+                <span className="text-gold-300">{generatedSnippet.files}</span>
+              </div>
+              <button
+                onClick={() => copyText(generatedSnippet.code)}
+                className="px-2.5 py-1 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-gold-500/40 text-[10px] font-mono text-slate-200 hover:text-gold-300 flex items-center gap-1.5 transition-colors"
+              >
+                {copiedCmd === generatedSnippet.code ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span className="text-emerald-300">Copied C++20</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    <span>Copy C++20 Snippet</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <pre
+              className="py-3.5 px-2 overflow-x-auto text-[12.5px] font-mono text-slate-200 leading-[1.68]"
+              dangerouslySetInnerHTML={{ __html: highlightedSnippet }}
+            />
+          </div>
+
+          <div className="p-3 rounded-xl bg-dark-900 border border-emerald-500/40 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-emerald-300 overflow-x-auto">
+              <Terminal className="w-4 h-4 shrink-0 text-gold-400" />
+              <span className="text-slate-400">Verify with:</span>
+              <code className="font-bold">{generatedSnippet.verifyCmd}</code>
+            </div>
+            <button
+              onClick={() => copyText(generatedSnippet.verifyCmd)}
+              className="px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 flex items-center gap-1"
+            >
+              {copiedCmd === generatedSnippet.verifyCmd ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              <span>Copy Verify Command</span>
+            </button>
           </div>
         </div>
       )}

@@ -3237,7 +3237,7 @@ void Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag) con
                                         yh / std::max(1.0f, std::abs(yd))));
     float px = vw * k * 0.5f + xd * fit;
     float py = vh * k * 0.5f + yd * fit;
-    // ...
+    s.rect(px - 5 * u, py - 5 * u, 10 * u, 10 * u, col);
 }
 \`\`\`
 
@@ -3284,5 +3284,421 @@ flowchart TD
       },
     ],
     interactiveComponent: 'gearevents',
+  },
+  {
+    id: 'tutorial-loot-affixes-allies',
+    title: '28. Tutorial 9: Contributing Diablo Item Bases, 5-Tier Affixes, Summoned Allies & Weapon Forms',
+    category: 'contribute',
+    summary: 'Step-by-step C++20 guide to adding Diablo-style gear bases, reversible 5-tier item affixes in Affix.cpp & Equip.cpp, autonomous summoned Ally companions, and custom FormBehaviors.',
+    sourceFiles: [
+      'src/item/loot/ItemBase.cpp',
+      'src/item/loot/Affix.hpp',
+      'src/item/loot/Affix.cpp',
+      'src/item/loot/Equip.cpp',
+      'src/entity/Ally.hpp',
+      'src/entity/Ally.cpp',
+      'src/item/weapon/form/Summon.cpp',
+      'src/item/weapon/FormRegistry.cpp',
+    ],
+    content: `
+### 1. Contributing a New Diablo Gear Base (\`src/item/loot/ItemBase.cpp\`)
+
+Weapon item bases in Mellangan are synthesized automatically at startup from \`Upgrade::all()\` inside \`build()\` (\`src/item/loot/ItemBase.cpp\`), so any new weapon recipe you add to \`RECIPES[]\` immediately becomes a droppable weapon base! Offhand shields/tomes, armour pieces, and charms are declared in \`const ItemBase GEAR[]\` (\`src/item/loot/ItemBase.cpp\`):
+
+\`\`\`cpp
+const ItemBase GEAR[] = {
+    {"Buckler", slot::Offhand, Atlas::RoundShield, 1, 10, 20, Stat::Armor, 1.0f, nullptr},
+    {"Kite Shield", slot::Offhand, Atlas::RoundShield, 6, 8, 55, Stat::Armor, 2.0f, nullptr},
+    {"Astral Aegis", slot::Offhand, Atlas::AegisShield, 14, 5, 135, Stat::ResistArcane, 18.0f, nullptr},
+    {"Starlight Signet", slot::Charm, Atlas::SignetRing, 10, 6, 95, Stat::CritChance, 4.0f, nullptr},
+};
+\`\`\`
+
+- **Field Breakdown (\`ItemBase\`):**
+  1. \`name\`: Display name shown as the base noun between prefix and suffix (e.g., \`"Celestial Astral Aegis of the Titan"\`).
+  2. \`slots\`: Bitmask from \`namespace slot\` (\`slot::Weapon = 1\`, \`slot::Offhand = 2\`, \`slot::Armour = 4\`, \`slot::Charm = 8\`).
+  3. \`icon\`: \`16 × 16\` \`Sprite\` coordinate from \`src/Atlas.hpp\`.
+  4. \`qlvl\`: Minimum monster/chest item level (\`ilvl >= qlvl\`) required before \`rollBase(rng, ilvl, mask)\` includes this base in the weighted pool.
+  5. \`weight\` & \`value\`: Relative drop weight and base gold value before rarity multipliers.
+  6. \`implicit\` & \`amount\`: Built-in implicit \`Stat\` and magnitude applied before any rolled affixes.
+
+---
+
+### 2. Contributing a Reversible 5-Tier Loot Affix (\`Affix.hpp\`, \`Affix.cpp\`, \`Equip.cpp\`)
+
+Adding a new item stat and 5-tier affix touches three files and must obey the **Reversible Delta Invariant**: equipping an item calls \`applyItem(m, item, +1.0f)\` and unequipping it calls \`applyItem(m, item, -1.0f)\`.
+
+#### Step 2A: Append to \`enum class Stat\` (\`src/item/loot/Affix.hpp\`)
+
+Always append new enum constants at the end of \`enum class Stat\` so existing save files and item tests remain aligned:
+
+\`\`\`cpp
+enum class Stat : uint8_t {
+    None,
+    FlatDamage,
+    PercentDamage,
+    AttackSpeed,
+    CritChance,
+    CritMultiplier,
+    Area,
+    Projectiles,
+    Pierce,
+    CooldownReduction,
+    SkillLevels,
+    MaxLife,
+    LifeRegen,
+    LifeOnHit,
+    Armor,
+    Thorns,
+    Dodge,
+    ResistFire,
+    ResistCold,
+    ResistLightning,
+    ResistPoison,
+    ResistArcane,
+    ResistAll,
+    MoveSpeed,
+    PickupRadius,
+    MagicFind,
+    GoldFind,
+    XpGain,
+    BurnChance,
+    ChillChance,
+    PoisonChance,
+    BleedChance,
+    ShockChance,
+    BossDamage,
+    EliteDamage,
+    NightDamage,
+    Light,
+    NovaMastery,
+};
+\`\`\`
+
+#### Step 2B: Add the 5-Tier \`AffixDef\` & Tooltip Formatter (\`src/item/loot/Affix.cpp\`)
+
+Add a row to \`const AffixDef AFFIXES[]\` in \`src/item/loot/Affix.cpp\` and format its tooltip string in \`describe(Stat stat, float value)\`:
+
+\`\`\`cpp
+{
+    "NovaMastery",
+    true,
+    slot::Weapon | slot::AreaWeapon | slot::Charm,
+    Stat::NovaMastery,
+    0xFFF,
+    5,
+    {
+        {"Resonant", 1, 6.0f, 10.0f},
+        {"Harmonic", 5, 11.0f, 16.0f},
+        {"Astral", 10, 17.0f, 23.0f},
+        {"Celestial", 15, 24.0f, 31.0f},
+        {"Supernova", 20, 32.0f, 40.0f},
+    }
+},
+\`\`\`
+
+And inside \`describe(Stat stat, float value)\` (\`src/item/loot/Affix.cpp\`):
+
+\`\`\`cpp
+case Stat::NovaMastery:
+    std::snprintf(buf, sizeof(buf), "+%d%% Area & Arcane Mastery", iv);
+    break;
+\`\`\`
+
+#### Step 2C: Wire the Reversible Stat Delta in \`apply()\` (\`src/item/loot/Equip.cpp\`)
+
+Inside \`apply(Mob &m, Stat stat, float v)\` in \`src/item/loot/Equip.cpp\`, apply \`v\` purely additively so \`+v\` on \`Player::wear\` and \`-v\` on \`Player::shed\` cancel out with zero drift:
+
+\`\`\`cpp
+case Stat::NovaMastery:
+    p.stats().area += v * 0.005f;
+    p.stats().might += v * 0.005f;
+    break;
+\`\`\`
+
+---
+
+### 3. Contributing an Autonomous Summoned \`Ally\` Companion (\`Ally.hpp\`, \`Ally.cpp\`, \`Recipe.cpp\`)
+
+Summoned companions in Mellangan are pooled \`Mob\` subclasses managed by \`src/entity/Ally.cpp\`. An ally can fight either via **melee/leap contact bites** (\`kit == nullptr\`) or by **wielding a full \`RecipeWeapon\` arsenal** (\`kit != nullptr\`, such as \`"Arcane Staff"\` on \`Clockwork Drone\`).
+
+#### Step 3A: Append to \`enum class AllyKind\` (\`src/entity/Ally.hpp\`)
+
+Append your new companion kind immediately before \`Count\`:
+
+\`\`\`cpp
+enum class AllyKind : uint8_t {
+    Skeleton,
+    Wolf,
+    Wisp,
+    Turret,
+    Totem,
+    Golem,
+    Decoy,
+    Fairy,
+    Crow,
+    Imp,
+    Beetle,
+    Banner,
+    Ancestor,
+    Mirror,
+    Bear,
+    Hawk,
+    Spiderling,
+    BoneMage,
+    EmberHound,
+    FrostSprite,
+    Gargoyle,
+    VineTendril,
+    Drone,
+    Valkyrie,
+    StarSentinel,
+    Count
+};
+\`\`\`
+
+#### Step 3B: Add the \`AllyDef\` Row to \`ALLIES[]\` (\`src/entity/Ally.cpp\`)
+
+\`src/entity/Ally.cpp\` enforces \`static_assert(std::size(ALLIES) == static_cast<size_t>(AllyKind::Count))\`. Add your companion definition at the matching index:
+
+\`\`\`cpp
+const AllyDef ALLIES[] = {
+    {"Star Sentinel", "Astral Beacon", EnemyKind::Wisp, 26.0f, 82.0f, 0.75f,
+     70.0f, 18.0f, 1.05f, true, false, Color::rgb(0x88, 0xE0, 0xFF), "Arcane Staff"},
+};
+\`\`\`
+
+- **How \`SummonForm\` Auto-Binds via \`AllyDef::recipe\`:**
+  When \`SummonForm::fire(const Context &c)\` (\`src/item/weapon/form/Summon.cpp\`) executes, it calls \`allyFor(c.r.name)\`, which scans \`ALLIES[]\` for \`a.recipe == c.r.name\`. By setting \`recipe = "Astral Beacon"\` in \`ALLIES[]\` and adding an \`"Astral Beacon"\` row with \`Form::Summon\` to \`RECIPES[]\` (\`src/item/weapon/Recipe.cpp\`), the weapon automatically spawns up to \`cap = c.count + 1 + (c.evolved ? 2 : 0)\` active \`Star Sentinel\` companions!
+
+---
+
+### 4. Contributing a New \`FormBehavior\` (\`src/item/weapon/form/\`, \`FormRegistry.cpp\`)
+
+If a weapon needs a brand-new geometric attack pattern beyond the 16 built-in \`Form\` types:
+1. Append the new identifier to \`enum class Form : uint8_t\` in \`src/item/weapon/Recipe.hpp\`.
+2. Create \`src/item/weapon/form/MyForm.cpp\` implementing \`class MyForm : public FormBehavior\` with \`void fire(const Context &c) const override\`.
+3. Use \`c.aimDir(ox, oy)\` to resolve target direction, \`c.payload(damageScale)\` to snapshot the \`HitPayload\` (including evolved status effects and hero luck/edge), and \`landHit(payload, enemy, fromX, fromY, by)\` (\`src/item/weapon/form/FormCommon.hpp\`) to apply damage, status procs, and floating combat numbers.
+4. Register the singleton in \`formFor(Form f)\` inside \`src/item/weapon/FormRegistry.cpp\`.
+`,
+    mermaidCharts: [
+      {
+        title: 'End-to-End Pipeline for Contributing a Reversible 5-Tier Loot Affix',
+        chart: `
+flowchart LR
+    classDef step fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef code fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef verify fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+
+    S1["1. Affix.hpp<br/>Append Stat::NovaMastery<br/>to enum class Stat"]:::step
+    S2["2. Affix.cpp<br/>Add 5-Tier AffixDef to AFFIXES[]<br/>+ Format in describe(Stat, float)"]:::code
+    S3["3. Equip.cpp<br/>Apply reversible +v / -v delta<br/>in apply(Mob &m, Stat, float v)"]:::code
+    S4["4. Verify in Sandbox & Tests<br/>MellanganApp.exe --dev --give 16 --loot<br/>MellanganApp.exe --test"]:::verify
+
+    S1 --> S2 --> S3 --> S4
+`,
+      },
+      {
+        title: 'Summoned Ally Companion & Form::Summon Auto-Binding Pipeline',
+        chart: `
+flowchart TD
+    classDef ally fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef weapon fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef runtime fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    Kind["1. Ally.hpp & Ally.cpp<br/>Append AllyKind::StarSentinel before Count<br/>Add AllyDef row (recipe = 'Astral Beacon', kit = 'Arcane Staff')"]:::ally
+    Recipe["2. Recipe.cpp<br/>Add 'Astral Beacon' row with Form::Summon<br/>SummonForm::fire() matches allyFor(c.r.name)"]:::weapon
+    Spawn["3. Runtime Execution (Ally::onAdded & Ally::tick)<br/>Grants kit weapon ('Arcane Staff'), orbits Player,<br/>leashes at 150px, and fires kit or melee bites"]:::runtime
+
+    Kind --> Recipe --> Spawn
+`,
+      },
+    ],
+    interactiveComponent: 'contribute',
+  },
+  {
+    id: 'tutorial-traits-events-bounties',
+    title: '29. Tutorial 10: Contributing Elite/Champion Traits, Regional Biome Events & Bounties',
+    category: 'contribute',
+    summary: 'Step-by-step C++20 guide to adding Elite/Champion monster Traits across 5 combat hooks, scheduling regional BiomeEvents, adding Bounty contracts, and writing deterministic Field unit tests.',
+    sourceFiles: [
+      'src/entity/Trait.hpp',
+      'src/entity/Trait.cpp',
+      'src/level/BiomeEvents.hpp',
+      'src/level/BiomeEvents.cpp',
+      'src/level/Bounty.hpp',
+      'src/level/Bounty.cpp',
+      'src/test/AllyTest.cpp',
+    ],
+    content: `
+### 1. Contributing an Elite / Champion \`Trait\` (\`src/entity/Trait.hpp\`, \`src/entity/Trait.cpp\`)
+
+Elite (1–2 traits) and Champion (2–3 traits) monsters store their active modifiers as a 32-bit bitmask \`uint32_t bits\` inside \`struct Traits\` (\`src/entity/Trait.hpp\`). Adding a new monster trait takes three steps:
+
+#### Step 1A: Append to \`enum class Trait\` (\`src/entity/Trait.hpp\`)
+
+Append the new trait identifier before \`Count\` (up to 31 traits fit in \`uint32_t bits\`):
+
+\`\`\`cpp
+enum class Trait : uint8_t {
+    Hasted,
+    Armored,
+    Regenerating,
+    Vampiric,
+    Thorns,
+    Molten,
+    Frozen,
+    Plagued,
+    Stormcaller,
+    Splitting,
+    Shielded,
+    Berserk,
+    Blinker,
+    Avenger,
+    Executioner,
+    Juggernaut,
+    Dampening,
+    Vortex,
+    Hexer,
+    Undying,
+    Mirrored,
+    Count
+};
+\`\`\`
+
+#### Step 1B: Register Name & Aura Tint in \`TRAITS[]\` (\`src/entity/Trait.cpp\`)
+
+Add the display name and pixel aura color to \`const TraitInfo TRAITS[int(Trait::Count)]\` in \`src/entity/Trait.cpp\`:
+
+\`\`\`cpp
+const TraitInfo TRAITS[static_cast<int>(Trait::Count)] = {
+    {"Hasted", Color::rgb(0xFF, 0xE0, 0x55)},
+    {"Armored", Color::rgb(0x9A, 0xA8, 0xB8)},
+    {"Mirrored", Color::rgb(0x90, 0xF0, 0xFF)},
+};
+\`\`\`
+
+#### Step 1C: Hook into the 5 \`Traits\` Lifecycle Methods (\`src/entity/Trait.cpp\`)
+
+Every \`Mob\` automatically invokes \`traits\` at five points in its lifecycle:
+1. **\`Traits::incoming(Mob &self, float damage)\`:** Modifies incoming damage before HP subtraction (e.g., \`Armored\` scales by \`0.6f\`, \`Dampening\` scales by \`0.45f\` when attacker is \`> 56 px\` away, \`Shielded\` absorbs one hit while \`cooldown <= 0\`).
+2. **\`Traits::landed(Mob &self, float dealt)\`:** Fires when the monster lands a hit on the player (e.g., \`Vampiric\` heals, \`Frozen\` chills, \`Plagued\` poisons, \`Hexer\` applies \`applyWeaken(3.0f)\`).
+3. **\`Traits::tick(Mob &self)\`:** Per-frame behavior (e.g., \`Regenerating\`, \`Stormcaller\` lightning strikes, \`Blinker\` teleports, \`Vortex\` player pull).
+4. **\`Traits::died(Mob &self, float damage)\`:** Death triggers (e.g., \`Undying\` revives once at \`35% HP\`, \`Molten\` explodes, \`Splitting\` spawns 2 mini-clones, \`Avenger\` buffs nearby allies).
+5. **\`Traits::render(const Mob &self, Sprites &s, double bob)\`:** Renders ground rings or floating badges under the monster.
+
+\`\`\`cpp
+float Traits::incoming(Mob &self, float damage) {
+    if (has(Trait::Mirrored) && self.level) {
+        if (auto *p = self.level->player()) {
+            double dx = p->x - self.x;
+            double dy = p->y - self.y;
+            if (dx * dx + dy * dy > 64.0 * 64.0) {
+                p->hurt(1, self.x, self.y, 2.0);
+                return damage * 0.70f;
+            }
+        }
+    }
+    return damage;
+}
+\`\`\`
+
+---
+
+### 2. Contributing a Contract \`Bounty\` Objective (\`src/level/Bounty.cpp\`)
+
+Shrine and night contract bounties are implemented in \`src/level/Bounty.cpp\`. Each bounty tracks \`kind\`, \`arg\`, \`goal\`, \`baseline\`, and \`reward\` (\`0 = Chest\`, \`1 = Gold\`, \`2 = Shrine Boon\`):
+
+\`\`\`cpp
+enum Kind : uint8_t {
+    SlayCount,
+    SlayFoe,
+    SurviveSec,
+    ReachCombo,
+    GatherGold,
+    StayMoving,
+    HoldGround,
+    SlayElites,
+    KINDS
+};
+\`\`\`
+
+To add a new bounty kind (such as \`SlayElites\`):
+1. Append \`SlayElites\` before \`KINDS\` in \`src/level/Bounty.cpp\`.
+2. Initialize \`b.goal\` and \`b.baseline\` inside \`Bounty::roll(Random &rng, const Level &level, int night)\`:
+
+\`\`\`cpp
+case SlayElites:
+    b.goal = 3 + night;
+    b.baseline = level.eliteKills();
+    break;
+\`\`\`
+
+3. Format the HUD objective banner in \`Bounty::text()\` and return live progress in \`Bounty::progress(const Level &level)\`:
+
+\`\`\`cpp
+case SlayElites:
+    return level.eliteKills() - baseline;
+\`\`\`
+
+---
+
+### 3. Writing Deterministic Headless \`Field\` Unit Tests (\`src/test/AllyTest.cpp\`, \`src/test/LootTest.cpp\`)
+
+Every contribution should include a fast, deterministic unit test in \`src/test/\` using the headless \`Field\` fixture (\`src/test/TestFixtures.hpp\`). \`Field\` initializes a complete \`Level\` and \`Player\` in memory without creating a Vulkan window or audio device, executing 180 simulation ticks (3.0 seconds of game time) in under **2 milliseconds**:
+
+\`\`\`cpp
+void testStarSentinelCompanion() {
+    Field f;
+    auto *ally = f.level.spawnAlly(AllyKind::StarSentinel, f.player->x + 16.0, f.player->y);
+    assert(ally != nullptr);
+    auto *foe = f.spawn(EnemyKind::Zombie, f.player->x + 48.0, f.player->y);
+    int before = foe->hp;
+    f.step(180);
+    assert(foe->removed || foe->hp < before);
+}
+\`\`\`
+
+Run the entire assertion suite in Debug mode before committing:
+
+\`\`\`bash
+cmake --build build --config Debug --parallel
+./build/bin/Debug/MellanganApp.exe --test
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: '5 Lifecycle Hooks of struct Traits on Elite & Champion Monsters',
+        chart: `
+flowchart LR
+    classDef hook fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef fn fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Spawn["Traits::roll(rng, count)<br/>Assigns 1..3 bitmask traits<br/>Sets tint & HP/Speed scale"]:::hook
+    Tick["Traits::tick(self)<br/>Regen, Stormcaller bolt,<br/>Blinker warp, Vortex pull"]:::fn
+    In["Traits::incoming(self, dmg)<br/>Shielded absorb, Armored 0.6x,<br/>Dampening 0.45x, Berserk"]:::fn
+    Land["Traits::landed(self, dealt)<br/>Vampiric heal, Frozen chill,<br/>Plagued poison, Hexer weaken"]:::fn
+    Died["Traits::died(self, dmg)<br/>Undying 35% revive, Molten blast,<br/>Splitting clones, Avenger buff"]:::fn
+
+    Spawn --> Tick --> In --> Land --> Died
+`,
+      },
+      {
+        title: 'Headless Field Unit Test & Debug Verification Pipeline',
+        chart: `
+flowchart LR
+    classDef test fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef gate fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    F1["Construct Headless Field f<br/>(Zero GPU/Audio Init)"]:::test
+    F2["Configure Scenario<br/>f.player->grant(...) / f.spawn(...)<br/>f.level.spawnAlly(...)"]:::test
+    F3["Step Deterministic Simulation<br/>f.step(180) (60 Hz fixed dt)"]:::test
+    F4["Verify C++ assert() Invariants<br/>./build/bin/Debug/MellanganApp.exe --test"]:::gate
+
+    F1 --> F2 --> F3 --> F4
+`,
+      },
+    ],
+    interactiveComponent: 'contribute',
   },
 ];
