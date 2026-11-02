@@ -6,22 +6,49 @@ export interface MermaidDiagramDef {
 export interface WikiSection {
   id: string;
   title: string;
-  category: 'core' | 'graphics' | 'simulation' | 'world' | 'gameplay' | 'contribute';
+  category:
+    | "core"
+    | "graphics"
+    | "simulation"
+    | "world"
+    | "gameplay"
+    | "contribute";
   summary: string;
   sourceFiles: string[];
   content: string;
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
-  interactiveComponent?: 'gameloop' | 'radix' | 'slab' | 'spatial' | 'ouroboros' | 'noise' | 'arsenal' | 'contribute' | 'pixelshader' | 'terrain' | 'renderer' | 'director' | 'goalai' | 'loot' | 'gearevents';
+  interactiveComponent?:
+    | "gameloop"
+    | "radix"
+    | "slab"
+    | "spatial"
+    | "ouroboros"
+    | "noise"
+    | "arsenal"
+    | "contribute"
+    | "pixelshader"
+    | "terrain"
+    | "renderer"
+    | "director"
+    | "goalai"
+    | "loot"
+    | "gearevents";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
   {
-    id: 'overview',
-    title: '01. Engine Philosophy & 8-Slot Hardware Telemetry',
-    category: 'core',
-    summary: 'The C++20 "C with classes" architecture, zero-allocation hot loops, and SDL_GetPerformanceCounter telemetry.',
-    sourceFiles: ['src/main.cpp', 'src/Game.cpp', 'src/Prof.c', 'src/SpriteObject.hpp'],
+    id: "overview",
+    title: "01. Engine Philosophy & 8-Slot Hardware Telemetry",
+    category: "core",
+    summary:
+      'The C++20 "C with classes" architecture, zero-allocation hot loops, and SDL_GetPerformanceCounter telemetry.',
+    sourceFiles: [
+      "src/main.cpp",
+      "src/Game.cpp",
+      "src/Prof.c",
+      "src/SpriteObject.hpp",
+    ],
     content: `
 ### Architectural Paradigm: Pragmatic "C with Classes"
 
@@ -64,7 +91,7 @@ void prof_end(int slot) {
 `,
     mermaidCharts: [
       {
-        title: 'Engine Subsystem Dependency Topology',
+        title: "Engine Subsystem Dependency Topology",
         chart: `
 flowchart TD
     classDef os fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -110,7 +137,7 @@ flowchart TD
 `,
       },
       {
-        title: 'End-to-End Frame Lifecycle & Telemetry Sequence',
+        title: "End-to-End Frame Lifecycle & Telemetry Sequence",
         chart: `
 sequenceDiagram
     autonumber
@@ -143,14 +170,19 @@ sequenceDiagram
 `,
       },
     ],
-    interactiveComponent: 'gameloop',
+    interactiveComponent: "gameloop",
   },
   {
-    id: 'radix-rendering',
-    title: '02. 64-Bit Radix Y-Sort, Planar Reflections & LightField',
-    category: 'graphics',
-    summary: 'IEEE-754 monotonic float conversion, 3-pass 12-bit LSD radix sort, planar water reflections, and directional contact shadows.',
-    sourceFiles: ['src/level/LevelRender.cpp', 'src/level/LightField.cpp', 'src/gfx/Screen.cpp'],
+    id: "radix-rendering",
+    title: "02. 64-Bit Radix Y-Sort, Planar Reflections & LightField",
+    category: "graphics",
+    summary:
+      "IEEE-754 monotonic float conversion, 3-pass 12-bit LSD radix sort, planar water reflections, and directional contact shadows.",
+    sourceFiles: [
+      "src/level/LevelRender.cpp",
+      "src/level/LightField.cpp",
+      "src/gfx/Screen.cpp",
+    ],
     content: `
 ### Strict $O(N)$ Depth Sorting via 64-Bit Key Packing
 
@@ -203,7 +235,7 @@ void radixSort(std::vector<uint64_t> &a, std::vector<uint64_t> &tmp) {
 `,
     mermaidCharts: [
       {
-        title: '64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture',
+        title: "64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture",
         chart: `
 flowchart TD
     classDef key fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -237,7 +269,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Dynamic LightField Contact Shadow & Perlin Flicker Pipeline',
+        title: "Dynamic LightField Contact Shadow & Perlin Flicker Pipeline",
         chart: `
 flowchart TD
     classDef light fill:#181524,stroke:#f97316,stroke-width:2px,color:#e2e8f0;
@@ -258,14 +290,19 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'radix',
+    interactiveComponent: "radix",
   },
   {
-    id: 'memory-slab',
-    title: '03. Intrusive Slab Allocator (Pool.c) & Sized Deallocation',
-    category: 'simulation',
-    summary: 'Zero-header C++ sized operator delete, 32 size classes (16B grain), 64KB slab pages, and SRWLOCK synchronization.',
-    sourceFiles: ['src/entity/Pool.c', 'src/entity/Pool.h', 'src/SpriteObject.hpp'],
+    id: "memory-slab",
+    title: "03. Intrusive Slab Allocator (Pool.c) & Sized Deallocation",
+    category: "simulation",
+    summary:
+      "Zero-header C++ sized operator delete, 32 size classes (16B grain), 64KB slab pages, and SRWLOCK synchronization.",
+    sourceFiles: [
+      "src/entity/Pool.c",
+      "src/entity/Pool.h",
+      "src/SpriteObject.hpp",
+    ],
     content: `
 ### Zero-Header Polymorphic Allocation via C++14 Sized \`operator delete\`
 
@@ -297,7 +334,7 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 `,
     mermaidCharts: [
       {
-        title: 'Sized Virtual Destructor to Slab Size-Class Routing',
+        title: "Sized Virtual Destructor to Slab Size-Class Routing",
         chart: `
 flowchart LR
     classDef cpp fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -319,7 +356,7 @@ flowchart LR
 `,
       },
       {
-        title: 'SpriteObject Polymorphic Class Hierarchy & Size Classes',
+        title: "SpriteObject Polymorphic Class Hierarchy & Size Classes",
         chart: `
 classDiagram
     class SpriteObject {
@@ -362,14 +399,21 @@ classDiagram
 `,
       },
     ],
-    interactiveComponent: 'slab',
+    interactiveComponent: "slab",
   },
   {
-    id: 'workers-concurrency',
-    title: '04. Lock-Free Atomic Stride Worker Pool, 4-Barrier AI & Thread Safety',
-    category: 'simulation',
-    summary: 'Epoch generation wakeups, atomic fetch_add chunk stealing, member-pointer pass<> thunks, per-enemy Xorshift32 PRNGs, and race-free crowd physics.',
-    sourceFiles: ['src/Workers.hpp', 'src/Workers.cpp', 'src/level/Level.cpp', 'src/entity/enemy/Enemy.cpp'],
+    id: "workers-concurrency",
+    title:
+      "04. Lock-Free Atomic Stride Worker Pool, 4-Barrier AI & Thread Safety",
+    category: "simulation",
+    summary:
+      "Epoch generation wakeups, atomic fetch_add chunk stealing, member-pointer pass<> thunks, per-enemy Xorshift32 PRNGs, and race-free crowd physics.",
+    sourceFiles: [
+      "src/Workers.hpp",
+      "src/Workers.cpp",
+      "src/level/Level.cpp",
+      "src/entity/enemy/Enemy.cpp",
+    ],
     content: `
 ### Zero-Allocation Fork-Join Concurrency (\`src/Workers.cpp\`)
 
@@ -482,7 +526,7 @@ float Enemy::roll() {
 `,
     mermaidCharts: [
       {
-        title: 'Workers::run Atomic Fetch-Add Chunk Stealing Protocol',
+        title: "Workers::run Atomic Fetch-Add Chunk Stealing Protocol",
         chart: `
 sequenceDiagram
     autonumber
@@ -507,7 +551,7 @@ sequenceDiagram
 `,
       },
       {
-        title: '4-Barrier Race-Free Crowd Separation & Serial Act Architecture',
+        title: "4-Barrier Race-Free Crowd Separation & Serial Act Architecture",
         chart: `
 flowchart TD
     classDef b1 fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -526,14 +570,19 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'goalai',
+    interactiveComponent: "goalai",
   },
   {
-    id: 'spatial-grid',
-    title: '05. CSR Prefix-Sum Spatial Grid & Bit-Packed Terrain',
-    category: 'simulation',
-    summary: 'Zero-bucket-vector counting sort spatial hash (buildGrid/gather) and 5-bit surface/elevation/ramp byte packing.',
-    sourceFiles: ['src/level/LevelSpace.cpp', 'src/level/LevelRender.cpp', 'src/level/Level.hpp'],
+    id: "spatial-grid",
+    title: "05. CSR Prefix-Sum Spatial Grid & Bit-Packed Terrain",
+    category: "simulation",
+    summary:
+      "Zero-bucket-vector counting sort spatial hash (buildGrid/gather) and 5-bit surface/elevation/ramp byte packing.",
+    sourceFiles: [
+      "src/level/LevelSpace.cpp",
+      "src/level/LevelRender.cpp",
+      "src/level/Level.hpp",
+    ],
     content: `
 ### Compressed Sparse Row (CSR) Spatial Partitioning (\`src/level/LevelSpace.cpp\`)
 
@@ -576,7 +625,7 @@ During \`Level::scatter(Screen &s)\`, the visible viewport plus a 3-tile border 
 `,
     mermaidCharts: [
       {
-        title: 'CSR Prefix-Sum Grid Construction & Gather Pipeline',
+        title: "CSR Prefix-Sum Grid Construction & Gather Pipeline",
         chart: `
 flowchart TD
     classDef pass fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -602,7 +651,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Collision & Elevation Resolution (LevelSpace.cpp)',
+        title: "Collision & Elevation Resolution (LevelSpace.cpp)",
         chart: `
 flowchart LR
     classDef in fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -622,14 +671,20 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: 'spatial',
+    interactiveComponent: "spatial",
   },
   {
-    id: 'goal-ai',
-    title: '06. GoalQueue AI Ringbuffer, Sense Sight-Cone Math & Ouroboros',
-    category: 'simulation',
-    summary: 'Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue preemption, 113-degree sight-cone dot products, and Ouroboros bit-twiddling.',
-    sourceFiles: ['src/entity/enemy/ai/Goal.hpp', 'src/entity/enemy/ai/Plans.cpp', 'src/entity/enemy/Enemy.cpp', 'src/other/Ouroboros.hpp'],
+    id: "goal-ai",
+    title: "06. GoalQueue AI Ringbuffer, Sense Sight-Cone Math & Ouroboros",
+    category: "simulation",
+    summary:
+      "Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue preemption, 113-degree sight-cone dot products, and Ouroboros bit-twiddling.",
+    sourceFiles: [
+      "src/entity/enemy/ai/Goal.hpp",
+      "src/entity/enemy/ai/Plans.cpp",
+      "src/entity/enemy/Enemy.cpp",
+      "src/other/Ouroboros.hpp",
+    ],
     content: `
 ### Zero-Allocation Composable Enemy AI (\`Goal.hpp\` & \`Plans.cpp\`)
 
@@ -791,7 +846,7 @@ void Enemy::think() {
 `,
     mermaidCharts: [
       {
-        title: 'Enemy GoalQueue State Machine & Interrupt Preemption',
+        title: "Enemy GoalQueue State Machine & Interrupt Preemption",
         chart: `
 stateDiagram-v2
     [*] --> RefillPlan : GoalQueue Empty
@@ -807,7 +862,7 @@ stateDiagram-v2
 `,
       },
       {
-        title: 'Ouroboros.hpp CRTP Serpents & XOR-Linked List Traversal',
+        title: "Ouroboros.hpp CRTP Serpents & XOR-Linked List Traversal",
         chart: `
 flowchart TD
     classDef crtp fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -829,14 +884,20 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'ouroboros',
+    interactiveComponent: "ouroboros",
   },
   {
-    id: 'world-generation',
-    title: '07. Voronoi Biome Lattice, Barycentric Blend & 4-Bit Cliffs',
-    category: 'world',
-    summary: 'Domain-warped Voronoi cells, 26-biome climate classification, 3-biome barycentric ground transitions, and 4-bit cliff masks.',
-    sourceFiles: ['src/level/world/Biomes.cpp', 'src/level/world/Ground.cpp', 'src/level/LevelRender.cpp', 'src/level/Noise.c'],
+    id: "world-generation",
+    title: "07. Voronoi Biome Lattice, Barycentric Blend & 4-Bit Cliffs",
+    category: "world",
+    summary:
+      "Domain-warped Voronoi cells, 26-biome climate classification, 3-biome barycentric ground transitions, and 4-bit cliff masks.",
+    sourceFiles: [
+      "src/level/world/Biomes.cpp",
+      "src/level/world/Ground.cpp",
+      "src/level/LevelRender.cpp",
+      "src/level/Noise.c",
+    ],
     content: `
 ### Domain-Warped Voronoi Biome Synthesis
 
@@ -878,7 +939,7 @@ Elevated plateaus (\`world::heightAt(x, y)\`), flood pools (\`sky.poolAt\`), and
 `,
     mermaidCharts: [
       {
-        title: 'Procedural Biome & Barycentric Ground Blending Pipeline',
+        title: "Procedural Biome & Barycentric Ground Blending Pipeline",
         chart: `
 flowchart TD
     classDef noise fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -896,7 +957,7 @@ flowchart TD
 `,
       },
       {
-        title: 'World Structures, Settlements & Landmarks Hierarchy',
+        title: "World Structures, Settlements & Landmarks Hierarchy",
         chart: `
 flowchart LR
     classDef reg fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -915,14 +976,21 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: 'noise',
+    interactiveComponent: "noise",
   },
   {
-    id: 'weather-sky',
-    title: '08. Diurnal Cycle, Weather Fronts & Footprints (Sky.cpp)',
-    category: 'world',
-    summary: 'Continuous diurnal illumination, weather fronts (Rain, Snow, Storm, Sand), lightning arcs, and persistent snow/mud footprints.',
-    sourceFiles: ['src/level/Sky.hpp', 'src/level/Sky.cpp', 'src/level/Night.hpp', 'src/level/sky/Fronts.hpp', 'src/level/sky/Footprints.hpp'],
+    id: "weather-sky",
+    title: "08. Diurnal Cycle, Weather Fronts & Footprints (Sky.cpp)",
+    category: "world",
+    summary:
+      "Continuous diurnal illumination, weather fronts (Rain, Snow, Storm, Sand), lightning arcs, and persistent snow/mud footprints.",
+    sourceFiles: [
+      "src/level/Sky.hpp",
+      "src/level/Sky.cpp",
+      "src/level/Night.hpp",
+      "src/level/sky/Fronts.hpp",
+      "src/level/sky/Footprints.hpp",
+    ],
     content: `
 ### Dynamic Atmosphere, Weather Fronts & Ground Persistence
 
@@ -942,7 +1010,7 @@ At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **
 `,
     mermaidCharts: [
       {
-        title: 'Atmospheric Fronts & Surface Mutation State Machine',
+        title: "Atmospheric Fronts & Surface Mutation State Machine",
         chart: `
 stateDiagram-v2
     [*] --> ClearSky
@@ -965,7 +1033,7 @@ stateDiagram-v2
 `,
       },
       {
-        title: 'Multi-Target Offscreen Lighting & Post-Process Pipeline',
+        title: "Multi-Target Offscreen Lighting & Post-Process Pipeline",
         chart: `
 flowchart LR
     classDef pass fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -985,11 +1053,20 @@ flowchart LR
     ],
   },
   {
-    id: 'weapon-synthesis',
-    title: '09. Combinatorial Weapon Synthesis (16 FormBehaviors, 16 Payloads & SummonForm)',
-    category: 'gameplay',
-    summary: 'Data-driven Recipe table, 16 polymorphic FormBehavior kinematic engines (including Whip, Wall, Spiral & Summon), 16 composable pay::Payload bitflags, and 41 weapon evolutions.',
-    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/weapon/Recipe.hpp', 'src/item/weapon/form/Forms.hpp', 'src/item/weapon/form/Shape.cpp', 'src/item/weapon/form/Summon.cpp', 'src/entity/Ally.cpp'],
+    id: "weapon-synthesis",
+    title:
+      "09. Combinatorial Weapon Synthesis (16 FormBehaviors, 16 Payloads & SummonForm)",
+    category: "gameplay",
+    summary:
+      "Data-driven Recipe table, 16 polymorphic FormBehavior kinematic engines (including Whip, Wall, Spiral & Summon), 16 composable pay::Payload bitflags, and 41 weapon evolutions.",
+    sourceFiles: [
+      "src/item/weapon/Recipe.cpp",
+      "src/item/weapon/Recipe.hpp",
+      "src/item/weapon/form/Forms.hpp",
+      "src/item/weapon/form/Shape.cpp",
+      "src/item/weapon/form/Summon.cpp",
+      "src/entity/Ally.cpp",
+    ],
     content: `
 ### Orthogonal Weapon Architecture: \`FormBehavior\` × \`pay::Payload\`
 
@@ -1088,7 +1165,8 @@ Every \`RecipeWeapon\` and \`RecipeShot\` operates on \`Mob &\` rather than \`Pl
 `,
     mermaidCharts: [
       {
-        title: 'Combinatorial RecipeWeapon Dispatch & 15 FormBehavior Hierarchy',
+        title:
+          "Combinatorial RecipeWeapon Dispatch & 15 FormBehavior Hierarchy",
         chart: `
 flowchart TD
     classDef rec fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -1105,7 +1183,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Base Signature Weapons & 29 Relic/Passive Evolution Synergies',
+        title: "Base Signature Weapons & 29 Relic/Passive Evolution Synergies",
         chart: `
 flowchart TD
     classDef wpn fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1123,14 +1201,22 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'arsenal',
+    interactiveComponent: "arsenal",
   },
   {
-    id: 'classes-encounters',
-    title: '10. 12 Hero Kits, 39 Foe Species, 20 Traits, Champions & 9 Bosses',
-    category: 'gameplay',
-    summary: 'Complete v0.5.15 breakdown of the 12 standalone hero classes, 8 general skills, 39 EnemyKind species (WildFoe Greenwood table, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.',
-    sourceFiles: ['src/hero/Hero.hpp', 'src/entity/Trait.hpp', 'src/entity/enemy/Enemy.hpp', 'src/entity/enemy/WildFoe.cpp', 'src/entity/enemy/Boss.cpp', 'src/level/Encounter.cpp'],
+    id: "classes-encounters",
+    title: "10. 12 Hero Kits, 39 Foe Species, 20 Traits, Champions & 9 Bosses",
+    category: "gameplay",
+    summary:
+      "Complete v0.5.15 breakdown of the 12 standalone hero classes, 8 general skills, 39 EnemyKind species (WildFoe Greenwood table, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.",
+    sourceFiles: [
+      "src/hero/Hero.hpp",
+      "src/entity/Trait.hpp",
+      "src/entity/enemy/Enemy.hpp",
+      "src/entity/enemy/WildFoe.cpp",
+      "src/entity/enemy/Boss.cpp",
+      "src/level/Encounter.cpp",
+    ],
     content: `
 ### The 12 Complete Playable Hero Kits (\`src/hero/\`)
 
@@ -1212,7 +1298,7 @@ Elites roll 1 trait and **Named Procedural Champions** (e.g., *"A CHAMPION STALK
 `,
     mermaidCharts: [
       {
-        title: 'Boss Phase Enrage & Telegraph Execution Loop',
+        title: "Boss Phase Enrage & Telegraph Execution Loop",
         chart: `
 stateDiagram-v2
     [*] --> Phase0 : Boss Spawned (100% HP)
@@ -1224,7 +1310,7 @@ stateDiagram-v2
 `,
       },
       {
-        title: 'Enemy Damage, Status Affliction & Elite Trait Pipeline',
+        title: "Enemy Damage, Status Affliction & Elite Trait Pipeline",
         chart: `
 flowchart TD
     classDef hit fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -1243,11 +1329,17 @@ flowchart TD
     ],
   },
   {
-    id: 'audio-qa',
-    title: '11. 32-Voice LRU Audio Mixer & Automated Visual QA',
-    category: 'core',
-    summary: 'SDL3 AudioStream voice stealing, hardware frequency-ratio pitch jitter, exponential weather beds, and headless QA views.',
-    sourceFiles: ['src/audio/Sound.cpp', 'src/Bench.cpp', 'src/test/Test.cpp', 'src/test/view/Screenshots.cpp'],
+    id: "audio-qa",
+    title: "11. 32-Voice LRU Audio Mixer & Automated Visual QA",
+    category: "core",
+    summary:
+      "SDL3 AudioStream voice stealing, hardware frequency-ratio pitch jitter, exponential weather beds, and headless QA views.",
+    sourceFiles: [
+      "src/audio/Sound.cpp",
+      "src/Bench.cpp",
+      "src/test/Test.cpp",
+      "src/test/view/Screenshots.cpp",
+    ],
     content: `
 ### 32-Voice LRU Audio Stream Architecture (\`src/audio/Sound.cpp\`)
 
@@ -1280,7 +1372,7 @@ Mellangan includes a built-in verification and visual regression harness across 
 `,
     mermaidCharts: [
       {
-        title: 'SDL3 32-Voice LRU Selection & Weather Bed Mixer',
+        title: "SDL3 32-Voice LRU Selection & Weather Bed Mixer",
         chart: `
 flowchart TD
     classDef sfx fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1301,7 +1393,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Automated Test Harness, Benchmark & GPU Screenshot Pipeline',
+        title: "Automated Test Harness, Benchmark & GPU Screenshot Pipeline",
         chart: `
 flowchart LR
     classDef cli fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1321,11 +1413,20 @@ flowchart LR
     ],
   },
   {
-    id: 'contribute-basics',
-    title: '12. Contribution Basics: Toolchain, Build, House Rules, DevStart & WorldDebug',
-    category: 'contribute',
-    summary: 'Step-by-step onboarding from cloning submodules and building with CMake/slangc to house rules, DevStart::seek() feature warps, and the F8 WorldDebug inspector.',
-    sourceFiles: ['CMakeLists.txt', 'NOTES.md', 'src/main.cpp', 'src/DevStart.hpp', 'src/DevStart.cpp', 'src/level/WorldDebug.cpp'],
+    id: "contribute-basics",
+    title:
+      "12. Contribution Basics: Toolchain, Build, House Rules, DevStart & WorldDebug",
+    category: "contribute",
+    summary:
+      "Step-by-step onboarding from cloning submodules and building with CMake/slangc to house rules, DevStart::seek() feature warps, and the F8 WorldDebug inspector.",
+    sourceFiles: [
+      "CMakeLists.txt",
+      "NOTES.md",
+      "src/main.cpp",
+      "src/DevStart.hpp",
+      "src/DevStart.cpp",
+      "src/level/WorldDebug.cpp",
+    ],
     content: `
 ### Welcome Contributor! Start with the Basics
 
@@ -1383,7 +1484,8 @@ template <class F> void DevStart::seek(F fits) {
 `,
     mermaidCharts: [
       {
-        title: 'CMake Build, Slang Shader Compilation & Asset Bundling Pipeline',
+        title:
+          "CMake Build, Slang Shader Compilation & Asset Bundling Pipeline",
         chart: `
 flowchart LR
     classDef src fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1406,7 +1508,7 @@ flowchart LR
 `,
       },
       {
-        title: 'Contributor Development & Verification Loop',
+        title: "Contributor Development & Verification Loop",
         chart: `
 flowchart TD
     classDef step fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1423,14 +1525,20 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'contribute',
+    interactiveComponent: "contribute",
   },
   {
-    id: 'tutorial-weapon',
-    title: '13. Tutorial 1: Adding a New Weapon, Recipe & Evolution',
-    category: 'contribute',
-    summary: 'Hands-on beginner tutorial: create a 16x16 icon, add a combinatorial Recipe or custom Upgrade, and test it in --dev.',
-    sourceFiles: ['src/item/weapon/Recipe.cpp', 'src/item/Upgrade.cpp', 'src/Atlas.hpp', 'src/test/ArsenalTest.cpp'],
+    id: "tutorial-weapon",
+    title: "13. Tutorial 1: Adding a New Weapon, Recipe & Evolution",
+    category: "contribute",
+    summary:
+      "Hands-on beginner tutorial: create a 16x16 icon, add a combinatorial Recipe or custom Upgrade, and test it in --dev.",
+    sourceFiles: [
+      "src/item/weapon/Recipe.cpp",
+      "src/item/Upgrade.cpp",
+      "src/Atlas.hpp",
+      "src/test/ArsenalTest.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 1: Creating a New Weapon Step by Step
 
@@ -1498,7 +1606,7 @@ Run both the interactive dev loadout and the automated arsenal verification view
 `,
     mermaidCharts: [
       {
-        title: 'Step-by-Step Weapon & Evolution Registration Flow',
+        title: "Step-by-Step Weapon & Evolution Registration Flow",
         chart: `
 flowchart TD
     classDef art fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1517,7 +1625,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Projectile Lifecycle & Slab Memory Reclamation',
+        title: "Projectile Lifecycle & Slab Memory Reclamation",
         chart: `
 sequenceDiagram
     autonumber
@@ -1543,11 +1651,17 @@ sequenceDiagram
     ],
   },
   {
-    id: 'tutorial-enemy-biome',
-    title: '14. Tutorial 2: Adding a Monster, AI Plan & Biome Niche',
-    category: 'contribute',
-    summary: 'Advanced tutorial: append save-safe EnemyKind enums, compose zero-allocation GoalQueue plans, and register a new Biome.',
-    sourceFiles: ['src/entity/enemy/Enemy.hpp', 'src/entity/enemy/Roster.cpp', 'src/entity/enemy/ai/Plans.cpp', 'src/level/biome/Biome.cpp'],
+    id: "tutorial-enemy-biome",
+    title: "14. Tutorial 2: Adding a Monster, AI Plan & Biome Niche",
+    category: "contribute",
+    summary:
+      "Advanced tutorial: append save-safe EnemyKind enums, compose zero-allocation GoalQueue plans, and register a new Biome.",
+    sourceFiles: [
+      "src/entity/enemy/Enemy.hpp",
+      "src/entity/enemy/Roster.cpp",
+      "src/entity/enemy/ai/Plans.cpp",
+      "src/level/biome/Biome.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 2: Adding a New Monster & Biome Rule
 
@@ -1597,7 +1711,7 @@ Add the \`EnemyType\` row (name, sprite, radius, speed, HP, contact damage, XP v
 `,
     mermaidCharts: [
       {
-        title: 'Thread-Safe Monster AI Intent vs Main-Thread Action Contract',
+        title: "Thread-Safe Monster AI Intent vs Main-Thread Action Contract",
         chart: `
 flowchart TD
     classDef worker fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1621,7 +1735,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Deterministic Asset Pipeline & Save-Safe Registration Checklist',
+        title:
+          "Deterministic Asset Pipeline & Save-Safe Registration Checklist",
         chart: `
 flowchart TD
     classDef step fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1638,11 +1753,21 @@ flowchart TD
     ],
   },
   {
-    id: 'tutorial-hero-class',
-    title: '15. Tutorial 3: Adding a Playable Hero, Active Skill, Talent & Relic',
-    category: 'contribute',
-    summary: 'Step-by-step guide to defining HeroData, Mob-symmetric active skills, class talents, boss relics, and Codex unlock predicates.',
-    sourceFiles: ['src/hero/Hero.hpp', 'src/hero/Hero.cpp', 'src/hero/ExpansionHero.hpp', 'src/hero/Warden.cpp', 'src/item/skill/Skill.hpp', 'src/item/talent/ExpansionTalents.cpp', 'src/item/relic/ExpansionRelics.cpp'],
+    id: "tutorial-hero-class",
+    title:
+      "15. Tutorial 3: Adding a Playable Hero, Active Skill, Talent & Relic",
+    category: "contribute",
+    summary:
+      "Step-by-step guide to defining HeroData, Mob-symmetric active skills, class talents, boss relics, and Codex unlock predicates.",
+    sourceFiles: [
+      "src/hero/Hero.hpp",
+      "src/hero/Hero.cpp",
+      "src/hero/ExpansionHero.hpp",
+      "src/hero/Warden.cpp",
+      "src/item/skill/Skill.hpp",
+      "src/item/talent/ExpansionTalents.cpp",
+      "src/item/relic/ExpansionRelics.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 3: Creating a Playable Hero & Class Kit
 
@@ -1713,7 +1838,8 @@ void MyHero::cast(Mob &p) const {
 `,
     mermaidCharts: [
       {
-        title: 'Hero Class, Active Skill & Renegade Mirror-Symmetry Architecture',
+        title:
+          "Hero Class, Active Skill & Renegade Mirror-Symmetry Architecture",
         chart: `
 flowchart TD
     classDef hero fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -1735,7 +1861,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Codex Unlock Predicate, Class Affinity & Relic Synergy Flow',
+        title: "Codex Unlock Predicate, Class Affinity & Relic Synergy Flow",
         chart: `
 flowchart TD
     classDef codex fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1754,11 +1880,19 @@ flowchart TD
     ],
   },
   {
-    id: 'tutorial-structures-boss',
-    title: '16. Tutorial 4: Adding World Landmarks, Interactive Sites & 3-Phase Bosses',
-    category: 'contribute',
-    summary: 'Step-by-step guide to procedural StructureDef footprints, interactive encounter::Site triggers, and 3-phase BossDef cast tables.',
-    sourceFiles: ['src/level/Structure.hpp', 'src/level/structure/Landmarks.cpp', 'src/level/encounter/Landmarks.cpp', 'src/entity/enemy/Boss.hpp', 'src/entity/enemy/Boss.cpp'],
+    id: "tutorial-structures-boss",
+    title:
+      "16. Tutorial 4: Adding World Landmarks, Interactive Sites & 3-Phase Bosses",
+    category: "contribute",
+    summary:
+      "Step-by-step guide to procedural StructureDef footprints, interactive encounter::Site triggers, and 3-phase BossDef cast tables.",
+    sourceFiles: [
+      "src/level/Structure.hpp",
+      "src/level/structure/Landmarks.cpp",
+      "src/level/encounter/Landmarks.cpp",
+      "src/entity/enemy/Boss.hpp",
+      "src/entity/enemy/Boss.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 4: World Landmarks, Interactive Encounters & 3-Phase Bosses
 
@@ -1829,7 +1963,7 @@ Set \`lands = land(BiomeId::CrystalFields)\` (or a bitwise OR of multiple \`Biom
 `,
     mermaidCharts: [
       {
-        title: 'Deterministic Region Structure & Landmark Encounter Pipeline',
+        title: "Deterministic Region Structure & Landmark Encounter Pipeline",
         chart: `
 flowchart LR
     classDef world fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1845,7 +1979,8 @@ flowchart LR
 `,
       },
       {
-        title: '3-Phase Boss Cast Rotation, Telegraph & Chest Drop State Machine',
+        title:
+          "3-Phase Boss Cast Rotation, Telegraph & Chest Drop State Machine",
         chart: `
 stateDiagram-v2
     [*] --> Arrival: Night Boss Timer or Landmark Trigger
@@ -1859,11 +1994,20 @@ stateDiagram-v2
     ],
   },
   {
-    id: 'tutorial-pixel-shader',
-    title: '17. Tutorial 5: Procedural 16x16 Pixel-Art (sprite_kit.py) & Slang Shaders',
-    category: 'contribute',
-    summary: 'Step-by-step guide to painting procedural 16x16 sprites in Python, validating 1px atlas gutters, and authoring Vulkan Slang shaders.',
-    sourceFiles: ['tools/sprite_kit.py', 'tools/atlas_layout.py', 'tools/make_assets.py', 'res/shaders/flash.slang', 'res/shaders/post.slang', 'src/gfx/Screen.cpp'],
+    id: "tutorial-pixel-shader",
+    title:
+      "17. Tutorial 5: Procedural 16x16 Pixel-Art (sprite_kit.py) & Slang Shaders",
+    category: "contribute",
+    summary:
+      "Step-by-step guide to painting procedural 16x16 sprites in Python, validating 1px atlas gutters, and authoring Vulkan Slang shaders.",
+    sourceFiles: [
+      "tools/sprite_kit.py",
+      "tools/atlas_layout.py",
+      "tools/make_assets.py",
+      "res/shaders/flash.slang",
+      "res/shaders/post.slang",
+      "src/gfx/Screen.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 5: Procedural Pixel-Art & Slang Shaders
 
@@ -1871,26 +2015,7 @@ Mellangan never commits hand-edited binary blobs without a reproducible generato
 
 ---
 
-#### Part 1: Authoring 16×16 Sprites with \`tools/sprite_kit.py\`
-
-\`tools/sprite_kit.py\` implements a tiny procedural pixel painter (\`class Canvas\`) designed to match the crisp **Kenney Tiny Town** aesthetic:
-- **Flat 3-Tone Top-Left Lighting:** Shapes receive a 3-color tuple \`pal = (dark_shadow, mid_base, light_highlight)\` lit from \`LIGHT = (-0.6, -0.8)\`.
-- **Automatic 1px Dark Outline:** Calling \`c.image(outline=True)\` walks every opaque pixel's 4-connected neighbors \`((1,0), (-1,0), (0,1), (0,-1))\` and stamps \`OUTLINE = (63, 38, 49, 255)\` around the silhouette.
-- **Primitive Methods on \`Canvas(16, 16)\`:**
-  - \`c.cluster(x, y, rows, color)\`: Paints ASCII pattern strings where any character other than \`'.'\` places a pixel.
-  - \`c.ellipse(cx, cy, rx, ry, pal, dither=0.0, seed=0)\`: Renders a 3-tone shaded ellipse with optional deterministic hash dithering.
-  - \`c.rect(x0, y0, x1, y1, pal)\` and \`c.tri(cx, top, bottom, half, pal)\`: Shaded geometric primitives.
-  - \`c.material(points, dark, light, seed, density=0.2)\`: Applies deterministic coordinate-hash micro-texture.
-
-##### Step-by-Step Atlas Workflow:
-1. Check \`BANDS\` and \`EXPANSION_ACTORS\` / \`EXPANSION_PROPS\` / \`ARSENAL\` in \`tools/atlas_layout.py\` for an available cell index.
-2. Add your \`Canvas(16, 16)\` function in \`tools/make_expansion.py\` or \`tools/make_arsenal.py\` and call \`place_cell(atlas, band, index, sprite)\`.
-3. Run the dual-pass verifier:
-\`\`\`cpp
-python tools/make_assets.py --verify
-\`\`\`
-\`--verify\` runs the entire asset generator **twice** and asserts that every cell's 1px gutter is \`RGBA(0,0,0,0)\`, no bands overlap, and both runs produce **byte-identical RGBA and PNG SHA-256 hashes**!
-
+#### Part 1: Draw sprites un Atlas by any means or tools you deem fit
 ---
 
 #### Part 2: Authoring Slang Fragment Shaders (\`res/shaders/*.slang\`)
@@ -1916,7 +2041,8 @@ Then \`PixelShader\` combines chromatic aberration (\`post.hurt\`), additive lig
 `,
     mermaidCharts: [
       {
-        title: 'sprite_kit.py Procedural Canvas -> atlas_layout.py Gutter Verifier Pipeline',
+        title:
+          "sprite_kit.py Procedural Canvas -> atlas_layout.py Gutter Verifier Pipeline",
         chart: `
 flowchart LR
     classDef py fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1932,7 +2058,8 @@ flowchart LR
 `,
       },
       {
-        title: 'Vulkan2D Bindless Slang Shader & Light-Map Post-Processing Pipeline',
+        title:
+          "Vulkan2D Bindless Slang Shader & Light-Map Post-Processing Pipeline",
         chart: `
 flowchart LR
     classDef pass fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1948,14 +2075,23 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: 'pixelshader',
+    interactiveComponent: "pixelshader",
   },
   {
-    id: 'tutorial-testing-profiling',
-    title: '18. Tutorial 6: Writing Deterministic Tests, Visual QA Views & Prof.c Benchmarks',
-    category: 'contribute',
-    summary: 'Step-by-step guide to authoring assert-driven unit suites, headless GPU screenshot QA views, and 8-slot Prof.c benchmarks.',
-    sourceFiles: ['src/test/Tests.hpp', 'src/test/Test.cpp', 'src/test/view/QaViews.cpp', 'src/Prof.h', 'src/Prof.c', 'src/Bench.cpp'],
+    id: "tutorial-testing-profiling",
+    title:
+      "18. Tutorial 6: Writing Deterministic Tests, Visual QA Views & Prof.c Benchmarks",
+    category: "contribute",
+    summary:
+      "Step-by-step guide to authoring assert-driven unit suites, headless GPU screenshot QA views, and 8-slot Prof.c benchmarks.",
+    sourceFiles: [
+      "src/test/Tests.hpp",
+      "src/test/Test.cpp",
+      "src/test/view/QaViews.cpp",
+      "src/Prof.h",
+      "src/Prof.c",
+      "src/Bench.cpp",
+    ],
     content: `
 ### Hands-On Tutorial 6: Deterministic Testing, Visual QA & Profiling
 
@@ -2028,7 +2164,8 @@ Run the automated benchmark before opening a PR or cutting a release:
 `,
     mermaidCharts: [
       {
-        title: 'Headless Deterministic Simulation & Assertions Pipeline (--test)',
+        title:
+          "Headless Deterministic Simulation & Assertions Pipeline (--test)",
         chart: `
 flowchart LR
     classDef init fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2044,7 +2181,7 @@ flowchart LR
 `,
       },
       {
-        title: 'Prof.c 8-Slot Frame Budget & Visual QA Readback Architecture',
+        title: "Prof.c 8-Slot Frame Budget & Visual QA Readback Architecture",
         chart: `
 flowchart TD
     classDef prof fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -2065,11 +2202,22 @@ flowchart TD
     ],
   },
   {
-    id: 'terrain-construction',
-    title: '19. Tutorial 7: How Our Terrain Is Constructed (Morphology, Cliffs & Auto-Tiling)',
-    category: 'contribute',
-    summary: 'Complete 7-layer synthesis of TileMemo bit-packing, 5x5 tent biome blending, solidCore/smoothPatch morphology, 4-tier plateaus, and RIM[16] auto-tiling.',
-    sourceFiles: ['src/level/World.hpp', 'src/level/world/Internal.hpp', 'src/level/world/Biomes.cpp', 'src/level/world/Terrain.cpp', 'src/level/world/Ground.cpp', 'src/level/world/Sites.cpp', 'src/level/world/Props.cpp', 'src/level/FloorPainter.cpp'],
+    id: "terrain-construction",
+    title:
+      "19. Tutorial 7: How Our Terrain Is Constructed (Morphology, Cliffs & Auto-Tiling)",
+    category: "contribute",
+    summary:
+      "Complete 7-layer synthesis of TileMemo bit-packing, 5x5 tent biome blending, solidCore/smoothPatch morphology, 4-tier plateaus, and RIM[16] auto-tiling.",
+    sourceFiles: [
+      "src/level/World.hpp",
+      "src/level/world/Internal.hpp",
+      "src/level/world/Biomes.cpp",
+      "src/level/world/Terrain.cpp",
+      "src/level/world/Ground.cpp",
+      "src/level/world/Sites.cpp",
+      "src/level/world/Props.cpp",
+      "src/level/FloorPainter.cpp",
+    ],
     content: `
 ### How Our Terrain Is Constructed: The 7-Stage Procedural Pipeline
 
@@ -2137,7 +2285,7 @@ Because auto-tiling and morphological filtering query neighboring tiles \`(x + d
 `,
     mermaidCharts: [
       {
-        title: 'Complete 7-Stage Procedural Terrain Construction Pipeline',
+        title: "Complete 7-Stage Procedural Terrain Construction Pipeline",
         chart: `
 flowchart TD
     classDef memo fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -2165,7 +2313,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Morphological Patch Smoothing (solidCore -> smoothPatch) & 4-Bit RIM[16] Auto-Tiler',
+        title:
+          "Morphological Patch Smoothing (solidCore -> smoothPatch) & 4-Bit RIM[16] Auto-Tiler",
         chart: `
 flowchart TD
     classDef raw fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
@@ -2182,14 +2331,22 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'terrain',
+    interactiveComponent: "terrain",
   },
   {
-    id: 'renderer-in-context',
-    title: '20. Tutorial 8: How the Renderer Works in Context of Our Game',
-    category: 'contribute',
-    summary: 'End-to-end walkthrough of Screen.cpp, LevelRender.cpp, LightField.cpp, offscreen targets, water reflections, submersion clipping, and native GUI scaling.',
-    sourceFiles: ['src/Game.cpp', 'src/gfx/Screen.hpp', 'src/gfx/Screen.cpp', 'src/level/LevelRender.cpp', 'src/level/LightField.cpp', 'res/shaders/post.slang'],
+    id: "renderer-in-context",
+    title: "20. Tutorial 8: How the Renderer Works in Context of Our Game",
+    category: "contribute",
+    summary:
+      "End-to-end walkthrough of Screen.cpp, LevelRender.cpp, LightField.cpp, offscreen targets, water reflections, submersion clipping, and native GUI scaling.",
+    sourceFiles: [
+      "src/Game.cpp",
+      "src/gfx/Screen.hpp",
+      "src/gfx/Screen.cpp",
+      "src/level/LevelRender.cpp",
+      "src/level/LightField.cpp",
+      "res/shaders/post.slang",
+    ],
     content: `
 ### How the Renderer Works in Context of Our Game
 
@@ -2294,7 +2451,8 @@ Finally, \`Screen::beginGui(window, fx)\` switches the render target to \`VK2D_T
 `,
     mermaidCharts: [
       {
-        title: 'Complete Multi-Pass Frame Graph (Game::render -> Screen -> LevelRender)',
+        title:
+          "Complete Multi-Pass Frame Graph (Game::render -> Screen -> LevelRender)",
         chart: `
 flowchart TD
     classDef setup fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -2329,7 +2487,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Planar Water Reflection, Submersion Clipping & White Silhouette Flash Pipeline',
+        title:
+          "Planar Water Reflection, Submersion Clipping & White Silhouette Flash Pipeline",
         chart: `
 flowchart LR
     classDef state fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2351,14 +2510,21 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: 'renderer',
+    interactiveComponent: "renderer",
   },
   {
-    id: 'night-spawner-director',
-    title: '21. Night Clock, 11 Omens, Shrine Dawn-Pull & 7-Stream Wave Director',
-    category: 'gameplay',
-    summary: 'How Night.cpp, Flavour.cpp, and Spawner.cpp orchestrate the 15-minute survival arc, 11 nocturnal Omens, 60s shrine dawn-pull, and 7 concurrent spawn streams.',
-    sourceFiles: ['src/level/Night.cpp', 'src/level/Spawner.cpp', 'src/entity/enemy/Rank.cpp', 'src/level/Flavour.cpp'],
+    id: "night-spawner-director",
+    title:
+      "21. Night Clock, 11 Omens, Shrine Dawn-Pull & 7-Stream Wave Director",
+    category: "gameplay",
+    summary:
+      "How Night.cpp, Flavour.cpp, and Spawner.cpp orchestrate the 15-minute survival arc, 11 nocturnal Omens, 60s shrine dawn-pull, and 7 concurrent spawn streams.",
+    sourceFiles: [
+      "src/level/Night.cpp",
+      "src/level/Spawner.cpp",
+      "src/entity/enemy/Rank.cpp",
+      "src/level/Flavour.cpp",
+    ],
     content: `
 ### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
 
@@ -2447,7 +2613,8 @@ When \`level.time >= dawnAt(level)\`, \`Night::tick\` sets \`dawn = true\` and t
 `,
     mermaidCharts: [
       {
-        title: 'Night Clock, 60s Shrine Dawn-Pull & 7-Stream Spawner Director Pipeline',
+        title:
+          "Night Clock, 60s Shrine Dawn-Pull & 7-Stream Spawner Director Pipeline",
         chart: `
 flowchart TD
     classDef clock fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -2473,7 +2640,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Spawner::pick() Decision Tree & Biome Specialist Routing',
+        title: "Spawner::pick() Decision Tree & Biome Specialist Routing",
         chart: `
 flowchart TD
     classDef roll fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2499,14 +2666,22 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'director',
+    interactiveComponent: "director",
   },
   {
-    id: 'persistence-codex-balance',
-    title: '22. Persistence, 6-World History LRU, Codex Unlocks & Balance INI',
-    category: 'core',
-    summary: 'How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 6-slot binary map charts, 12 hero unlock predicates, and pointer-to-member INI reflection.',
-    sourceFiles: ['src/meta/Saves.hpp', 'src/meta/Saves.cpp', 'src/meta/Codex.hpp', 'src/meta/Codex.cpp', 'src/meta/Balance.cpp', 'res/balance.ini'],
+    id: "persistence-codex-balance",
+    title: "22. Persistence, 6-World History LRU, Codex Unlocks & Balance INI",
+    category: "core",
+    summary:
+      "How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 6-slot binary map charts, 12 hero unlock predicates, and pointer-to-member INI reflection.",
+    sourceFiles: [
+      "src/meta/Saves.hpp",
+      "src/meta/Saves.cpp",
+      "src/meta/Codex.hpp",
+      "src/meta/Codex.cpp",
+      "src/meta/Balance.cpp",
+      "res/balance.ini",
+    ],
     content: `
 ### Cross-Platform Persistence & 6-World Chart LRU (\`src/meta/Saves.cpp\`)
 
@@ -2585,7 +2760,8 @@ const Field FIELDS[] = {
 `,
     mermaidCharts: [
       {
-        title: 'Saves Preference Directory, 6-World LRU History & Chart Eviction',
+        title:
+          "Saves Preference Directory, 6-World LRU History & Chart Eviction",
         chart: `
 flowchart TD
     classDef io fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -2601,7 +2777,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Balance::load() Pointer-to-Member INI Reflection Cascade (res/balance.ini)',
+        title:
+          "Balance::load() Pointer-to-Member INI Reflection Cascade (res/balance.ini)",
         chart: `
 flowchart TD
     classDef ini fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -2616,14 +2793,21 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'director',
+    interactiveComponent: "director",
   },
   {
-    id: 'combat-status-draft',
-    title: '23. 7 Status Afflictions, 0.5s DoT Ticks, Bleed Stacking & Level-Up Draft',
-    category: 'gameplay',
-    summary: 'Exact math behind all 7 StatusKind afflictions in Status.hpp (including Bleed 1.6x moving damage, Weaken, and Fear), lossless 0.5-second DoT ticks, and LevelUpMenu weighted card drafting.',
-    sourceFiles: ['src/entity/Status.hpp', 'src/entity/Mob.cpp', 'src/menu/LevelUpMenu.cpp', 'src/entity/pickup/Chest.cpp'],
+    id: "combat-status-draft",
+    title:
+      "23. 7 Status Afflictions, 0.5s DoT Ticks, Bleed Stacking & Level-Up Draft",
+    category: "gameplay",
+    summary:
+      "Exact math behind all 7 StatusKind afflictions in Status.hpp (including Bleed 1.6x moving damage, Weaken, and Fear), lossless 0.5-second DoT ticks, and LevelUpMenu weighted card drafting.",
+    sourceFiles: [
+      "src/entity/Status.hpp",
+      "src/entity/Mob.cpp",
+      "src/menu/LevelUpMenu.cpp",
+      "src/entity/pickup/Chest.cpp",
+    ],
     content: `
 ### Fixed-Slot 7-Status Affliction Array (\`src/entity/Status.hpp\`)
 
@@ -2698,7 +2882,8 @@ After drawing up to 3 standard upgrade cards, \`LevelUpMenu::roll\` checks wheth
 `,
     mermaidCharts: [
       {
-        title: 'Status::apply() Clamping, Bleed Stacking & Lossless 0.5s DoT Tick State Machine',
+        title:
+          "Status::apply() Clamping, Bleed Stacking & Lossless 0.5s DoT Tick State Machine",
         chart: `
 flowchart TD
     classDef apply fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2715,7 +2900,8 @@ flowchart TD
 `,
       },
       {
-        title: 'LevelUpMenu::roll() 3x/2x/1x Weighted Draft & 4th Bonus Card Resolution',
+        title:
+          "LevelUpMenu::roll() 3x/2x/1x Weighted Draft & 4th Bonus Card Resolution",
         chart: `
 flowchart TD
     classDef pool fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2736,14 +2922,23 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'director',
+    interactiveComponent: "director",
   },
   {
-    id: 'goal-steering-catalog',
-    title: '24. The 16 AI Goal Primitives, Gait Kinematics & 39-Monster Plan Table',
-    category: 'simulation',
-    summary: 'Complete mathematical breakdown of all 16 Goal subclasses in src/entity/enemy/ai/, Gait wave/weave modulation, V-formation pack following, and subterranean burrow state machines.',
-    sourceFiles: ['src/entity/enemy/ai/Plans.cpp', 'src/entity/enemy/ai/Approach.cpp', 'src/entity/enemy/ai/Melee.cpp', 'src/entity/enemy/ai/Flank.cpp', 'src/entity/enemy/ai/Follow.cpp', 'src/entity/enemy/ai/Burrow.cpp'],
+    id: "goal-steering-catalog",
+    title:
+      "24. The 16 AI Goal Primitives, Gait Kinematics & 39-Monster Plan Table",
+    category: "simulation",
+    summary:
+      "Complete mathematical breakdown of all 16 Goal subclasses in src/entity/enemy/ai/, Gait wave/weave modulation, V-formation pack following, and subterranean burrow state machines.",
+    sourceFiles: [
+      "src/entity/enemy/ai/Plans.cpp",
+      "src/entity/enemy/ai/Approach.cpp",
+      "src/entity/enemy/ai/Melee.cpp",
+      "src/entity/enemy/ai/Flank.cpp",
+      "src/entity/enemy/ai/Follow.cpp",
+      "src/entity/enemy/ai/Burrow.cpp",
+    ],
     content: `
 ### Architectural Overview of \`src/entity/enemy/ai/\`
 
@@ -2848,7 +3043,8 @@ On every tick until \`stop > 0 && s.dist < stop && e.cooldown <= 0\`, \`Approach
 `,
     mermaidCharts: [
       {
-        title: 'Approach Gait Modulation, 8-Lane Fan Spread & Melee Lock-On Pipeline',
+        title:
+          "Approach Gait Modulation, 8-Lane Fan Spread & Melee Lock-On Pipeline",
         chart: `
 flowchart TD
     classDef sense fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2866,7 +3062,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Burrow 3-Stage Subterranean State Machine & Follow V-Formation Wing Math',
+        title:
+          "Burrow 3-Stage Subterranean State Machine & Follow V-Formation Wing Math",
         chart: `
 flowchart TD
     classDef burrow fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -2888,14 +3085,23 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'goalai',
+    interactiveComponent: "goalai",
   },
   {
-    id: 'diablo-loot-runrules',
-    title: '25. Diablo-Style Item System, 30 Affix Families, Treasure Classes & RunRules',
-    category: 'gameplay',
-    summary: 'Deep dive into v0.5.14+ item bases, 30 five-tier affix families, diminishing-returns Magic Find, Night-Touched cursed items, ItemDrop physics, RunRules, and BiomeViewer.',
-    sourceFiles: ['src/item/loot/Item.hpp', 'src/item/loot/Affix.cpp', 'src/item/loot/Loot.cpp', 'src/entity/pickup/ItemDrop.cpp', 'src/level/RunRules.hpp', 'tools/biome_viewer/main.cpp'],
+    id: "diablo-loot-runrules",
+    title:
+      "25. Diablo-Style Item System, 30 Affix Families, Treasure Classes & RunRules",
+    category: "gameplay",
+    summary:
+      "Deep dive into v0.5.14+ item bases, 30 five-tier affix families, diminishing-returns Magic Find, Night-Touched cursed items, ItemDrop physics, RunRules, and BiomeViewer.",
+    sourceFiles: [
+      "src/item/loot/Item.hpp",
+      "src/item/loot/Affix.cpp",
+      "src/item/loot/Loot.cpp",
+      "src/entity/pickup/ItemDrop.cpp",
+      "src/level/RunRules.hpp",
+      "tools/biome_viewer/main.cpp",
+    ],
     content: `
 ### Diablo-Style Item System Architecture (\`src/item/loot/\`)
 
@@ -2966,7 +3172,8 @@ When an item is rolled at night (\`night == true\`), Magic and Rare items have a
 `,
     mermaidCharts: [
       {
-        title: 'Diablo-Style Loot Pipeline: TreasureClass -> rollItem() -> Night-Touched Touch()',
+        title:
+          "Diablo-Style Loot Pipeline: TreasureClass -> rollItem() -> Night-Touched Touch()",
         chart: `
 flowchart TD
     classDef tc fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -2985,7 +3192,8 @@ flowchart TD
 `,
       },
       {
-        title: 'RunRules Campaign Parameterization & SafeZone / Threat Evaluation',
+        title:
+          "RunRules Campaign Parameterization & SafeZone / Threat Evaluation",
         chart: `
 flowchart TD
     classDef rules fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -2999,21 +3207,23 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'loot',
+    interactiveComponent: "loot",
   },
   {
-    id: 'paper-doll-gear-combat',
-    title: '26. Paper-Doll Inventory (I), Reversible PlayerGear, ItemStats Combat Hooks & Loot Label Stacker',
-    category: 'gameplay',
-    summary: 'How the 37-slot InventoryMenu (5 paper-doll slots + 8x4 bag), reversible applyItem(±1) stat & upgrade-level accounting, (1-r)² quadratic DoT resistance, Enemy::hurt/onHit combat pipeline, and 12-pass Hud::lootLabels() AABB stacker operate.',
+    id: "paper-doll-gear-combat",
+    title:
+      "26. Paper-Doll Inventory (I), Reversible PlayerGear, ItemStats Combat Hooks & Loot Label Stacker",
+    category: "gameplay",
+    summary:
+      "How the 37-slot InventoryMenu (5 paper-doll slots + 8x4 bag), reversible applyItem(±1) stat & upgrade-level accounting, (1-r)² quadratic DoT resistance, Enemy::hurt/onHit combat pipeline, and 12-pass Hud::lootLabels() AABB stacker operate.",
     sourceFiles: [
-      'src/menu/InventoryMenu.cpp',
-      'src/entity/PlayerGear.cpp',
-      'src/item/loot/Equip.cpp',
-      'src/entity/ItemStats.hpp',
-      'src/entity/enemy/Enemy.cpp',
-      'src/gui/Tooltip.cpp',
-      'src/gui/Hud.cpp',
+      "src/menu/InventoryMenu.cpp",
+      "src/entity/PlayerGear.cpp",
+      "src/item/loot/Equip.cpp",
+      "src/entity/ItemStats.hpp",
+      "src/entity/enemy/Enemy.cpp",
+      "src/gui/Tooltip.cpp",
+      "src/gui/Hud.cpp",
     ],
     content: `
 ### 1. The 37-Slot Paper-Doll Inventory (\`src/menu/InventoryMenu.cpp\`)
@@ -3125,7 +3335,8 @@ When a player attack strikes an enemy, \`Enemy::hurt\` and \`Enemy::onHit\` exec
 `,
     mermaidCharts: [
       {
-        title: 'Reversible PlayerGear::wear / shed & (1-r)² Status Resistance Pipeline',
+        title:
+          "Reversible PlayerGear::wear / shed & (1-r)² Status Resistance Pipeline",
         chart: `
 flowchart TD
     classDef gear fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -3142,7 +3353,7 @@ flowchart TD
 `,
       },
       {
-        title: 'Enemy::hurt & Enemy::onHit Multi-Stage Combat & Proc Pipeline',
+        title: "Enemy::hurt & Enemy::onHit Multi-Stage Combat & Proc Pipeline",
         chart: `
 flowchart TD
     classDef hit fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#f8fafc;
@@ -3157,19 +3368,21 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'gearevents',
+    interactiveComponent: "gearevents",
   },
   {
-    id: 'biome-events-chart-hud',
-    title: '27. 26 Regional Biome Events, Paged RLE Fog-of-War Chart & HUD Ray-Clipped Edge Pointers',
-    category: 'world',
-    summary: 'Deterministic stateless Murmur3 scheduling for 26 regional BiomeEvents, sparse 32x32 paged fog-of-war Chart with horizontal scanline RLE coalescing, and asymmetric viewport ray-clipping in Hud::edge().',
+    id: "biome-events-chart-hud",
+    title:
+      "27. 26 Regional Biome Events, Paged RLE Fog-of-War Chart & HUD Ray-Clipped Edge Pointers",
+    category: "world",
+    summary:
+      "Deterministic stateless Murmur3 scheduling for 26 regional BiomeEvents, sparse 32x32 paged fog-of-war Chart with horizontal scanline RLE coalescing, and asymmetric viewport ray-clipping in Hud::edge().",
     sourceFiles: [
-      'src/level/BiomeEvents.hpp',
-      'src/level/BiomeEvents.cpp',
-      'src/level/Chart.hpp',
-      'src/level/Chart.cpp',
-      'src/gui/Hud.cpp',
+      "src/level/BiomeEvents.hpp",
+      "src/level/BiomeEvents.cpp",
+      "src/level/Chart.hpp",
+      "src/level/Chart.cpp",
+      "src/gui/Hud.cpp",
     ],
     content: `
 ### 1. Deterministic Stateless \`BiomeEvents\` across All 26 Biomes (\`src/level/BiomeEvents.cpp\`)
@@ -3247,7 +3460,8 @@ void Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag) con
 `,
     mermaidCharts: [
       {
-        title: 'Stateless BiomeEvents::schedule() Murmur3 Hash & Sanctuary Pipeline',
+        title:
+          "Stateless BiomeEvents::schedule() Murmur3 Hash & Sanctuary Pipeline",
         chart: `
 flowchart TD
     classDef hash fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -3267,7 +3481,8 @@ flowchart TD
 `,
       },
       {
-        title: 'Sparse Paged Fog-of-War Chart, Scanline RLE Coalescer & Hud::edge Ray Clipper',
+        title:
+          "Sparse Paged Fog-of-War Chart, Scanline RLE Coalescer & Hud::edge Ray Clipper",
         chart: `
 flowchart TD
     classDef chart fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -3282,22 +3497,24 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'gearevents',
+    interactiveComponent: "gearevents",
   },
   {
-    id: 'tutorial-loot-affixes-allies',
-    title: '28. Tutorial 9: Contributing Diablo Item Bases, 5-Tier Affixes, Summoned Allies & Weapon Forms',
-    category: 'contribute',
-    summary: 'Step-by-step C++20 guide to adding Diablo-style gear bases, reversible 5-tier item affixes in Affix.cpp & Equip.cpp, autonomous summoned Ally companions, and custom FormBehaviors.',
+    id: "tutorial-loot-affixes-allies",
+    title:
+      "28. Tutorial 9: Contributing Diablo Item Bases, 5-Tier Affixes, Summoned Allies & Weapon Forms",
+    category: "contribute",
+    summary:
+      "Step-by-step C++20 guide to adding Diablo-style gear bases, reversible 5-tier item affixes in Affix.cpp & Equip.cpp, autonomous summoned Ally companions, and custom FormBehaviors.",
     sourceFiles: [
-      'src/item/loot/ItemBase.cpp',
-      'src/item/loot/Affix.hpp',
-      'src/item/loot/Affix.cpp',
-      'src/item/loot/Equip.cpp',
-      'src/entity/Ally.hpp',
-      'src/entity/Ally.cpp',
-      'src/item/weapon/form/Summon.cpp',
-      'src/item/weapon/FormRegistry.cpp',
+      "src/item/loot/ItemBase.cpp",
+      "src/item/loot/Affix.hpp",
+      "src/item/loot/Affix.cpp",
+      "src/item/loot/Equip.cpp",
+      "src/entity/Ally.hpp",
+      "src/entity/Ally.cpp",
+      "src/item/weapon/form/Summon.cpp",
+      "src/item/weapon/FormRegistry.cpp",
     ],
     content: `
 ### 1. Contributing a New Diablo Gear Base (\`src/item/loot/ItemBase.cpp\`)
@@ -3482,7 +3699,8 @@ If a weapon needs a brand-new geometric attack pattern beyond the 16 built-in \`
 `,
     mermaidCharts: [
       {
-        title: 'End-to-End Pipeline for Contributing a Reversible 5-Tier Loot Affix',
+        title:
+          "End-to-End Pipeline for Contributing a Reversible 5-Tier Loot Affix",
         chart: `
 flowchart LR
     classDef step fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -3498,7 +3716,7 @@ flowchart LR
 `,
       },
       {
-        title: 'Summoned Ally Companion & Form::Summon Auto-Binding Pipeline',
+        title: "Summoned Ally Companion & Form::Summon Auto-Binding Pipeline",
         chart: `
 flowchart TD
     classDef ally fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -3513,21 +3731,23 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: 'contribute',
+    interactiveComponent: "contribute",
   },
   {
-    id: 'tutorial-traits-events-bounties',
-    title: '29. Tutorial 10: Contributing Elite/Champion Traits, Regional Biome Events & Bounties',
-    category: 'contribute',
-    summary: 'Step-by-step C++20 guide to adding Elite/Champion monster Traits across 5 combat hooks, scheduling regional BiomeEvents, adding Bounty contracts, and writing deterministic Field unit tests.',
+    id: "tutorial-traits-events-bounties",
+    title:
+      "29. Tutorial 10: Contributing Elite/Champion Traits, Regional Biome Events & Bounties",
+    category: "contribute",
+    summary:
+      "Step-by-step C++20 guide to adding Elite/Champion monster Traits across 5 combat hooks, scheduling regional BiomeEvents, adding Bounty contracts, and writing deterministic Field unit tests.",
     sourceFiles: [
-      'src/entity/Trait.hpp',
-      'src/entity/Trait.cpp',
-      'src/level/BiomeEvents.hpp',
-      'src/level/BiomeEvents.cpp',
-      'src/level/Bounty.hpp',
-      'src/level/Bounty.cpp',
-      'src/test/AllyTest.cpp',
+      "src/entity/Trait.hpp",
+      "src/entity/Trait.cpp",
+      "src/level/BiomeEvents.hpp",
+      "src/level/BiomeEvents.cpp",
+      "src/level/Bounty.hpp",
+      "src/level/Bounty.cpp",
+      "src/test/AllyTest.cpp",
     ],
     content: `
 ### 1. Contributing an Elite / Champion \`Trait\` (\`src/entity/Trait.hpp\`, \`src/entity/Trait.cpp\`)
@@ -3667,7 +3887,8 @@ cmake --build build --config Debug --parallel
 `,
     mermaidCharts: [
       {
-        title: '5 Lifecycle Hooks of struct Traits on Elite & Champion Monsters',
+        title:
+          "5 Lifecycle Hooks of struct Traits on Elite & Champion Monsters",
         chart: `
 flowchart LR
     classDef hook fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
@@ -3683,7 +3904,7 @@ flowchart LR
 `,
       },
       {
-        title: 'Headless Field Unit Test & Debug Verification Pipeline',
+        title: "Headless Field Unit Test & Debug Verification Pipeline",
         chart: `
 flowchart LR
     classDef test fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -3698,6 +3919,6 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: 'contribute',
+    interactiveComponent: "contribute",
   },
 ];
