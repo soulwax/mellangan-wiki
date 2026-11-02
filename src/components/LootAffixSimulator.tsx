@@ -112,6 +112,45 @@ const SAMPLE_BASES = [
 const TIER_NAMES = ["Worn", "Standard", "Elite"];
 const TIER_LEVEL = [0, 18, 36];
 
+const LOOT_SCENARIOS = [
+  {
+    name: "End-Game Boss Drop",
+    ilvl: 55,
+    mf: 250,
+    night: true,
+    force: "Auto" as const,
+    forceCurse: false,
+    desc: "Ilvl 55 + 250% MF: Rolls Tier V affixes on Elite bases with high Rare/Unique weight.",
+  },
+  {
+    name: "Night-Touched Curse Roll",
+    ilvl: 38,
+    mf: 80,
+    night: true,
+    force: "Rare" as const,
+    forceCurse: true,
+    desc: "Demonstrates 12% night curse trigger, boosting positive affixes by +2 tiers while inflicting severe trade-offs.",
+  },
+  {
+    name: "Early Progression (Lvl 3)",
+    ilvl: 3,
+    mf: 0,
+    night: false,
+    force: "Auto" as const,
+    forceCurse: false,
+    desc: "Low-level swarm drop: strictly Worn Tier I base with 1 prefix/suffix.",
+  },
+  {
+    name: "High-Tier Rare Armor",
+    ilvl: 45,
+    mf: 160,
+    night: false,
+    force: "Rare" as const,
+    forceCurse: false,
+    desc: "Elite defense piece with 4 affixes: Armour, Life, and Elemental Resists.",
+  },
+];
+
 const AFFIX_POOL: AffixFamilyData[] = [
   {
     key: "damage",
@@ -414,12 +453,13 @@ export const LootAffixSimulator: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"forge" | "treasure" | "forms">(
     "forge",
   );
-  const [ilvl, setIlvl] = useState<number>(38);
-  const [magicFind, setMagicFind] = useState<number>(180);
+  const [selectedScenario, setSelectedScenario] = useState<number | null>(0);
+  const [ilvl, setIlvl] = useState<number>(55);
+  const [magicFind, setMagicFind] = useState<number>(250);
   const [forceRarity, setForceRarity] = useState<"Auto" | "Magic" | "Rare">(
-    "Rare",
+    "Auto",
   );
-  const [forceNightTouched, setForceNightTouched] = useState<boolean>(true);
+  const [forceNightTouched, setForceNightTouched] = useState<boolean>(false);
   const [seed, setSeed] = useState<number>(0x5eed14);
   const [selectedSource, setSelectedSource] = useState<number>(5); // Boss
   const [isNight, setIsNight] = useState<boolean>(true);
@@ -555,6 +595,10 @@ export const LootAffixSimulator: React.FC = () => {
       affixes: pickedAffixes,
       curse,
       saveLine,
+      candidatesCount: candidates.length,
+      chosenQlvl: base.qlvl + TIER_LEVEL[chosen.tier],
+      prefixCount: pickedAffixes.filter((a) => a.family.prefix).length,
+      suffixCount: pickedAffixes.filter((a) => !a.family.prefix).length,
     };
   }, [ilvl, odds, forceRarity, forceNightTouched, seed]);
 
@@ -619,6 +663,53 @@ export const LootAffixSimulator: React.FC = () => {
 
       {activeTab === "forge" && (
         <div className="p-4 sm:p-5 space-y-5">
+          {/* Guided Scenario Presets */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400 font-semibold flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                <span>1-Click Drop Scenarios:</span>
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Click a scenario to load canonical engine drop parameters
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {LOOT_SCENARIOS.map((sc, idx) => {
+                const isSelected = selectedScenario === idx;
+                return (
+                  <button
+                    key={sc.name}
+                    onClick={() => {
+                      setSelectedScenario(idx);
+                      setIlvl(sc.ilvl);
+                      setMagicFind(sc.mf);
+                      setForceRarity(sc.force);
+                      setForceNightTouched(sc.forceCurse);
+                      setIsNight(sc.night);
+                      setSeed((prev) => ((prev * 1664525 + 1013904223) >>> 0) | 1);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left font-mono transition-all ${
+                      isSelected
+                        ? "bg-amber-500/15 border-amber-500/60 text-amber-200 shadow-md shadow-amber-950/30 ring-1 ring-amber-500/30"
+                        : "bg-dark-950/70 border-dark-800 text-slate-300 hover:border-dark-700 hover:text-slate-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold mb-1">
+                      <span>{sc.name}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-dark-900 border border-dark-750 text-slate-400">
+                        ilvl {sc.ilvl}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 leading-tight">
+                      {sc.desc}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             <div className="lg:col-span-5 rounded-xl border border-dark-800 bg-dark-950/60 p-4 space-y-3.5">
               <div className="text-xs font-mono uppercase tracking-wider text-amber-300 font-semibold flex items-center justify-between">
@@ -828,6 +919,57 @@ export const LootAffixSimulator: React.FC = () => {
                 <code className="block p-2 rounded bg-dark-900 border border-dark-800 text-[11px] font-mono text-amber-200 overflow-x-auto">
                   {rolledItem.saveLine}
                 </code>
+              </div>
+            </div>
+          </div>
+
+          {/* Engine Decision Log */}
+          <div className="p-4 rounded-xl border border-dark-800 bg-dark-950/90 font-mono text-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-dark-800 pb-2">
+              <span className="text-amber-300 font-semibold flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                <Sparkles className="w-3.5 h-3.5" />
+                Engine Decision Log (src/item/loot/* &amp; Equip.cpp)
+              </span>
+              <span className="text-[10px] text-slate-500">
+                Deterministic Execution Trace
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-[11px]">
+              <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 space-y-1">
+                <div className="text-sky-300 font-bold text-[10px] uppercase">
+                  1. Base Selection (rollBase)
+                </div>
+                <div className="text-slate-200">
+                  Scanned <strong>{rolledItem.candidatesCount}</strong> eligible bases with <code className="text-amber-300">qlvl + tier &le; {ilvl}</code>. Picked <span className="text-amber-200 font-semibold">{rolledItem.base.name}</span> (qlvl {rolledItem.chosenQlvl}).
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 space-y-1">
+                <div className="text-amber-300 font-bold text-[10px] uppercase">
+                  2. Rarity Threshold (rollRarity)
+                </div>
+                <div className="text-slate-200">
+                  MF +{magicFind}% asymptotic curve <code className="text-emerald-300">mf*600/(mf+600) = +{diminish(magicFind, 600).toFixed(0)}%</code>. Resolved rarity: <strong className="text-amber-300">{rolledItem.rarity}</strong>.
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 space-y-1">
+                <div className="text-purple-300 font-bold text-[10px] uppercase">
+                  3. Affix Slots &amp; Night Mutation
+                </div>
+                <div className="text-slate-200">
+                  Allocated <strong>{rolledItem.affixes.length}</strong> affixes ({rolledItem.prefixCount} Pre / {rolledItem.suffixCount} Suf, max 3/3). {rolledItem.curse ? <span className="text-purple-300">Night curse mutated 1 affix by +2 tiers with penalty.</span> : <span className="text-slate-400">No curse mutation applied.</span>}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 space-y-1">
+                <div className="text-emerald-300 font-bold text-[10px] uppercase">
+                  4. Equip Reversibility Invariant
+                </div>
+                <div className="text-slate-200">
+                  <code>Player::wear()</code> adds affix deltas; <code>Player::shed()</code> restores exact pre-wear values with zero float drift.
+                </div>
               </div>
             </div>
           </div>
