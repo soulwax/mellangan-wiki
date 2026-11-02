@@ -489,16 +489,20 @@ export const App: React.FC = () => {
   });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
-  const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>("all");
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    "getting-started": true,
-    tutorials: true,
-    "ai-concurrency": true,
-    rendering: true,
-    "world-terrain": true,
-    "core-memory": true,
-    "gameplay-ai": true,
-  });
+  const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>(
+    "all",
+  );
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {
+      "getting-started": true,
+      tutorials: true,
+      "ai-concurrency": true,
+      rendering: true,
+      "world-terrain": true,
+      "core-memory": true,
+      "gameplay-ai": true,
+    },
+  );
 
   const sectionById = useMemo(() => {
     const map = new Map<string, WikiSection>();
@@ -645,10 +649,7 @@ export const App: React.FC = () => {
     setExpandedGroups(next);
   };
 
-  const selectChapter = (
-    id: string,
-    e?: React.MouseEvent<HTMLElement>,
-  ) => {
+  const selectChapter = (id: string, e?: React.MouseEvent<HTMLElement>) => {
     if (
       e &&
       (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
@@ -658,10 +659,7 @@ export const App: React.FC = () => {
     if (e) {
       e.preventDefault();
     }
-    if (
-      window.location.pathname !== `/${id}` ||
-      window.location.hash !== ""
-    ) {
+    if (window.location.pathname !== `/${id}` || window.location.hash !== "") {
       window.history.pushState({ sectionId: id }, "", `/${id}`);
     }
     setActiveSectionId(id);
@@ -671,10 +669,7 @@ export const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const scrollToAnchor = (
-    slug: string,
-    e?: React.MouseEvent<HTMLElement>,
-  ) => {
+  const scrollToAnchor = (slug: string, e?: React.MouseEvent<HTMLElement>) => {
     if (
       e &&
       (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
@@ -975,7 +970,9 @@ export const App: React.FC = () => {
                                   : "text-slate-400 hover:text-slate-100 hover:bg-dark-850/60 border border-transparent"
                               }`}
                             >
-                              <span className="truncate">{item.shortTitle}</span>
+                              <span className="truncate">
+                                {item.shortTitle}
+                              </span>
                               {sec.interactiveComponent && (
                                 <span
                                   className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0"
@@ -1009,7 +1006,10 @@ export const App: React.FC = () => {
                                   <a
                                     href={`/${activeSection.id}#interactive-lab-anchor`}
                                     onClick={(e) =>
-                                      scrollToAnchor("interactive-lab-anchor", e)
+                                      scrollToAnchor(
+                                        "interactive-lab-anchor",
+                                        e,
+                                      )
                                     }
                                     className="w-full text-left py-1 px-1.5 rounded text-[11px] font-mono text-emerald-300 hover:bg-dark-850 flex items-center gap-1.5 truncate"
                                   >
@@ -1068,7 +1068,9 @@ export const App: React.FC = () => {
                   Docs
                 </a>
                 <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
-                <span className={`uppercase font-semibold shrink-0 ${activeGroup.color}`}>
+                <span
+                  className={`uppercase font-semibold shrink-0 ${activeGroup.color}`}
+                >
                   {activeGroup.label}
                 </span>
                 <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
