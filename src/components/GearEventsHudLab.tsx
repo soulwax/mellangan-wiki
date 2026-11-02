@@ -247,8 +247,7 @@ export const GearEventsHudLab: React.FC = () => {
         Math.imul(regionY, 0x27d4eb2f)) >>>
       0;
     const h = mix32(seedInput);
-    const begins =
-      epoch * def.every + 8 + (h % Math.max(1, def.every - 17));
+    const begins = epoch * def.every + 8 + (h % Math.max(1, def.every - 17));
     const ends = begins + 5;
     const warnAt = begins - 3;
     const offsetX = ((h >>> 8) & 63) - 31;
@@ -296,18 +295,17 @@ export const GearEventsHudLab: React.FC = () => {
     const dd = Math.max(1, Math.hypot(targetDx, targetDy));
     const nx = targetDx / dd;
     const ny = targetDy / dd;
-    const clampedEdge =
-      !offscreen
-        ? "Inside Viewport (No Edge Pin)"
-        : fitX < fitY
-          ? targetDx > 0
-            ? "Right Edge (xh = 222px)"
-            : "Left Edge (-xh = -222px)"
-          : targetDy < 0
-            ? "Top Safe Edge (84u Dawn/Omen Header Margin)"
-            : bossBarActive
-              ? "Bottom Safe Edge (46u Boss Bar Margin)"
-              : "Bottom Edge (18u Standard Margin)";
+    const clampedEdge = !offscreen
+      ? "Inside Viewport (No Edge Pin)"
+      : fitX < fitY
+        ? targetDx > 0
+          ? "Right Edge (xh = 222px)"
+          : "Left Edge (-xh = -222px)"
+        : targetDy < 0
+          ? "Top Safe Edge (84u Dawn/Omen Header Margin)"
+          : bossBarActive
+            ? "Bottom Safe Edge (46u Boss Bar Margin)"
+            : "Bottom Edge (18u Standard Margin)";
 
     // Simulate Hud::lootLabels() 12-iteration vertical AABB sweep
     const baseY = 180;
@@ -315,13 +313,28 @@ export const GearEventsHudLab: React.FC = () => {
     const u = 1;
     const sampleNames = [
       { text: "Dusk Fang [Rare]", color: "text-amber-300 border-amber-500/40" },
-      { text: "Night-Touched Tower Aegis", color: "text-purple-300 border-purple-500/40" },
-      { text: "Searing Ember Lance of Haste", color: "text-sky-300 border-sky-500/40" },
+      {
+        text: "Night-Touched Tower Aegis",
+        color: "text-purple-300 border-purple-500/40",
+      },
+      {
+        text: "Searing Ember Lance of Haste",
+        color: "text-sky-300 border-sky-500/40",
+      },
       { text: "42 gold", color: "text-gold-300 border-gold-500/30" },
       { text: "material", color: "text-slate-300 border-slate-600/40" },
-      { text: "Divine Moon Idol of Quickening", color: "text-sky-300 border-sky-500/40" },
+      {
+        text: "Divine Moon Idol of Quickening",
+        color: "text-sky-300 border-sky-500/40",
+      },
     ];
-    const stackedLabels: { text: string; color: string; rawY: number; finalY: number; shifts: number }[] = [];
+    const stackedLabels: {
+      text: string;
+      color: string;
+      rawY: number;
+      finalY: number;
+      shifts: number;
+    }[] = [];
     for (let i = 0; i < clusterCount; i++) {
       const rawY = baseY - (i % 2) * 4;
       let y = rawY;
@@ -363,7 +376,8 @@ export const GearEventsHudLab: React.FC = () => {
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-gold-400" />
           <span className="font-display font-bold text-xs sm:text-sm tracking-wide text-slate-100">
-            Paper-Doll Gear Math, Regional BiomeEvents &amp; HUD/Chart Geometry Lab
+            Paper-Doll Gear Math, Regional BiomeEvents &amp; HUD/Chart Geometry
+            Lab
           </span>
         </div>
 
@@ -416,7 +430,9 @@ export const GearEventsHudLab: React.FC = () => {
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-slate-400">Base Weapon Hit</span>
-                  <span className="text-slate-100 font-bold">{baseWeaponDmg} dmg</span>
+                  <span className="text-slate-100 font-bold">
+                    {baseWeaponDmg} dmg
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -442,7 +458,9 @@ export const GearEventsHudLab: React.FC = () => {
                 </button>
                 <button
                   onClick={() =>
-                    setHeroEdge((e) => (e === 1.8 ? 2.2 : e === 2.2 ? 2.5 : 1.8))
+                    setHeroEdge((e) =>
+                      e === 1.8 ? 2.2 : e === 2.2 ? 2.5 : 1.8,
+                    )
                   }
                   className="px-2.5 py-1 rounded-lg border bg-dark-900 border-dark-750 text-purple-300"
                 >
@@ -520,7 +538,9 @@ export const GearEventsHudLab: React.FC = () => {
                 <div>
                   <div className="flex justify-between text-[10px] text-slate-400 mb-1">
                     <span>Drafted Upgrade Lvl</span>
-                    <span className="text-emerald-300">Lv.{draftedWeaponLvl}</span>
+                    <span className="text-emerald-300">
+                      Lv.{draftedWeaponLvl}
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -528,7 +548,9 @@ export const GearEventsHudLab: React.FC = () => {
                     max={5}
                     step={1}
                     value={draftedWeaponLvl}
-                    onChange={(e) => setDraftedWeaponLvl(Number(e.target.value))}
+                    onChange={(e) =>
+                      setDraftedWeaponLvl(Number(e.target.value))
+                    }
                     className="w-full accent-emerald-400"
                   />
                 </div>
@@ -578,18 +600,21 @@ export const GearEventsHudLab: React.FC = () => {
                     {(gearStats.totalDoTScale * 100).toFixed(2)}% Dmg Taken
                   </div>
                   <div className="text-[10px] text-emerald-400">
-                    {gearStats.effectiveMitigationPct.toFixed(2)}% Total DoT Mitigated!
+                    {gearStats.effectiveMitigationPct.toFixed(2)}% Total DoT
+                    Mitigated!
                   </div>
                 </div>
 
                 <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 col-span-2">
                   <div className="text-[10px] uppercase text-purple-300 mb-1">
-                    Reversible <code>Player::wear</code> / <code>Player::shed</code>{" "}
-                    (<code>gearLevels[slot]</code>)
+                    Reversible <code>Player::wear</code> /{" "}
+                    <code>Player::shed</code> (<code>gearLevels[slot]</code>)
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="p-1.5 rounded bg-dark-950 border border-dark-800">
-                      <div className="text-[10px] text-slate-500">Before Wear</div>
+                      <div className="text-[10px] text-slate-500">
+                        Before Wear
+                      </div>
                       <div className="text-slate-200 font-bold">
                         Lv.{draftedWeaponLvl}
                       </div>
@@ -603,7 +628,9 @@ export const GearEventsHudLab: React.FC = () => {
                       </div>
                     </div>
                     <div className="p-1.5 rounded bg-dark-950 border border-emerald-500/40">
-                      <div className="text-[10px] text-emerald-400">After Shed</div>
+                      <div className="text-[10px] text-emerald-400">
+                        After Shed
+                      </div>
                       <div className="text-emerald-300 font-bold">
                         Lv.{gearStats.shedRestoredLvl} (Exact!)
                       </div>
@@ -721,12 +748,16 @@ export const GearEventsHudLab: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center justify-between border-b border-dark-800 pb-2">
                   <div>
-                    <div className={`font-bold text-sm ${scheduleStats.def.color}`}>
+                    <div
+                      className={`font-bold text-sm ${scheduleStats.def.color}`}
+                    >
                       {scheduleStats.def.name}
                     </div>
                     <div className="text-[10px] text-slate-400">
                       Banner: &quot;{scheduleStats.def.name} -{" "}
-                      {scheduleStats.def.boon ? "STEP INSIDE" : "MOVE TO SAFETY"}
+                      {scheduleStats.def.boon
+                        ? "STEP INSIDE"
+                        : "MOVE TO SAFETY"}
                       &quot;
                     </div>
                   </div>
@@ -741,7 +772,8 @@ export const GearEventsHudLab: React.FC = () => {
                       Telegraph / Active Window
                     </div>
                     <div className="text-gold-300 font-bold mt-0.5">
-                      Warn @ {scheduleStats.warnAt}s → [{scheduleStats.begins}s..
+                      Warn @ {scheduleStats.warnAt}s → [{scheduleStats.begins}
+                      s..
                       {scheduleStats.ends}s]
                     </div>
                     <div className="text-[10px] text-slate-500">
@@ -778,9 +810,7 @@ export const GearEventsHudLab: React.FC = () => {
                   {scheduleStats.def.heal
                     ? ` • Heals +${scheduleStats.def.heal} HP / 0.5s`
                     : ""}
-                  {scheduleStats.def.cleanse
-                    ? " • Cleanses Burn & Poison"
-                    : ""}
+                  {scheduleStats.def.cleanse ? " • Cleanses Burn & Poison" : ""}
                   {scheduleStats.def.charge
                     ? " • 3× Skill Cooldown Recharge (skillTime -= 2*DT)"
                     : ""}
@@ -859,13 +889,16 @@ export const GearEventsHudLab: React.FC = () => {
                       : "bg-dark-900 border-dark-800 text-slate-400"
                   }`}
                 >
-                  Boss Bar Active (Bottom Margin = {bossBarActive ? "46u" : "18u"})
+                  Boss Bar Active (Bottom Margin ={" "}
+                  {bossBarActive ? "46u" : "18u"})
                 </button>
               </div>
 
               <div className="p-2.5 rounded-lg bg-dark-900 border border-dark-800 space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Ray Scale Factor (fit):</span>
+                  <span className="text-slate-400">
+                    Ray Scale Factor (fit):
+                  </span>
                   <span className="text-emerald-300 font-bold">
                     fit = {hudAndChartStats.fit.toFixed(3)}
                   </span>
@@ -912,7 +945,9 @@ export const GearEventsHudLab: React.FC = () => {
                         key={idx}
                         className={`px-2.5 py-1 rounded bg-dark-900/90 border flex items-center justify-between text-[11px] ${lbl.color}`}
                       >
-                        <span className="truncate font-semibold">{lbl.text}</span>
+                        <span className="truncate font-semibold">
+                          {lbl.text}
+                        </span>
                         <span className="text-[10px] text-slate-400 shrink-0 ml-2">
                           y={lbl.finalY}px ({lbl.shifts} shifts)
                         </span>
@@ -936,4 +971,3 @@ export const GearEventsHudLab: React.FC = () => {
     </div>
   );
 };
-
