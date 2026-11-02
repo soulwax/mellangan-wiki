@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Cpu, GitCommit, Zap, RotateCcw, ArrowRight, ShieldAlert, Sparkles, Layers, CheckCircle2 } from 'lucide-react';
+import { Cpu, GitCommit, Zap, RotateCcw, ArrowRight, ShieldAlert, Sparkles, Layers, CheckCircle2, ArrowLeft, Play, Info } from 'lucide-react';
 
 function swarFlip(v: number): number {
   let u = v >>> 0;
@@ -42,6 +42,21 @@ function rebeccaByte(v: number): { byte: number; out: number } {
   return { byte: b, out };
 }
 
+const CANONICAL_EDGES = [
+  { label: '0 (Root)', val: 0, desc: 'Zero: Lowest bit is 0, all serpents confirm even' },
+  { label: '1 (Odd Unit)', val: 1, desc: 'Positive unit: LSB is 1, parity bit isolated' },
+  { label: '-1 (Neg Unit)', val: -1, desc: "Two's complement: 0xFFFFFFFF, all 32 bits set, odd" },
+  { label: '2 (Even Unit)', val: 2, desc: 'Smallest positive even integer' },
+  { label: '-2 (Neg Even)', val: -2, desc: "Two's complement: 0xFFFFFFFE, lowest bit is 0" },
+  { label: '0x7FFFFFFF', val: 0x7FFFFFFF, desc: 'INT_MAX: 31 set bits, MSB is 0, odd' },
+  { label: '0x80000000', val: -2147483648, desc: 'INT_MIN: Only MSB is set, bit 0 is 0, even' },
+  { label: '0x55555555', val: 0x55555555, desc: 'Alternating bits (0101...): bit 0 is 1, odd' },
+  { label: '0xAAAAAAAA', val: -1431655766, desc: 'Alternating bits (1010...): bit 0 is 0, even' },
+  { label: '65536 (2¹⁶)', val: 65536, desc: '16-bit halfword boundary, power of two, even' },
+  { label: '255 (2⁸-1)', val: 255, desc: 'Full 8-bit byte set, odd' },
+  { label: '256 (2⁸)', val: 256, desc: 'Byte overflow boundary, even' },
+];
+
 interface QueueSlot {
   name: string;
   isInterrupt: boolean;
@@ -50,6 +65,7 @@ interface QueueSlot {
 export const OuroborosBitLab: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'council' | 'dissectors' | 'augury' | 'queue'>('council');
   const [inputVal, setInputVal] = useState<number>(42);
+  const [auguryStep, setAuguryStep] = useState<number>(0);
   const [queueItems, setQueueItems] = useState<(QueueSlot | null)[]>([
     { name: 'HOWL', isInterrupt: false },
     { name: 'FLANK', isInterrupt: false },
@@ -65,6 +81,7 @@ export const OuroborosBitLab: React.FC = () => {
 
   const serpentData = useMemo(() => {
     const u = inputVal >>> 0;
+    const binaryStr = u.toString(2).padStart(32, '0');
 
     // SWAR breakdown stages
     const swar1 = (((u >>> 1) & 0x55555555) | ((u & 0x55555555) << 1)) >>> 0;
@@ -121,6 +138,7 @@ export const OuroborosBitLab: React.FC = () => {
 
     return {
       u,
+      binaryStr,
       swar1,
       swar2,
       swar3,
@@ -192,8 +210,11 @@ export const OuroborosBitLab: React.FC = () => {
     setSize(3);
   };
 
+  const activeXorNode = serpentData.xorNodes[auguryStep];
+
   return (
-    <div className="my-6 rounded-xl border border-dark-700 bg-dark-900/90 p-5 shadow-xl space-y-6">
+    <div className="my-6 rounded-2xl border border-dark-700 bg-dark-900/95 p-5 shadow-2xl space-y-6">
+      {/* Header Banner */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-dark-750 pb-4">
         <div>
           <div className="flex items-center gap-2">
@@ -208,7 +229,7 @@ export const OuroborosBitLab: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-          <div className="flex items-center gap-1.5 bg-dark-950 px-2.5 py-1 rounded-lg border border-dark-750">
+          <div className="flex items-center gap-1.5 bg-dark-950 px-2.5 py-1.5 rounded-lg border border-dark-750 shadow-inner">
             <span className="text-slate-400">Target n:</span>
             <input
               type="number"
@@ -221,36 +242,57 @@ export const OuroborosBitLab: React.FC = () => {
           <div className="flex gap-1">
             <button
               onClick={() => setInputVal((v) => v + 1)}
-              className="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200"
+              className="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200 transition-colors"
               title="Increment n"
             >
               n+1
             </button>
             <button
+              onClick={() => setInputVal((v) => v - 1)}
+              className="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200 transition-colors"
+              title="Decrement n"
+            >
+              n-1
+            </button>
+            <button
               onClick={() => setInputVal(0)}
-              className="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200"
-              title="Zero"
+              className="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200 transition-colors"
+              title="Set to Zero"
             >
-              0
-            </button>
-            <button
-              onClick={() => setInputVal(255)}
-              className="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200"
-              title="255 (Odd Edge)"
-            >
-              255
-            </button>
-            <button
-              onClick={() => setInputVal(65536)}
-              className="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-dark-700 text-slate-200"
-              title="65536 (Even Edge)"
-            >
-              65536
+              Zero
             </button>
           </div>
         </div>
       </div>
 
+      {/* Guided Canonical Edge Cases Presets */}
+      <div className="p-3 rounded-xl bg-dark-950 border border-dark-800 space-y-2 font-mono">
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span className="font-semibold text-gold-400 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Try Canonical C++20 Compile-Time Edge Cases (constexpr int EDGES[]):</span>
+          </span>
+          <span className="text-slate-500">1-Click Scenarios</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {CANONICAL_EDGES.map((edge) => (
+            <button
+              key={edge.label}
+              onClick={() => setInputVal(edge.val)}
+              className={`px-2 py-1 rounded text-[10px] border transition-all ${
+                inputVal === edge.val
+                  ? 'bg-gold-500/20 border-gold-400 text-gold-300 font-bold shadow-sm'
+                  : 'bg-dark-900 hover:bg-dark-850 border-dark-750 text-slate-300'
+              }`}
+              title={edge.desc}
+            >
+              {edge.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs border-b border-dark-800 pb-3">
         <button
           onClick={() => setActiveTab('council')}
@@ -298,14 +340,15 @@ export const OuroborosBitLab: React.FC = () => {
         </button>
       </div>
 
+      {/* Tab 1: The Council & Consensus */}
       {activeTab === 'council' && (
         <div className="space-y-5 font-mono text-xs">
           <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-[10px] uppercase text-slate-400 font-semibold">
-                Infix Pointer-to-Member Evaluation
+                Infix Pointer-to-Member Evaluation (Ouroboros::operator-&gt;*)
               </div>
-              <div className="text-lg font-bold text-slate-100 mt-1 flex items-center gap-2">
+              <div className="text-xl font-bold text-slate-100 mt-1 flex items-center gap-2">
                 <span>council-&gt;*{inputVal} =</span>
                 <span className={serpentData.isEven ? 'text-emerald-400' : 'text-rose-400'}>
                   {serpentData.isEven ? 'true (EVEN)' : 'false (ODD)'}
@@ -329,6 +372,41 @@ export const OuroborosBitLab: React.FC = () => {
             </div>
           </div>
 
+          {/* 32-Bit Binary Visualizer */}
+          <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>32-Bit Binary Value (std::bit_cast&lt;uint32_t&gt;(n)):</span>
+              <span className="text-slate-500">Hex: 0x{serpentData.u.toString(16).toUpperCase().padStart(8, '0')}</span>
+            </div>
+            <div className="flex flex-wrap gap-1 font-mono text-[11px] text-center">
+              {serpentData.binaryStr.split('').map((bit, idx) => {
+                const bitPos = 31 - idx;
+                const isLsb = bitPos === 0;
+                const isMsb = bitPos === 31;
+                return (
+                  <div
+                    key={bitPos}
+                    className={`flex-1 min-w-[20px] p-1 rounded border text-center transition-all ${
+                      isLsb
+                        ? 'bg-amber-500/30 border-amber-400 text-amber-200 font-bold scale-105'
+                        : isMsb
+                        ? 'bg-purple-500/20 border-purple-500/40 text-purple-200'
+                        : 'bg-dark-900 border-dark-800 text-slate-300'
+                    }`}
+                    title={`Bit ${bitPos}${isLsb ? ' (LSB: Parity Bit)' : isMsb ? ' (MSB: Sign Bit)' : ''}`}
+                  >
+                    <div className="text-[8px] text-slate-500">{bitPos}</div>
+                    <div className="font-bold">{bit}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 pt-1">
+              <span>Bit 31 (MSB)</span>
+              <span className="text-amber-300 font-bold">Bit 0 (LSB = {serpentData.u & 1} → {serpentData.isEven ? 'Even' : 'Odd'})</span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
@@ -341,7 +419,7 @@ export const OuroborosBitLab: React.FC = () => {
                 SWAR 32-bit parallel flip. Inverts bit-order so bit 0 maps to MSB (bit 31).
               </p>
               <div className="p-2 rounded bg-dark-900 border border-dark-800 text-[10px] text-slate-300 font-mono">
-                !(flip(n) &gt;&gt; 31)
+                !(flip(n) &gt;&gt; 31) = {serpentData.mirrorBite ? 1 : 0}
               </div>
             </div>
 
@@ -356,7 +434,7 @@ export const OuroborosBitLab: React.FC = () => {
                 XOR nibble-fold down to 4 bits, indexing <code className="text-gold-300">0x6996u</code> parity truth table.
               </p>
               <div className="p-2 rounded bg-dark-900 border border-dark-800 text-[10px] text-slate-300 font-mono">
-                !(fold(n) ^ fold(n&gt;&gt;1))
+                !(fold(n) ^ fold(n&gt;&gt;1)) = {serpentData.grayBite ? 1 : 0}
               </div>
             </div>
 
@@ -371,7 +449,7 @@ export const OuroborosBitLab: React.FC = () => {
                 Isolates LSB via <code className="text-gold-300">v &amp; (~v + 1)</code> and hashes into <code className="text-gold-300">0x077CB531u</code> spiral table.
               </p>
               <div className="p-2 rounded bg-dark-900 border border-dark-800 text-[10px] text-slate-300 font-mono">
-                SPIRAL[hash] != 0
+                SPIRAL[hash] != 0 = {serpentData.bruijnBite ? 1 : 0}
               </div>
             </div>
 
@@ -386,13 +464,14 @@ export const OuroborosBitLab: React.FC = () => {
                 Rotates right by 8 bits (<code className="text-gold-300">std::rotr(n, 8)</code>) and checks 256-entry feelings LUT.
               </p>
               <div className="p-2 rounded bg-dark-900 border border-dark-800 text-[10px] text-slate-300 font-mono">
-                AN_ARRAY_OF_FEELINGS[b] != 0
+                AN_ARRAY_OF_FEELINGS[b] != 0 = {serpentData.rebeccaBite ? 1 : 0}
               </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Tab 2: Serpent Bit Dissectors */}
       {activeTab === 'dissectors' && (
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 space-y-3">
@@ -471,52 +550,106 @@ export const OuroborosBitLab: React.FC = () => {
         </div>
       )}
 
+      {/* Tab 3: Augury XOR-Linked List Traversal with Interactive Stepping */}
       {activeTab === 'augury' && (
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="text-emerald-400 font-bold text-sm">Augury: Self-Traversing XOR-Linked List</span>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Compact 24-byte <code className="text-gold-300">Rite</code> nodes storing a single <code className="text-slate-200">link = prev ^ next</code> pointer.
                 </p>
               </div>
-              <span className="text-xs px-2.5 py-1 rounded bg-dark-900 border border-dark-750 text-gold-300">
-                Traversal: next = r-&gt;link ^ prev
-              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setAuguryStep((s) => Math.max(0, s - 1))}
+                  disabled={auguryStep === 0}
+                  className="px-2 py-1 rounded bg-dark-850 hover:bg-dark-800 disabled:opacity-30 border border-dark-700 text-slate-300 flex items-center gap-1"
+                >
+                  <ArrowLeft className="w-3 h-3" />
+                  <span>Prev</span>
+                </button>
+                <span className="text-gold-300 font-bold px-1.5">
+                  Node {auguryStep + 1} / 4
+                </span>
+                <button
+                  onClick={() => setAuguryStep((s) => Math.min(3, s + 1))}
+                  disabled={auguryStep === 3}
+                  className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-30 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1"
+                >
+                  <span>Next Node</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => setAuguryStep(0)}
+                  className="px-2 py-1 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 text-slate-400"
+                  title="Reset to first node"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              {serpentData.xorNodes.map((node, i) => (
-                <div key={i} className="p-3 rounded-lg bg-dark-900 border border-dark-750 space-y-1.5">
-                  <div className="flex items-center justify-between text-gold-400 font-bold">
-                    <span>rites[{i}] ({node.serpentName})</span>
-                    <span className={node.vote ? 'text-emerald-400' : 'text-rose-400'}>
-                      {node.vote ? 'EVEN' : 'ODD'}
-                    </span>
+              {serpentData.xorNodes.map((node, i) => {
+                const isActive = i === auguryStep;
+                return (
+                  <div
+                    key={i}
+                    onClick={() => setAuguryStep(i)}
+                    className={`p-3 rounded-lg border space-y-1.5 cursor-pointer transition-all ${
+                      isActive
+                        ? 'bg-emerald-500/15 border-emerald-400 shadow-md shadow-emerald-500/10 scale-102'
+                        : 'bg-dark-900 hover:bg-dark-850 border-dark-750'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-gold-400 font-bold">
+                      <span>rites[{i}] ({node.serpentName})</span>
+                      <span className={node.vote ? 'text-emerald-400' : 'text-rose-400'}>
+                        {node.vote ? 'EVEN' : 'ODD'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 space-y-0.5">
+                      <div>Addr: <strong className="text-slate-300">0x{node.addr.toString(16)}</strong></div>
+                      <div>Prev: 0x{node.prev.toString(16)}</div>
+                      <div>Next: 0x{node.next.toString(16)}</div>
+                    </div>
+                    <div className="text-[11px] text-emerald-300 font-bold pt-1 border-t border-dark-800">
+                      link: 0x{node.link.toString(16)}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-400 space-y-0.5">
-                    <div>Addr: <strong className="text-slate-300">0x{node.addr.toString(16)}</strong></div>
-                    <div>Prev: 0x{node.prev.toString(16)}</div>
-                    <div>Next: 0x{node.next.toString(16)}</div>
-                  </div>
-                  <div className="text-[11px] text-emerald-300 font-bold pt-1 border-t border-dark-800">
-                    link: 0x{node.link.toString(16)}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+
+            {/* Active Node Live XOR Calculation Box */}
+            <div className="p-3 rounded-lg bg-dark-900 border border-emerald-500/30 text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Play className="w-3.5 h-3.5 text-emerald-400" />
+                <span>
+                  Active Node: <strong className="text-gold-300">{activeXorNode.serpentName} (rites[{auguryStep}])</strong>
+                </span>
+              </div>
+              <div className="text-emerald-300 font-mono">
+                <code>next = link ^ prev = 0x{activeXorNode.link.toString(16)} ^ 0x{activeXorNode.prev.toString(16)} = 0x{activeXorNode.next.toString(16)}</code>
+              </div>
             </div>
 
             <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800 text-[11px] text-slate-300 space-y-1">
-              <span className="text-gold-400 font-bold">Type-Erased Thunk Dispatch:</span>
-              <p className="text-slate-400">
-                Each node invokes <code className="text-slate-200">r-&gt;bite(r-&gt;charlotte, u)</code> through a function pointer <code className="text-slate-200">thunk&lt;S&gt;</code> without virtual method tables, testing pointer arithmetic, function pointer ABI stability, and stack locality.
+              <span className="text-gold-400 font-bold flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" />
+                <span>Why XOR-Linked Lists Validate Compiler Integrity:</span>
+              </span>
+              <p className="text-slate-400 leading-relaxed">
+                Doubly linked lists require 16 bytes of pointer storage per node. XOR-linked lists compress this into a single 64-bit integer (<code className="text-slate-200">link = prev ^ next</code>). Mellangan runs this in <code className="text-slate-200">consultOuroboros()</code> to guarantee that strict aliasing and pointer provenance optimizations in GCC/Clang/MSVC never corrupt bidirectional pointer reconstruction!
               </p>
             </div>
           </div>
         </div>
       )}
 
+      {/* Tab 4: GoalQueue Modulo-8 Ringbuffer */}
       {activeTab === 'queue' && (
         <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 space-y-4 font-mono">
           <div className="flex items-center justify-between">
@@ -537,7 +670,7 @@ export const OuroborosBitLab: React.FC = () => {
             Bitwise modulo-8 indexing (<code className="text-slate-200">&amp; 7</code>) enables zero-branch ring wrapping and $O(1)$ <code className="text-rose-300">pushFront()</code> interrupt preemption via <code className="text-rose-300">head = (head + 7) &amp; 7</code>.
           </div>
 
-          <div className="grid grid-cols-4 gap-2 pt-1">
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 pt-1">
             {queueItems.map((slot, idx) => {
               const isHead = size > 0 && idx === head;
               const isTail = size > 0 && idx === ((head + size - 1) & 7);
@@ -546,7 +679,7 @@ export const OuroborosBitLab: React.FC = () => {
                   key={idx}
                   className={`p-2 rounded-lg border text-center relative transition-all ${
                     isHead
-                      ? 'bg-gold-500/20 border-gold-400 text-gold-200 shadow-md shadow-gold-500/10'
+                      ? 'bg-gold-500/20 border-gold-400 text-gold-200 shadow-md shadow-gold-500/10 scale-102'
                       : slot
                       ? slot.isInterrupt
                         ? 'bg-rose-500/15 border-rose-500/50 text-rose-200'
