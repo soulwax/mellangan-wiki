@@ -124,7 +124,7 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "goal-ai",
-        shortTitle: "GoalQueue Ringbuffer, Sense & Ouroboros",
+        shortTitle: "GoalQueue Ringbuffer, Sense & Steering",
       },
       {
         id: "goal-steering-catalog",
@@ -200,6 +200,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "audio-qa",
         shortTitle: "32-Voice LRU Audio Mixer & QA Views",
+      },
+      {
+        id: "ouroboros-deep-dive",
+        shortTitle: "How Ouroboros Really Works",
       },
     ],
   },
@@ -828,6 +832,15 @@ export const App: React.FC = () => {
             </a>
 
             <a
+              href="/ouroboros-deep-dive"
+              onClick={(e) => selectChapter("ouroboros-deep-dive", e)}
+              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-xs font-mono text-purple-300 font-semibold transition-colors"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Ouroboros</span>
+            </a>
+
+            <a
               href="https://github.com/soulwax/Mellangan"
               target="_blank"
               rel="noreferrer"
@@ -861,7 +874,7 @@ export const App: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 29 chapters, files..."
+                placeholder="Filter 30 chapters, files..."
                 className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (

@@ -675,10 +675,10 @@ flowchart LR
   },
   {
     id: "goal-ai",
-    title: "06. GoalQueue AI Ringbuffer, Sense Sight-Cone Math & Ouroboros",
+    title: "06. GoalQueue AI Ringbuffer, Sense Sight-Cone Math & Goal Steering",
     category: "simulation",
     summary:
-      "Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue preemption, 113-degree sight-cone dot products, and Ouroboros bit-twiddling.",
+      "Zero-allocation constexpr Plan tables, 8-slot bitwise GoalQueue preemption, 113-degree sight-cone dot products, and steer velocity integration.",
     sourceFiles: [
       "src/entity/enemy/ai/Goal.hpp",
       "src/entity/enemy/ai/Plans.cpp",
@@ -843,6 +843,10 @@ void Enemy::think() {
 3. **\`Bruijn\`:** Isolates the lowest set bit \`(v & (~v + 1))\` (with MSB sentinel \`0x80000000u\`) and hashes it through the de Bruijn multiplier \`0x077CB531u >> 27\` into a \`constexpr\` 32-byte spiral table.
 4. **\`Rebecca\`:** Rotates right by 8 bits (\`std::rotr(n, 8) >> 24\`) to extract the low byte into a 256-entry \`constexpr\` LUT (\`AN_ARRAY_OF_FEELINGS\`).
 5. **\`Augury\` XOR-Linked List:** Stores the four serpents in type-erased \`Rite\` nodes where \`uintptr_t link = prev ^ next\`, traversing forward using a single pointer field via \`next = r->link ^ reinterpret_cast<uintptr_t>(prev)\`!
+
+> [!NOTE]
+> For the dedicated, exhaustive mathematical breakdown, proofs, De Bruijn spirals, and XOR-linked list implementation, see **[30. Inside Ouroboros: The Council of Four Serpents](/ouroboros-deep-dive)**.
+
 `,
     mermaidCharts: [
       {
@@ -3920,5 +3924,398 @@ flowchart LR
       },
     ],
     interactiveComponent: "contribute",
+  },
+  {
+    id: "ouroboros-deep-dive",
+    title:
+      "30. How Ouroboros Really Works: The Council of Four Serpents, SWAR Parity, De Bruijn Spirals & XOR-Linked Augury",
+    category: "core",
+    summary:
+      "Complete mathematical and architectural breakdown of src/other/Ouroboros.hpp: compile-time consteval unanimity proofs, 4 CRTP serpents (Mirror, Gray, Bruijn, Rebecca), infix operator->*, and self-traversing XOR-linked list Augury.",
+    sourceFiles: [
+      "src/other/Ouroboros.hpp",
+      "src/main.cpp",
+    ],
+    content: `
+### 1. The Mythos, Origin & Purpose of Ouroboros (\`src/other/Ouroboros.hpp\`, \`src/main.cpp\`)
+
+In classical antiquity and alchemical philosophy, the **Ouroboros** represents the serpent consuming its own tail—a primordial symbol of eternal cyclical return, self-referential systems, and closed feedback loops.
+
+Within the Mellangan codebase, \`namespace ouroboros\` (\`src/other/Ouroboros.hpp\`) elevates the simplest computational question—**"Is an integer n even or odd (n % 2 == 0)?"**—into a tour-de-force of modern C++20 metaprogramming, SIMD-within-a-register (SWAR) bit manipulations, discrete mathematics, and self-traversing XOR pointer arithmetic.
+
+#### Why Ouroboros Exists: The Engine's Hardware & Compiler Canary
+
+Rather than being a whimsical Easter egg, Ouroboros serves a critical operational role in Mellangan's engine integrity. When launching the game with the \`--dev\` developer sandbox flag, \`src/main.cpp\` invokes \`consultOuroboros()\`:
+
+\`\`\`cpp
+static void consultOuroboros() {
+    constexpr ouroboros::Ouroboros council;
+    int n = int(SDL_GetTicks() % 1000);
+    ouroboros::Augury augury;
+    spdlog::info("Ouroboros: {} is {}, {} of 4 serpents agree, the augury {}", n,
+                 (council->*n) ? "even" : "odd", council.agreement(n),
+                 augury.even(n) == (council->*n) ? "concurs" : "dissents");
+}
+\`\`\`
+
+1. **Compile-Time Optimization Verification:** Mellangan compiles with aggressive optimization (\`-O3\` / \`/O2\`) and heavily utilizes modern C++20 features: \`consteval\`, \`std::bit_cast\`, \`std::rotr\`, and \`std::popcount\`. The entire council must pass an exhaustive compile-time test suite (\`static_assert(unanimous(), "the serpents disagree");\`). If an optimizing compiler introduces an instruction-scheduling bug, mishandles sign extension, or breaks constant folding, compilation halts immediately.
+2. **Runtime ABI & Pointer Provenance Test:** The dynamic \`Augury\` class instantiates a self-referential XOR-linked list of type-erased function-pointer thunks on the stack. \`consultOuroboros()\` verifies at runtime that pointer-to-integer casts (\`reinterpret_cast<uintptr_t>\`) and XOR-pointer recovery work without strict-aliasing violations or link-time optimization (LTO) miscompilations.
+
+---
+
+### 2. Zero-Vtable Static Polymorphism: \`template <class Self> struct Charlotte\`
+
+Each of the four serpents is modeled as an empty, stateless C++ struct inheriting from a common CRTP (Curiously Recurring Template Pattern) base named \`Charlotte\`:
+
+\`\`\`cpp
+template <class Self> struct Charlotte {
+    constexpr bool operator()(uint32_t n) const {
+        return static_cast<const Self &>(*this).bite(n);
+    }
+};
+\`\`\`
+
+- **Zero Memory Overhead:** Because \`Charlotte\` defines no member variables and no virtual function table (\`vtable\`), \`sizeof(Charlotte<Self>) == 1\` (standard C++ minimum for empty classes).
+- **Zero-Cost Abstraction:** Calling \`Mirror{}(u)\` expands into an inlined, direct static dispatch to \`Mirror::bite(u)\` without any indirect pointer dereferences or dynamic call indirection.
+- **The Bite Invariant:** Every serpent struct must implement \`constexpr bool bite(uint32_t n) const\`, returning \`true\` if \`n\` is even ($n \\pmod 2 = 0$) and \`false\` if \`n\` is odd ($n \\pmod 2 = 1$).
+
+---
+
+### 3. Serpent 1: \`Mirror\` — 32-Bit SIMD-Within-A-Register (SWAR) Bit Reversal
+
+\`Mirror\` determines integer parity by reversing all 32 bits of the integer end-to-end using a 5-stage SIMD-Within-A-Register (SWAR) divide-and-conquer algorithm:
+
+\`\`\`cpp
+struct Mirror : Charlotte<Mirror> {
+    static constexpr uint32_t flip(uint32_t v) {
+        v = (v >> 1 & 0x55555555u) | (v & 0x55555555u) << 1;
+        v = (v >> 2 & 0x33333333u) | (v & 0x33333333u) << 2;
+        v = (v >> 4 & 0x0F0F0F0Fu) | (v & 0x0F0F0F0Fu) << 4;
+        v = (v >> 8 & 0x00FF00FFu) | (v & 0x00FF00FFu) << 8;
+        return v >> 16 | v << 16;
+    }
+    constexpr bool bite(uint32_t n) const { return !(flip(n) >> 31); }
+};
+\`\`\`
+
+#### Step-by-Step SWAR Breakdown
+1. **Stage 1 (1-Bit Pair Swap):** Bitmask \`0x55555555u\` (\`01010101 01010101 01010101 01010101\`). Swaps adjacent odd and even bits across all 16 bit-pairs simultaneously.
+2. **Stage 2 (2-Bit Dibit Swap):** Bitmask \`0x33333333u\` (\`00110011 00110011 00110011 00110011\`). Swaps adjacent 2-bit groups.
+3. **Stage 3 (4-Bit Nibble Swap):** Bitmask \`0x0F0F0F0Fu\` (\`00001111 00001111 00001111 00001111\`). Swaps adjacent 4-bit nibbles.
+4. **Stage 4 (8-Bit Byte Swap):** Bitmask \`0x00FF00FFu\` (\`00000000 11111111 00000000 11111111\`). Swaps adjacent 8-bit bytes.
+5. **Stage 5 (16-Bit Halfword Swap):** \`v >> 16 | v << 16\`. Swaps the upper and lower 16-bit words.
+
+#### Why Mirror Proves Parity
+In binary representation, the parity of any integer $n$ is encoded exclusively in its least significant bit $b_0$ (bit 0):
+- If $n$ is even, $b_0 = 0$.
+- If $n$ is odd, $b_0 = 1$.
+
+Because \`flip(n)\` inverts the position of every bit $i \\mapsto (31 - i)$, bit 0 is transposed to bit 31 (the most significant bit, MSB). Shifting right by 31 bits (\`flip(n) >> 31\`) extracts $b_0$. Negating this with logical not (\`!(flip(n) >> 31)\`) evaluates to \`!0 = true\` if even, and \`!1 = false\` if odd!
+
+---
+
+### 4. Serpent 2: \`Gray\` — XOR Nibble Folding & The Parity Constant \`0x6996u\`
+
+\`Gray\` utilizes Gray-code folding and discrete parity trees, solving parity through a mathematical identity where all 31 upper bits destroy themselves through pairwise cancellation:
+
+\`\`\`cpp
+struct Gray : Charlotte<Gray> {
+    static constexpr uint32_t fold(uint32_t v) {
+        v ^= v >> 16, v ^= v >> 8, v ^= v >> 4;
+        return 0x6996u >> (v & 15) & 1;
+    }
+    constexpr bool bite(uint32_t n) const { return !(fold(n) ^ fold(n >> 1)); }
+};
+\`\`\`
+
+#### Step 1: 32-Bit to 4-Bit XOR Folding
+- \`v ^= v >> 16\`: Folds the upper 16 bits of the word into the lower 16 bits.
+- \`v ^= v >> 8\`: Folds the upper 8 bits of that result into the lower 8 bits.
+- \`v ^= v >> 4\`: Folds the upper 4 bits into the lowest nibble ($[0..15]$).
+The lowest 4 bits now contain the accumulated XOR sum of all 32 bits partitioned modulo 4.
+
+#### Step 2: The Magic Parity Constant \`0x6996u\`
+Why does \`0x6996u >> (v & 15) & 1\` compute the parity of a 4-bit nibble?
+Let us express \`0x6996\` in binary:
+\`\`\`text
+0x6996 = 0110 1001 1001 0110 (binary)
+\`\`\`
+Now calculate the parity ($popcount \\pmod 2$) for every 4-bit integer from 0 to 15:
+- $0 = 0000_2 \\implies 0$
+- $1 = 0001_2 \\implies 1$
+- $2 = 0010_2 \\implies 1$
+- $3 = 0011_2 \\implies 0$
+- $4 = 0100_2 \\implies 1$
+- $5 = 0101_2 \\implies 0$
+- $6 = 0110_2 \\implies 0$
+- $7 = 0111_2 \\implies 1$
+- $8 = 1000_2 \\implies 1$
+- $9 = 1001_2 \\implies 0$
+- $10 = 1010_2 \\implies 0$
+- $11 = 1011_2 \\implies 1$
+- $12 = 1100_2 \\implies 0$
+- $13 = 1101_2 \\implies 1$
+- $14 = 1110_2 \\implies 1$
+- $15 = 1111_2 \\implies 0$
+
+Reading these parity values from index 0 to index 15 yields: **\`0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0\`**! This is the exact 16-bit binary pattern of \`0x6996u\`. Thus, shifting \`0x6996u\` right by \`(v & 15)\` and masking with \`1\` computes the global parity of \`v\` with zero memory loads and zero branches!
+
+#### Step 3: The Parity Cancellation Theorem
+Why does \`!(fold(n) ^ fold(n >> 1))\` determine whether $n$ is even?
+Let $P(x)$ denote the global parity of an integer $x$:
+$$P(n) = \\bigoplus_{i=0}^{31} b_i = b_0 \\oplus \\bigoplus_{i=1}^{31} b_i$$
+Now consider the right-shifted value $n \\gg 1$:
+$$P(n \\gg 1) = 0 \\oplus \\bigoplus_{i=1}^{31} b_i = \\bigoplus_{i=1}^{31} b_i$$
+When we compute the XOR sum of their parities:
+$$P(n) \\oplus P(n \\gg 1) = \\left( b_0 \\oplus \\bigoplus_{i=1}^{31} b_i \\right) \\oplus \\left( \\bigoplus_{i=1}^{31} b_i \\right)$$
+By the associativity and commutativity of XOR ($x \\oplus x = 0$ and $x \\oplus 0 = x$):
+$$P(n) \\oplus P(n \\gg 1) = b_0 \\oplus 0 = b_0$$
+**Every single bit from 1 through 31 cancels itself out completely!** Only bit 0 survives!
+Negating the result with \`!\` returns \`!b_0\`, which is \`true\` (1) for even numbers and \`false\` (0) for odd numbers.
+
+---
+
+### 5. Serpent 3: \`Bruijn\` — De Bruijn Sequence $B(2, 5)$ Spiral & LSB Isolation
+
+\`Bruijn\` solves parity using cyclic De Bruijn sequences to isolate and hash the least significant set bit ($LSB$) into a trailing zero count table:
+
+\`\`\`cpp
+struct Bruijn : Charlotte<Bruijn> {
+    static constexpr std::array<uint8_t, 32> SPIRAL = [] {
+        std::array<uint8_t, 32> t{};
+        for (uint32_t i = 0; i < 32; i++)
+            t[(0x077CB531u << i) >> 27] = uint8_t(i);
+        return t;
+    }();
+    constexpr bool bite(uint32_t n) const {
+        uint32_t v = n | 0x80000000u;
+        return SPIRAL[((v & (~v + 1)) * 0x077CB531u) >> 27] != 0;
+    }
+};
+\`\`\`
+
+#### What Is a De Bruijn Sequence $B(2, 5)$?
+A De Bruijn sequence of order $k=5$ on a binary alphabet is a cyclic sequence of length $2^5 = 32$ in which every possible 5-bit combination appears exactly once as a contiguous circular substring.
+The 32-bit constant **\`0x077CB531u\`** is a canonical $B(2, 5)$ generator:
+\`\`\`text
+0x077CB531 = 0000 0111 0111 1100 1011 0101 0011 0001 (binary)
+\`\`\`
+
+#### The Compile-Time \`SPIRAL\` Hash Table
+At compile time, the lambda generates \`SPIRAL\`:
+\`\`\`cpp
+for (uint32_t i = 0; i < 32; i++)
+    t[(0x077CB531u << i) >> 27] = uint8_t(i);
+\`\`\`
+Because \`0x077CB531u\` is a De Bruijn cycle, multiplying by any isolated power-of-two bit $2^i$ circularly shifts the 32-bit sequence by $i$ positions. The top 5 bits (\`>> 27\`) uniquely identify the power $i \\in [0..31]$ with zero hash collisions!
+
+#### The Sentinel and Parity Decision
+1. **Sentinel Mask (\`v = n | 0x80000000u\`):** If $n = 0$, $v \\& -v$ would be 0, leading to undefined behavior in table indexing. Or-ing with \`0x80000000u\` (bit 31) guarantees $v \\neq 0$ while leaving bit 0 completely untouched.
+2. **Two's Complement LSB Isolation (\`v & (~v + 1)\`):** This is the classic bitwise operation \`v & -v\`, which strips away all set bits except the lowest one ($2^k$).
+3. **Parity Check:**
+   - If $n$ is **odd**, bit 0 is set $\\implies LSB = 2^0 = 1$. The trailing zero count is $0 \\implies SPIRAL[...] = 0$.
+   - If $n$ is **even**, bit 0 is clear $\\implies LSB \\ge 2^1$ (or $2^{31}$ if $n = 0$). The trailing zero count is $\\ge 1 \\implies SPIRAL[...] \\neq 0$.
+4. Checking \`SPIRAL[...] != 0\` returns \`true\` if and only if $n$ is even!
+
+---
+
+### 6. Serpent 4: \`Rebecca\` — Circular Vector Rotation & Affine Galois Field Inversion
+
+\`Rebecca\` rotates the 32-bit word, extracts the lowest byte, and routes it through an affine Galois field mapping over $\\mathbb{Z}_2$:
+
+\`\`\`cpp
+struct Rebecca : Charlotte<Rebecca> {
+    static constexpr std::array<uint8_t, 256> AN_ARRAY_OF_FEELINGS = [] {
+        std::array<uint8_t, 256> t{};
+        for (uint32_t b = 0; b < 256; b++)
+            t[b] = uint8_t(1 ^ (((b * 0x5Du) ^ 0x2Eu) & 1));
+        return t;
+    }();
+    constexpr bool bite(uint32_t n) const {
+        return AN_ARRAY_OF_FEELINGS[std::rotr(n, 8) >> 24] != 0;
+    }
+};
+\`\`\`
+
+#### Step 1: Circular Vector Rotation (\`std::rotr\`)
+C++20's \`std::rotr(n, 8)\` performs a circular right rotation of 8 bits. The lowest byte of $n$ (byte 0) wraps around into the highest byte position (bits $24..31$). Right-shifting by 24 (\`>> 24\`) isolates this original low byte ($b \\in [0..255]$).
+
+#### Step 2: The Affine Galois Parity Proof
+Inside the compile-time lambda, each byte is transformed by:
+$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\& \\ 1 \\Big)$$
+Why is this mathematically guaranteed to yield the even/odd parity of $b$?
+1. **Multiplication by $0x5D$ (93):**
+   In binary arithmetic modulo 2, $93 = 2 \\times 46 + 1 \\equiv 1 \\pmod 2$.
+   Because 93 is odd, $\\gcd(93, 2) = 1$. Multiplication by an odd scalar in $\\mathbb{Z}_2$ is an automorphism (invertible permutation):
+   $$(b \\times 93) \\pmod 2 \\equiv (b \\pmod 2) \\times (93 \\pmod 2) \\equiv b \\times 1 \\equiv b \\pmod 2$$
+   The parity of $b$ is perfectly conserved!
+2. **XOR with $0x2E$ (46):**
+   In binary, $46 = 00101110_2$. Notice that its least significant bit is **0** ($46 \\equiv 0 \\pmod 2$).
+   XORing any integer with an even number does not alter its lowest bit:
+   $$(X \\oplus 46) \\ \\& \\ 1 = (X \\ \\& \\ 1) \\oplus (46 \\ \\& \\ 1) = (X \\ \\& \\ 1) \\oplus 0 = X \\ \\& \\ 1$$
+   Therefore:
+   $$\\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\& \\ 1 = b \\ \\& \\ 1 = b_0$$
+3. **Inversion with $1 \\oplus$:**
+   - If $b$ is even, $b_0 = 0 \\implies 1 \\oplus 0 = 1$.
+   - If $b$ is odd, $b_0 = 1 \\implies 1 \\oplus 1 = 0$.
+4. \`AN_ARRAY_OF_FEELINGS[b] != 0\` returns \`true\` if even, \`false\` if odd!
+
+---
+
+### 7. The Consensus Council & Infix Operator \`->*\`
+
+The \`Ouroboros\` class gathers the independent verdicts of all four serpents into a 4-bit omens register and exposes the custom infix operator \`->*\`:
+
+\`\`\`cpp
+class Ouroboros {
+public:
+    constexpr uint32_t omens(int n) const {
+        uint32_t u = std::bit_cast<uint32_t>(n);
+        return uint32_t(Mirror{}(u)) | uint32_t(Gray{}(u)) << 1 |
+               uint32_t(Bruijn{}(u)) << 2 | uint32_t(Rebecca{}(u)) << 3;
+    }
+    constexpr int agreement(int n) const {
+        uint32_t o = omens(n);
+        return std::popcount(o) > 2 ? std::popcount(o) : 4 - std::popcount(o);
+    }
+    constexpr bool even(int n) const { return std::popcount(omens(n)) > 2; }
+    friend constexpr bool operator->*(Ouroboros self, int n) {
+        return self.even(n);
+    }
+};
+\`\`\`
+
+- **Bitwise Omens (\`omens\`):** Bit 0 = Mirror, Bit 1 = Gray, Bit 2 = Bruijn, Bit 3 = Rebecca.
+- **Democratic Majority Rule:** \`std::popcount(omens(n)) > 2\` determines evenness by supermajority consensus (at least 3 votes).
+- **The Infix \`operator->*\`:** Overloading C++'s pointer-to-member operator \`->*\` allows idiomatic evaluation:
+  \`\`\`cpp
+  constexpr ouroboros::Ouroboros council;
+  if (council->*ticks) {
+      // Executes on even ticks
+  }
+  \`\`\`
+
+#### The Compile-Time Unanimity Proof (\`consteval\`)
+Before any code in Mellangan can be compiled, the compiler executes \`unanimous()\` inside a compile-time constant evaluation:
+
+\`\`\`cpp
+consteval bool unanimous() {
+    Ouroboros o;
+    constexpr int EDGES[] = {
+        0, 1, -1, 2, -2,
+        0x7FFFFFFF, int(0x80000000u),
+        0x55555555, int(0xAAAAAAAAu),
+        65536, 255, 256
+    };
+    for (int n : EDGES)
+        if ((o->*n) != (n % 2 == 0) || o.agreement(n) != 4)
+            return false;
+    for (int n = -2048; n <= 2048; n++)
+        if ((o->*n) != (n % 2 == 0) || o.agreement(n) != 4)
+            return false;
+    return true;
+}
+static_assert(unanimous(), "the serpents disagree");
+\`\`\`
+Every edge case—zero, positive/negative unit, INT_MAX, INT_MIN, alternating bitmasks (\`0x55555555\`, \`0xAAAAAAAA\`), power-of-two boundaries, and the entire continuous span of 4,097 integers between $[-2048, 2048]$—must achieve **100% unanimous agreement (\`agreement == 4\`)** at compile time!
+
+---
+
+### 8. \`Augury\`: The Self-Traversing XOR-Linked List & Type-Erased Thunk Dispatch
+
+While \`Ouroboros\` executes at compile time via inlined templates, \`Augury\` executes at runtime using a memory-compact **XOR-linked list** and type-erased function pointers:
+
+\`\`\`cpp
+template <class S> bool thunk(const void *charlotte, uint32_t n) {
+    return (*static_cast<const S *>(charlotte))(n);
+}
+
+struct Rite {
+    const void *charlotte;
+    bool (*bite)(const void *, uint32_t);
+    uintptr_t link;
+};
+\`\`\`
+
+#### The XOR-Linked List Principle
+A standard doubly linked list node requires two separate 64-bit pointers (\`prev\` and \`next\`), occupying 16 bytes of pointer overhead per node.
+An XOR-linked list compresses both pointers into a **single 64-bit integer**:
+$$\\text{link} = \\text{prev} \\oplus \\text{next}$$
+
+#### Construction in \`Augury::Augury()\`
+\`\`\`cpp
+for (int i = 0; i < 4; i++) {
+    uintptr_t prev = i ? reinterpret_cast<uintptr_t>(static_cast<void *>(&rites[i - 1])) : 0;
+    uintptr_t next = i < 3 ? reinterpret_cast<uintptr_t>(static_cast<void *>(&rites[i + 1])) : 0;
+    rites[i] = {serpents[i], bites[i], prev ^ next};
+}
+\`\`\`
+
+#### Forward Traversal via XOR Pointer Arithmetic
+\`\`\`cpp
+bool even(int n) const {
+    uint32_t u = std::bit_cast<uint32_t>(n), votes = 0, seat = 0;
+    const void *prev = nullptr, *here = static_cast<const void *>(rites);
+    while (here) {
+        const Rite *r = static_cast<const Rite *>(here);
+        votes |= uint32_t(r->bite(r->charlotte, u)) << seat++;
+        const void *next = reinterpret_cast<const void *>(
+            r->link ^ reinterpret_cast<uintptr_t>(prev));
+        prev = here, here = next;
+    }
+    return std::popcount(votes) > 2;
+}
+\`\`\`
+
+- **Pointer Recovery:** Because $link = prev \\oplus next$, calculating $link \\oplus prev = (prev \\oplus next) \\oplus prev = next$. The address of the next node is reconstructed on the fly using zero extra memory!
+- **Type-Erased Thunks:** Each node points to a stateless serpent instance (\`r->charlotte\`) and an indirect C function pointer (\`r->bite\`). This validates runtime indirect branch prediction, function call ABI compliance, and cacheline alignment across compiler versions.
+`,
+    mermaidCharts: [
+      {
+        title: "The Council of Four Serpents: Compile-Time Parity Consensus & Operator ->*",
+        chart: `
+flowchart TD
+    classDef input fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef serpent fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef council fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Input["Target Integer int n<br/>u = std::bit_cast<uint32_t>(n)"]:::input
+
+    M["Mirror::bite(u)<br/>5-Stage SWAR 32-Bit Flip<br/>Bit 0 -> Bit 31<br/>!(flip(u) >> 31)"]:::serpent
+    G["Gray::bite(u)<br/>XOR Nibble Fold to 4 Bits<br/>0x6996u Parity Truth Table<br/>!(fold(u) ^ fold(u >> 1))"]:::serpent
+    B["Bruijn::bite(u)<br/>LSB Isolation (v & -v)<br/>De Bruijn Multiplier 0x077CB531u<br/>SPIRAL[hash] != 0"]:::serpent
+    R["Rebecca::bite(u)<br/>std::rotr(u, 8) >> 24 Low Byte<br/>Galois Affine Inversion in Z₂<br/>AN_ARRAY_OF_FEELINGS[b] != 0"]:::serpent
+
+    Omens["omens(n) = M | G<<1 | B<<2 | R<<3<br/>popcount(omens) > 2 (Consensus Majority)"]:::council
+    Operator["council->*n (Infix Pointer-to-Member)<br/>static_assert(unanimous(), 'the serpents disagree')"]:::council
+
+    Input --> M & G & B & R
+    M & G & B & R --> Omens --> Operator
+`,
+      },
+      {
+        title: "Augury XOR-Linked List Traversal with Type-Erased Thunks (link = prev ^ next)",
+        chart: `
+flowchart LR
+    classDef node fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef dispatch fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef result fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    R0["rites[0] (Mirror)<br/>link = 0 ^ &rites[1]"]:::node
+    R1["rites[1] (Gray)<br/>link = &rites[0] ^ &rites[2]"]:::node
+    R2["rites[2] (Bruijn)<br/>link = &rites[1] ^ &rites[3]"]:::node
+    R3["rites[3] (Rebecca)<br/>link = &rites[2] ^ 0"]:::node
+
+    Thunk["Indirect Function Pointer Call<br/>r->bite(r->charlotte, u)<br/>thunk<S>() -> bool"]:::dispatch
+    Votes["Accumulate Bitwise Votes<br/>votes |= bite() << seat++<br/>std::popcount(votes) > 2"]:::result
+
+    R0 -->|"next = link ^ 0"| R1
+    R1 -->|"next = link ^ prev"| R2
+    R2 -->|"next = link ^ prev"| R3
+    R0 & R1 & R2 & R3 -.-> Thunk --> Votes
+`,
+      },
+    ],
+    interactiveComponent: "ouroboros",
   },
 ];
