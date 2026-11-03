@@ -11,7 +11,8 @@
     "test:math": "node scripts/verify-math.js",
     "test:escapes": "node scripts/verify-escapes.js",
     "test:prose": "node scripts/verify-prose.js",
-    "test:integrity": "node scripts/verify-integrity.js"
+    "test:integrity": "node scripts/verify-integrity.js",
+    "test:screenshot": "node scripts/capture-live-screen.js"
   },
   "dependencies": {
     "katex": "^0.16.21",
