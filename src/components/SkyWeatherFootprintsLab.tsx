@@ -625,3 +625,4 @@ export const SkyWeatherFootprintsLab: React.FC = () => {
     </div>
   );
 };
+
