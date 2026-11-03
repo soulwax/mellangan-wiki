@@ -244,7 +244,7 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "campaign-settlements-delves",
-        shortTitle: "Settlements, Refugee Escort & Delves",
+        shortTitle: "Settlements, Sanctuary Seekers & Delves",
       },
     ],
   },

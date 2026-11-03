@@ -3334,8 +3334,8 @@ Because \`Status::apply\` multiplies **both** \`duration\` by $(1 - r)$ **and** 
 
 $$\\text{Total DoT} = (\\text{power} \\cdot (1 - r)) \\times (\\text{duration} \\cdot (1 - r)) = \\text{Base DoT} \\cdot (1 - r)^2$$
 
-- At \`r = 0.50\` (\`50%\` resistance): DPS is halved and duration is halved $\\implies 25\\%$ total DoT taken (\`75%\` effective mitigation).
-- At the \`r = 0.75\` (\`75%\` resistance cap): DPS is $0.25\\times$ and duration is $0.25\\times$ $\\implies (0.25)^2 = 6.25\\%$ total DoT taken (**\`93.75%\` effective DoT mitigation**!).
+- At \`r = 0.50\` (\`50%\` resistance): DPS is halved and duration is halved $\\implies 25$% total DoT taken (\`75%\` effective mitigation).
+- At the \`r = 0.75\` (\`75%\` resistance cap): DPS is $0.25\\times$ and duration is $0.25\\times$ $\\implies (0.25)^2 = 6.25$% total DoT taken (**\`93.75%\` effective DoT mitigation**!).
 
 ---
 
@@ -4153,7 +4153,7 @@ for (uint32_t i = 0; i < 32; i++)
 Because \`0x077CB531u\` is a De Bruijn cycle, multiplying by any isolated power-of-two bit $2^i$ circularly shifts the 32-bit sequence by $i$ positions. The top 5 bits (\`>> 27\`) uniquely identify the power $i \\in [0..31]$ with zero hash collisions!
 
 #### The Sentinel and Parity Decision
-1. **Sentinel Mask (\`v = n | 0x80000000u\`):** If $n = 0$, $v \\mathbin{\\&} -v$ would be 0, leading to undefined behavior in table indexing. Or-ing with \`0x80000000u\` (bit 31) guarantees $v \\neq 0$ while leaving bit 0 completely untouched.
+1. **Sentinel Mask (\`v = n | 0x80000000u\`):** If $n = 0$, $v \\ \\&\\ -v$ would be 0, leading to undefined behavior in table indexing. Or-ing with \`0x80000000u\` (bit 31) guarantees $v \\neq 0$ while leaving bit 0 completely untouched.
 2. **Two's Complement LSB Isolation (\`v & (~v + 1)\`):** This is the classic bitwise operation \`v & -v\`, which strips away all set bits except the lowest one ($2^k$).
 3. **Parity Check:**
    - If $n$ is **odd**, bit 0 is set $\\implies LSB = 2^0 = 1$. The trailing zero count is $0 \\implies SPIRAL[...] = 0$.
@@ -4187,7 +4187,7 @@ C++20's \`std::rotr(n, 8)\` performs a circular right rotation of 8 bits. The lo
 
 Inside the compile-time lambda, each byte is transformed by:
 
-$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 \\Big)$$
+$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\&\\ 1 \\Big)$$
 
 Why is this mathematically guaranteed to yield the even/odd parity of $b$?
 
@@ -4203,11 +4203,11 @@ Why is this mathematically guaranteed to yield the even/odd parity of $b$?
    In binary, $46 = 00101110_2$. Notice that its least significant bit is **0** ($46 \\equiv 0 \\pmod 2$).
    XORing any integer with an even number does not alter its lowest bit:
 
-   $$(X \\oplus 46) \\mathbin{\\&} 1 = (X \\mathbin{\\&} 1) \\oplus (46 \\mathbin{\\&} 1) = (X \\mathbin{\\&} 1) \\oplus 0 = X \\mathbin{\\&} 1$$
+   $$(X \\oplus 46) \\ \\&\\ 1 = (X \\ \\&\\ 1) \\oplus (46 \\ \\&\\ 1) = (X \\ \\&\\ 1) \\oplus 0 = X \\ \\&\\ 1$$
 
    Therefore:
 
-   $$\\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 = b \\mathbin{\\&} 1 = b_0$$
+   $$\\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\&\\ 1 = b \\ \\&\\ 1 = b_0$$
 
 3. **Inversion with $1 \\oplus$:**
    - If $b$ is even, $b_0 = 0 \\implies 1 \\oplus 0 = 1$.
@@ -4375,10 +4375,10 @@ flowchart LR
   {
     id: "campaign-settlements-delves",
     title:
-      "31. Campaign Settlements, Refugee Escort, Watchtowers & Dungeon Delves",
+      "31. Campaign Settlements, Sanctuary Seekers, Watchtowers & Dungeon Delves",
     category: "gameplay",
     summary:
-      "The v0.6.0 Hearth & Home meta-loop: lost refugee escort state machines (Townsfolk.cpp), watchtower ballistic defense (Watchtower.cpp), merchant discounts, the Loyal Hound companion, and multi-floor subterranean Delves (Delve.cpp).",
+      "The v0.6.0 Hearth & Home meta-loop: lost sanctuary seeker escort state machines (Townsfolk.cpp), watchtower ballistic defense (Watchtower.cpp), merchant discounts, the Loyal Hound companion, and multi-floor subterranean Delves (Delve.cpp).",
     sourceFiles: [
       "src/campaign/Campaign.hpp",
       "src/campaign/Campaign.cpp",
@@ -4395,10 +4395,10 @@ flowchart LR
     content: `
 ### The Hearth & Home Architecture: Settlements, Escort & Subterranean Delves
 
-Mellangan v0.6.0 introduces the **Hearth & Home** meta-progression loop (\`src/campaign/\`), connecting high-stakes nocturnal survival with persistent settlement growth, lost refugee rescues, defensive watchtowers, and multi-floor subterranean dungeon delves:
+Mellangan v0.6.0 introduces the **Hearth & Home** meta-progression loop (\`src/campaign/\`), connecting high-stakes nocturnal survival with persistent settlement growth, lost sanctuary seeker rescues, defensive watchtowers, and multi-floor subterranean dungeon delves:
 
 \`\`\`
-Wilderness Excursions <---> Lost Refugee Escort <---> Town Hearth Settlement
+Wilderness Excursions <---> Lost Sanctuary Seeker Escort <---> Town Hearth Settlement
         |                                                 |
         v                                                 v
 Deep Dungeon Delves                              Watchtower Fortifications & Loyal Hound
@@ -4408,7 +4408,7 @@ Deep Dungeon Delves                              Watchtower Fortifications & Loy
 
 ### 1. The Townsfolk Entity & Escort State Machine (\`Townsfolk.cpp\`)
 
-The \`Townsfolk\` class (\`src/campaign/Townsfolk.hpp\`) models civilian villagers displaced by the spreading darkness. Each refugee operates under a strict three-state lifecycle:
+The \`Townsfolk\` class (\`src/campaign/Townsfolk.hpp\`) models civilian villagers displaced by the spreading darkness. Each sanctuary seeker operates under a strict three-state lifecycle:
 
 \`\`\`cpp
 class Townsfolk : public Entity {
@@ -4424,24 +4424,24 @@ public:
 #### Mathematical Invariants of the Escort Loop:
 
 1. **The Rescue Call Proximity (\`CALL = 28.0f\`):**
-   When spawned in the wilderness, refugees begin in \`Mode::Lost\`. They shiver in the cold, emit regional distress cries, and cannot fight back. When the player enters within Euclidean distance $d < \\text{CALL}$, the refugee immediately transitions to \`Mode::Following\`:
+   When spawned in the wilderness, sanctuary seekers begin in \`Mode::Lost\`. They shiver in the cold, emit regional distress cries, and cannot fight back. When the player enters within Euclidean distance $d < \\text{CALL}$, the sanctuary seeker immediately transitions to \`Mode::Following\`:
    \`\`\`cpp
    if (mode == Mode::Lost && d < CALL && !p.dead()) {
        mode = Mode::Following;
        talk = SAY;
        hush = SAY + 6;
        spoken = "Stay close, I'm right behind you.";
-       level->game.announce("A REFUGEE FOLLOWS YOU  BRING THEM TO A TOWN");
+       level->game.announce("A SANCTUARY SEEKER FOLLOWS YOU  BRING THEM TO A TOWN");
    }
    \`\`\`
 
 2. **Breadcrumb Trailing Velocity (\`TRAIL = 50.0f\`):**
-   Once following, the refugee matches the player's vector with an adaptive trailing speed capped at $1.05\\times$ player velocity:
+   Once following, the sanctuary seeker matches the player's vector with an adaptive trailing speed capped at $1.05\\times$ player velocity:
    $$v_{\\text{trail}} = \\min(50.0, v_{\\text{player}} \\times 1.05)$$
    This guarantees that a briskly running hero does not trivially outpace the follower, while preventing unnatural teleportation.
 
 3. **The Leash Break Theorem (\`LEASH = 260.0f\`):**
-   If the hero abandons the refugee or sprints past the separation threshold ($d > \\text{LEASH}$), the tether breaks! The refugee reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
+   If the hero abandons the sanctuary seeker or sprints past the separation threshold ($d > \\text{LEASH}$), the tether breaks! The sanctuary seeker reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
    \`\`\`cpp
    if (d > LEASH || p.dead()) {
        mode = Mode::Lost;
@@ -4450,15 +4450,15 @@ public:
    \`\`\`
 
 4. **Predator Vulnerability & Flashing (\`HP = 40.0f\`):**
-   Roaming predators (wolves, rats, night shades) deal $1.5\\times$ scaling damage to unarmored refugees:
+   Roaming predators (wolves, rats, night shades) deal $1.5\\times$ scaling damage to unarmored sanctuary seekers:
    \`\`\`cpp
    if (float bite = e.type.damage * e.damageMul * DT * 1.5f; bite > 0)
        hp -= bite, flash = 0.15f;
    \`\`\`
-   If HP drops to zero, the refugee disintegrates in a burst of white spark particles (\`Spark::burst\`) and is permanently lost to the dark.
+   If HP drops to zero, the sanctuary seeker disintegrates in a burst of white spark particles (\`Spark::burst\`) and is permanently lost to the dark.
 
 5. **Regional Dialogue Matrices (\`LINES[5][4]\`):**
-   Refugees speak authentic regional lore based on their native biome act (\`town % 5\`):
+   Sanctuary seekers speak authentic regional lore based on their native biome act (\`town % 5\`):
    - **Act 1 (Meadows):** *"They took the mill first. Then the well."*
    - **Act 2 (Barrows & Marshes):** *"The lanterns sing in the marsh. Don't listen."*
    - **Act 3 (Highlands & Standing Stones):** *"The cold is coming from the barrows, not the sky."*
@@ -4502,18 +4502,18 @@ public:
 
 ### 3. Settlement Economy, Vendor Discounts & The Loyal Hound Companion
 
-Leading a refugee safely across the perimeter into the town safe radius (\`settle()\`) permanently expands the settlement and yields three compounding rewards:
+Leading a sanctuary seeker safely across the perimeter into the town safe radius (\`settle()\`) permanently expands the settlement and yields three compounding rewards:
 
 1. **Crafting Materials Payout:**
    Every successful rescue deposits **+3 basic crafting materials** (\`Mat::Wood\`, \`Mat::Stone\`) directly into the player's satchel.
 2. **Permanent Merchant Discount:**
-   Rescuing refugees earns the gratitude of the regional vendor (\`Vendor.cpp\`), applying a **+5% price discount** per rescued refugee, capped at a hard maximum of **25%** (\`level.vendor.discount = 0.25f\`):
+   Rescuing sanctuary seekers earns the gratitude of the regional vendor (\`Vendor.cpp\`), applying a **+5% price discount** per rescued sanctuary seeker, capped at a hard maximum of **25%** (\`level.vendor.discount = 0.25f\`):
    $$\\text{discount} = \\min(0.25, 0.05 \\times \\text{rescued})$$
 3. **Milestone: The Loyal Hound Companion (\`c.hound\`):**
    Upon reaching **3 total rescues** (\`rescued == 3\`), the town gifts the player their faithful **Hunting Hound**:
    - The hound follows the player into the wilderness as a dedicated \`Ally\`.
    - Deals scaled biting damage: $damage = 6.0 + 2.0 \\times \\text{Player::lvl}$.
-   - Aggressively pounces on predators targeting following refugees.
+   - Aggressively pounces on predators targeting following sanctuary seekers.
    - **Dawn Revival Invariant:** If the hound falls in battle during the night, it falls back to the hearth (\`c.houndDown = true\`) and **automatically revives fresh at dawn** (\`level.night.dawn == true\`)!
 
 ---
@@ -4542,7 +4542,7 @@ struct Delve {
 `,
     mermaidCharts: [
       {
-        title: "The Refugee Escort & Leash Lifecycle State Machine",
+        title: "The Sanctuary Seeker Escort & Leash Lifecycle State Machine",
         chart: `
 stateDiagram-v2
     [*] --> Lost : Spawn in Wilderness
@@ -4569,13 +4569,13 @@ flowchart TD
     classDef dog fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
 
     Hero["Hero Explores Wilderness<br/>(Satchel & Materials)"]:::hero
-    Refugee["Lost Refugee Discovered<br/>Mode::Following (Leash 260)"]:::hero
+    Seeker["Lost Sanctuary Seeker Discovered<br/>Mode::Following (Leash 260)"]:::hero
 
     Town["Town Hearth & Safe Zone<br/>+3 Materials | +5% Discount"]:::town
     Hound["Loyal Hound Companion<br/>(Unlocked at 3 Rescues)<br/>Revives Fresh at Dawn!"]:::dog
     Tower["Watchtower Fortification<br/>(RANGE 190 | RELOAD 1.1s)<br/>Arrow Slits & Flame Lightfield"]:::tower
 
-    Refugee -->|"Escort into Town"| Town
+    Seeker -->|"Escort into Town"| Town
     Town -->|"Milestone: 3 Rescues"| Hound
     Town -->|"Gold + Stone + Wood"| Tower
     Tower -->|"Auto-Fire Arrows (260 px/s)"| Foes["Incoming Nocturnal Swarm"]

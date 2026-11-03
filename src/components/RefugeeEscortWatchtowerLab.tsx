@@ -101,7 +101,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
   const [rescuedCount, setRescuedCount] = useState<number>(1);
   const [materials, setMaterials] = useState<number>(3);
   const [announcement, setAnnouncement] = useState<string>(
-    "ESCORT THE LOST REFUGEE TO THE TOWN HEARTH"
+    "ESCORT THE LOST SANCTUARY SEEKER TO THE TOWN HEARTH"
   );
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -190,7 +190,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
       shiver: 0,
       townIndex: Math.floor(Math.random() * 4),
     };
-    setAnnouncement("A LOST REFUGEE SHOUTS FOR HELP OUTSIDE TOWN!");
+    setAnnouncement("A LOST SANCTUARY SEEKER SHOUTS FOR HELP OUTSIDE TOWN!");
   }, []);
 
   const spawnEnemy = useCallback((kind?: "Wolf" | "Rat" | "Shade") => {
@@ -321,7 +321,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
             r.spoken = "Stay close, I'm right behind you.";
             r.speechTimer = 3.5;
             setAnnouncement(
-              "A REFUGEE FOLLOWS YOU - BRING THEM SAFELY TO TOWN!"
+              "A SANCTUARY SEEKER FOLLOWS YOU - BRING THEM SAFELY TO TOWN!"
             );
             // Spark particles
             for (let i = 0; i < 8; i++) {
@@ -344,7 +344,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
             r.spoken = "Wait! Don't leave me behind!";
             r.speechTimer = 4.0;
             setAnnouncement(
-              "LEASH BROKEN! YOU SPRINTED TOO FAR AHEAD OF THE REFUGEE!"
+              "LEASH BROKEN! YOU SPRINTED TOO FAR AHEAD OF THE SANCTUARY SEEKER!"
             );
           } else {
             // Trail hero breadcrumb
@@ -365,7 +365,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               setRescuedCount((c) => c + 1);
               setMaterials((m) => m + 3);
               setAnnouncement(
-                "REFUGEE RESCUED! +3 MATERIALS & +5% VENDOR DISCOUNT!"
+                "SANCTUARY SEEKER RESCUED! +3 MATERIALS & +5% VENDOR DISCOUNT!"
               );
 
               // Celebration fireworks
@@ -421,7 +421,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               size: 3,
             });
           }
-          setAnnouncement("A REFUGEE WAS LOST TO THE DARK!");
+          setAnnouncement("A SANCTUARY SEEKER WAS LOST TO THE DARK!");
           s.refugee = null;
         }
       }
@@ -891,7 +891,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
           </div>
           <div>
             <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              Refugee Escort &amp; Watchtower Defense Simulator
+              Sanctuary Seeker Escort &amp; Watchtower Defense Simulator
               <span className="px-2 py-0.5 text-[10px] uppercase font-mono tracking-wider rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 v0.6.0 Campaign
               </span>
@@ -1024,7 +1024,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               className="p-2.5 rounded-xl bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-amber-500/40 text-xs font-mono text-slate-200 flex items-center justify-center gap-2 transition-all"
             >
               <Users className="w-3.5 h-3.5 text-amber-400" />
-              Spawn Lost Refugee
+              Spawn Lost Sanctuary Seeker
             </button>
             <button
               type="button"
@@ -1138,10 +1138,10 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               The Loyal Hound Companion (Milestone: 3 Rescues)
             </h4>
             <p className="text-xs text-slate-300 leading-relaxed mb-4">
-              Upon delivering the third refugee, the townspeople bestow their
+              Upon delivering the third sanctuary seeker, the townspeople bestow their
               devoted hunting hound upon the hero. The hound features
               autonomous combat steering, bites enemies targeting the hero or
-              following refugees, and automatically teleports home if downed,
+              following sanctuary seekers, and automatically teleports home if downed,
               reviving fresh at dawn!
             </p>
 
