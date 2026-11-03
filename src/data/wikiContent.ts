@@ -33,7 +33,10 @@ export interface WikiSection {
     | "director"
     | "goalai"
     | "loot"
-    | "gearevents";
+    | "gearevents"
+    | "refugee"
+    | "audiomixer"
+    | "weather";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -1006,11 +1009,29 @@ flowchart LR
 - **Wind Foliage Sway (\`sky.sway(x, y, time)\`):** Multi-segment props outside structures oscillate with phase-coherent wind waves scaled by storm intensity.
 
 #### 2. Persistent Footprints & Thunder Strikes
-- **\`Footprints.cpp\`:** Moving entities leave oriented footprint decals in snow, mud, sand, and shallow water that fade over time.
+- **\`Footprints.cpp\` Circular Ringbuffer:** Moving entities leave oriented footprint decals in snow, mud, sand, and shallow water. Each footprint is stamped into a contiguous 256-slot ringbuffer:
+\`\`\`cpp
+struct Footprint {
+    float x, y, angle;
+    float age, maxAge;
+    bool isRight;
+};
+\`\`\`
+Footprints fade linearly over time. Wet weather fronts (rainstorms, blizzards) apply an accelerated erosion multiplier:
+$$\\text{decayRate} = \\text{baseRate} \\times \\text{weatherDecayMultiplier}$$
 - **\`Thunder.cpp\`:** Storm fronts periodically charge localized lightning strikes, rendering jagged procedural \`Arc\` bolts, illuminating the entire offscreen lightmap with an HDR flash, and triggering delayed acoustic thunder rolls.
 
 #### 3. Nocturnal Omens (\`Night.cpp\`)
 At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **Omen** (\`OMENS[omen]\`) that alters nocturnal rules and awards a permanent score handicap multiplier—culminating in Blood Moon surges and the final Dawn survival threshold.
+
+#### 4. The 24-Hour Diurnal Illumination Equation
+The celestial solar/lunar arc is evaluated as a continuous trigonometric angle:
+$$\\theta(t) = \\frac{t - 6}{24} \\times 2\\pi$$
+Ambient light is smoothly interpolated across four distinct chromatic keyframes:
+- **Dawn (05:00 - 08:00):** Warm rose and peach hues ($65\\%$ ambient luminance) with elongated westward ground shadows.
+- **Daylight (08:00 - 17:00):** Clear emerald and azure sunlight ($100\\%$ ambient luminance) with compact vertical shadows.
+- **Dusk (17:00 - 20:00):** Fiery amber and deep crimson tones ($60\\%$ ambient luminance) with eastward shadows.
+- **Night (20:00 - 05:00):** Nocturnal indigo ($25\\%$ ambient baseline), revealing player lantern cones and dynamic lightfield casters.
 `,
     mermaidCharts: [
       {
@@ -1055,6 +1076,7 @@ flowchart LR
 `,
       },
     ],
+    interactiveComponent: "weather",
   },
   {
     id: "weapon-synthesis",
@@ -1359,8 +1381,21 @@ Instead of relying on external audio middleware, \`Sound.cpp\` builds a zero-all
    Each sound call applies randomized frequency-ratio scaling directly on the stream:
    \`SDL_SetAudioStreamFrequencyRatio(v, pitch * (1 + rng.range(-pitchJitter, pitchJitter)));\`
 
-3. **Exponentially Smoothed Weather Beds (\`beds[]\`):**
+3. **Quadratic Distance Attenuation:**
+   To maintain sub-microsecond mixing performance without evaluating square roots, spatial sounds apply rational quadratic distance falloff relative to the player position:
+   $$A(d) = \\frac{1.0}{1.0 + \\left(\\frac{d}{R}\\right)^2}$$
+   where $d$ is Euclidean separation in world units and $R$ is the reference hearing radius (typically 140 pixels).
+
+4. **Exponentially Smoothed Weather Beds (\`beds[]\`):**
    Continuous ambient loops (\`rain.wav\`, \`wind.wav\`) smoothly interpolate their gain every tick via \`b.gain += (b.want - b.gain) * 0.02f;\` and automatically flush their queued PCM buffer when \`b.gain < 0.002f && b.want == 0\`.
+
+5. **Priority Preemption Hierarchy:**
+   Audio streams are classified into 5 strict priority tiers:
+   - **Priority 4 (BGM):** Nocturnal ambient streams (\`night.ogg\`); never preempted under any circumstances.
+   - **Priority 3 (Boss Omens):** Roars, screen-shake stingers, and omen announcements.
+   - **Priority 2 (Player Combat):** Weapon swings, spell detonations, critical strikes, and status afflictions.
+   - **Priority 1 (Environmental SFX):** Campfire crackle, watchtower arrows, door clicks.
+   - **Priority 0 (Footsteps & Minor Sparks):** Ephemeral movement ticks; first candidates for LRU voice stealing.
 
 ### Automated Test Suites, Benchmarks & Visual QA (\`src/test/\`)
 
@@ -1415,6 +1450,7 @@ flowchart LR
 `,
       },
     ],
+    interactiveComponent: "audiomixer",
   },
   {
     id: "contribute-basics",
@@ -4335,5 +4371,218 @@ flowchart LR
       },
     ],
     interactiveComponent: "ouroboros",
+  },
+  {
+    id: "campaign-settlements-delves",
+    title:
+      "31. Campaign Settlements, Refugee Escort, Watchtowers & Dungeon Delves",
+    category: "gameplay",
+    summary:
+      "The v0.6.0 Hearth & Home meta-loop: lost refugee escort state machines (Townsfolk.cpp), watchtower ballistic defense (Watchtower.cpp), merchant discounts, the Loyal Hound companion, and multi-floor subterranean Delves (Delve.cpp).",
+    sourceFiles: [
+      "src/campaign/Campaign.hpp",
+      "src/campaign/Campaign.cpp",
+      "src/campaign/Townsfolk.hpp",
+      "src/campaign/Townsfolk.cpp",
+      "src/campaign/Watchtower.hpp",
+      "src/campaign/Watchtower.cpp",
+      "src/campaign/Delve.hpp",
+      "src/campaign/Delve.cpp",
+      "src/test/RescueTest.cpp",
+      "src/test/TowerTest.cpp",
+      "src/test/DelveTest.cpp",
+    ],
+    content: `
+### The Hearth & Home Architecture: Settlements, Escort & Subterranean Delves
+
+Mellangan v0.6.0 introduces the **Hearth & Home** meta-progression loop (\`src/campaign/\`), connecting high-stakes nocturnal survival with persistent settlement growth, lost refugee rescues, defensive watchtowers, and multi-floor subterranean dungeon delves:
+
+\`\`\`
+Wilderness Excursions <---> Lost Refugee Escort <---> Town Hearth Settlement
+        |                                                 |
+        v                                                 v
+Deep Dungeon Delves                              Watchtower Fortifications & Loyal Hound
+\`\`\`
+
+---
+
+### 1. The Townsfolk Entity & Escort State Machine (\`Townsfolk.cpp\`)
+
+The \`Townsfolk\` class (\`src/campaign/Townsfolk.hpp\`) models civilian villagers displaced by the spreading darkness. Each refugee operates under a strict three-state lifecycle:
+
+\`\`\`cpp
+class Townsfolk : public Entity {
+public:
+    static constexpr float SPEED = 18, HEAR = 34, SAY = 5, TRAIL = 50,
+                           CALL = 28, LEASH = 260, HP = 40;
+    enum class Mode { Home, Lost, Following };
+    Mode mode = Mode::Home;
+    // ...
+};
+\`\`\`
+
+#### Mathematical Invariants of the Escort Loop:
+
+1. **The Rescue Call Proximity (\`CALL = 28.0f\`):**
+   When spawned in the wilderness, refugees begin in \`Mode::Lost\`. They shiver in the cold, emit regional distress cries, and cannot fight back. When the player enters within Euclidean distance $d < \\text{CALL}$, the refugee immediately transitions to \`Mode::Following\`:
+   \`\`\`cpp
+   if (mode == Mode::Lost && d < CALL && !p.dead()) {
+       mode = Mode::Following;
+       talk = SAY;
+       hush = SAY + 6;
+       spoken = "Stay close, I'm right behind you.";
+       level->game.announce("A REFUGEE FOLLOWS YOU  BRING THEM TO A TOWN");
+   }
+   \`\`\`
+
+2. **Breadcrumb Trailing Velocity (\`TRAIL = 50.0f\`):**
+   Once following, the refugee matches the player's vector with an adaptive trailing speed capped at $1.05\\times$ player velocity:
+   $$v_{\\text{trail}} = \\min(50.0, v_{\\text{player}} \\times 1.05)$$
+   This guarantees that a briskly running hero does not trivially outpace the follower, while preventing unnatural teleportation.
+
+3. **The Leash Break Theorem (\`LEASH = 260.0f\`):**
+   If the hero abandons the refugee or sprints past the separation threshold ($d > \\text{LEASH}$), the tether breaks! The refugee reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
+   \`\`\`cpp
+   if (d > LEASH || p.dead()) {
+       mode = Mode::Lost;
+       return;
+   }
+   \`\`\`
+
+4. **Predator Vulnerability & Flashing (\`HP = 40.0f\`):**
+   Roaming predators (wolves, rats, night shades) deal $1.5\\times$ scaling damage to unarmored refugees:
+   \`\`\`cpp
+   if (float bite = e.type.damage * e.damageMul * DT * 1.5f; bite > 0)
+       hp -= bite, flash = 0.15f;
+   \`\`\`
+   If HP drops to zero, the refugee disintegrates in a burst of white spark particles (\`Spark::burst\`) and is permanently lost to the dark.
+
+5. **Regional Dialogue Matrices (\`LINES[5][4]\`):**
+   Refugees speak authentic regional lore based on their native biome act (\`town % 5\`):
+   - **Act 1 (Meadows):** *"They took the mill first. Then the well."*
+   - **Act 2 (Barrows & Marshes):** *"The lanterns sing in the marsh. Don't listen."*
+   - **Act 3 (Highlands & Standing Stones):** *"The cold is coming from the barrows, not the sky."*
+   - **Act 4 (Steppe & Waste):** *"The caravan is our only water."*
+   - **Act 5 (Core of the Dark):** *"This is where the dark began. If the fire goes out here, it goes out everywhere."*
+
+---
+
+### 2. Watchtower Ballistic Defense & Light Casters (\`Watchtower.cpp\`)
+
+To protect vulnerable settlements against nocturnal siege waves, town elders can fortify town perimeters by constructing **Watchtowers** (\`src/campaign/Watchtower.hpp\`):
+
+\`\`\`cpp
+class Watchtower : public Entity {
+public:
+    static constexpr float RANGE = 190, RELOAD = 1.1f;
+    float reload = 0.5f, t = 0;
+    int shots = 0;
+};
+\`\`\`
+
+#### Architectural Invariants:
+1. **Procedural Multi-Tile Sprite Assembly:**
+   A Watchtower is drawn across 4 vertical atlas tiles:
+   \`\`\`cpp
+   s.sprite(atlas::town(tt::Bricks), xp, yp, 8, 16, 1, 1);
+   s.sprite(atlas::town(tt::ArrowSlit), xp, yp - 16, 8, 16, 1, 1);
+   s.sprite(atlas::town(tt::TowerTop + 25), xp, yp - 32, 8, 16, 1, 1);
+   s.sprite(atlas::town(tt::TowerTop + 1), xp, yp - 48, 8, 16, 1, 1);
+   \`\`\`
+2. **Target Acquisition & Ballistic Cadence:**
+   Every \`RELOAD = 1.1f\` seconds, the tower scans a circular perimeter of radius $\\text{RANGE} = 190$ px centered at the arrow slit ($y - 40$). It selects the nearest valid hostile and looses an arrow projectile at **260 px/s**:
+   $$damage = 8.0 + 2.0 \\times \\text{Player::lvl}$$
+3. **Dynamic Lightfield Beacon:**
+   The tower summit casts an additive flame glow into \`level->lights\` with a natural sinusoidal flicker:
+   \`\`\`cpp
+   s.glow(xp, yp - 40, 70, FLAME * (0.8f + 0.2f * std::sin(t * 6)));
+   \`\`\`
+
+---
+
+### 3. Settlement Economy, Vendor Discounts & The Loyal Hound Companion
+
+Leading a refugee safely across the perimeter into the town safe radius (\`settle()\`) permanently expands the settlement and yields three compounding rewards:
+
+1. **Crafting Materials Payout:**
+   Every successful rescue deposits **+3 basic crafting materials** (\`Mat::Wood\`, \`Mat::Stone\`) directly into the player's satchel.
+2. **Permanent Merchant Discount:**
+   Rescuing refugees earns the gratitude of the regional vendor (\`Vendor.cpp\`), applying a **+5% price discount** per rescued refugee, capped at a hard maximum of **25%** (\`level.vendor.discount = 0.25f\`):
+   $$\\text{discount} = \\min(0.25, 0.05 \\times \\text{rescued})$$
+3. **Milestone: The Loyal Hound Companion (\`c.hound\`):**
+   Upon reaching **3 total rescues** (\`rescued == 3\`), the town gifts the player their faithful **Hunting Hound**:
+   - The hound follows the player into the wilderness as a dedicated \`Ally\`.
+   - Deals scaled biting damage: $damage = 6.0 + 2.0 \\times \\text{Player::lvl}$.
+   - Aggressively pounces on predators targeting following refugees.
+   - **Dawn Revival Invariant:** If the hound falls in battle during the night, it falls back to the hearth (\`c.houndDown = true\`) and **automatically revives fresh at dawn** (\`level.night.dawn == true\`)!
+
+---
+
+### 4. Deep Dark Dungeon Delves (\`Delve.cpp\`)
+
+In addition to surface exploration, campaign maps contain abandoned mine shafts that lead into **Subterranean Delves** (\`src/campaign/Delve.hpp\`):
+
+\`\`\`cpp
+struct Delve {
+    static constexpr int FLOORS = 3, RING = 7;
+    static constexpr float REACH = 48, PAUSE = 2.5f;
+    bool active = false;
+    int floor = 0;
+};
+\`\`\`
+
+#### Delve Dynamics:
+1. **Surface Sealing (\`seal()\`):** Entering a delve seals the surface entrance with solid stone blocks. The surface daylight fades, ambient \`gloom\` increases, and subterranean dust particles fill the air.
+2. **Three-Floor Progression (\`FLOORS = 3\`):** Players descend through 3 sequential floor chambers of increasing depth and monster density.
+3. **Subterranean Guardian Bosses (\`guardian(act)\`):** Each floor culminate in guardian encounters tailored to the regional act:
+   - Act 1: Armored Burrowers
+   - Act 2: Crypt Specters
+   - Act 3: Ironplate Minotaurs
+4. **Earthquakes & Unsealing (\`quake()\`, \`unseal()\`):** Defeating the delve's final chamber triggers screen tremors and unseals the exit vault, showering the party in ancient relic caches and high-tier affix loot!
+`,
+    mermaidCharts: [
+      {
+        title: "The Refugee Escort & Leash Lifecycle State Machine",
+        chart: `
+stateDiagram-v2
+    [*] --> Lost : Spawn in Wilderness
+    Lost --> Following : Player Distance < CALL (28 px)
+    Following --> Lost : Player Distance > LEASH (260 px)
+    Following --> Home : Arrive at Town Hearth (settle())
+    Lost --> Death : HP <= 0 (Predator Bites)
+    Following --> Death : HP <= 0 (Intercepted by Foes)
+
+    state Home {
+        [*] --> VillageWander : Day (SPEED = 18)
+        VillageWander --> CampfireHuddle : Night (Shiver + Near Fire)
+        CampfireHuddle --> CitizenDialogue : Player Distance < HEAR
+    }
+`,
+      },
+      {
+        title: "Settlement Defense, Watchtowers & Hound Companion Progression",
+        chart: `
+flowchart TD
+    classDef hero fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef town fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef tower fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef dog fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    Hero["Hero Explores Wilderness<br/>(Satchel & Materials)"]:::hero
+    Refugee["Lost Refugee Discovered<br/>Mode::Following (Leash 260)"]:::hero
+
+    Town["Town Hearth & Safe Zone<br/>+3 Materials | +5% Discount"]:::town
+    Hound["Loyal Hound Companion<br/>(Unlocked at 3 Rescues)<br/>Revives Fresh at Dawn!"]:::dog
+    Tower["Watchtower Fortification<br/>(RANGE 190 | RELOAD 1.1s)<br/>Arrow Slits & Flame Lightfield"]:::tower
+
+    Refugee -->|"Escort into Town"| Town
+    Town -->|"Milestone: 3 Rescues"| Hound
+    Town -->|"Gold + Stone + Wood"| Tower
+    Tower -->|"Auto-Fire Arrows (260 px/s)"| Foes["Incoming Nocturnal Swarm"]
+    Hound -->|"Autonomous Biting & Quarry Aggro"| Foes
+`,
+      },
+    ],
+    interactiveComponent: "refugee",
   },
 ];

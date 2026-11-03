@@ -16,6 +16,9 @@ import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
 import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
 import { LootAffixSimulator } from "./components/LootAffixSimulator";
 import { GearEventsHudLab } from "./components/GearEventsHudLab";
+import { RefugeeEscortWatchtowerLab } from "./components/RefugeeEscortWatchtowerLab";
+import { AudioMixerVoiceStealingLab } from "./components/AudioMixerVoiceStealingLab";
+import { SkyWeatherFootprintsLab } from "./components/SkyWeatherFootprintsLab";
 import { highlightCodeToHtml, escapeHtml } from "./utils/highlightCode";
 import katex from "katex";
 import {
@@ -238,6 +241,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "classes-encounters",
         shortTitle: "12 Hero Kits, 39 Foes & 20 Traits",
+      },
+      {
+        id: "campaign-settlements-delves",
+        shortTitle: "Settlements, Refugee Escort & Delves",
       },
     ],
   },
@@ -892,6 +899,15 @@ export const App: React.FC = () => {
             </a>
 
             <a
+              href="/campaign-settlements-delves"
+              onClick={(e) => selectChapter("campaign-settlements-delves", e)}
+              className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-mono text-amber-300 font-semibold transition-colors"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>Hearth &amp; Delves</span>
+            </a>
+
+            <a
               href="https://github.com/soulwax/Mellangan"
               target="_blank"
               rel="noreferrer"
@@ -1331,6 +1347,15 @@ export const App: React.FC = () => {
                 )}
                 {activeSection.interactiveComponent === "gearevents" && (
                   <GearEventsHudLab />
+                )}
+                {activeSection.interactiveComponent === "refugee" && (
+                  <RefugeeEscortWatchtowerLab />
+                )}
+                {activeSection.interactiveComponent === "audiomixer" && (
+                  <AudioMixerVoiceStealingLab />
+                )}
+                {activeSection.interactiveComponent === "weather" && (
+                  <SkyWeatherFootprintsLab />
                 )}
               </div>
             )}
