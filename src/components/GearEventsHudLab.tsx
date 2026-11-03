@@ -187,7 +187,9 @@ const GEAR_GUIDED_SCENARIOS = [
 
 export const GearEventsHudLab: React.FC = () => {
   const [tab, setTab] = useState<LabTab>("gear");
-  const [selectedScenarioIdx, setSelectedScenarioIdx] = useState<number | null>(0);
+  const [selectedScenarioIdx, setSelectedScenarioIdx] = useState<number | null>(
+    0,
+  );
   const [sanctuaryActive, setSanctuaryActive] = useState<boolean>(false);
 
   // Tab 1: Paper-Doll Gear Reversibility & Enemy::hurt / Resistance Math
@@ -740,7 +742,8 @@ export const GearEventsHudLab: React.FC = () => {
                       Mitigation Curve: Linear vs Quadratic (1-r)²
                     </span>
                     <span className="text-slate-500">
-                      Clamped @ 75% ({((1 - Math.pow(1 - 0.75, 2)) * 100).toFixed(1)}% Max)
+                      Clamped @ 75% (
+                      {((1 - Math.pow(1 - 0.75, 2)) * 100).toFixed(1)}% Max)
                     </span>
                   </div>
                   <svg
@@ -748,11 +751,41 @@ export const GearEventsHudLab: React.FC = () => {
                     className="w-full h-16 bg-dark-950 rounded border border-dark-800"
                   >
                     {/* Grid lines */}
-                    <line x1="20" y1="50" x2="260" y2="50" stroke="#334155" strokeWidth="1" />
-                    <line x1="20" y1="10" x2="20" y2="50" stroke="#334155" strokeWidth="1" />
+                    <line
+                      x1="20"
+                      y1="50"
+                      x2="260"
+                      y2="50"
+                      stroke="#334155"
+                      strokeWidth="1"
+                    />
+                    <line
+                      x1="20"
+                      y1="10"
+                      x2="20"
+                      y2="50"
+                      stroke="#334155"
+                      strokeWidth="1"
+                    />
                     {/* 75% Clamp Line (20 + 0.75 * 240 = 200) */}
-                    <line x1="200" y1="10" x2="200" y2="50" stroke="#ef4444" strokeWidth="1" strokeDasharray="2 2" />
-                    <text x="202" y="18" fill="#ef4444" fontSize="8" fontFamily="monospace">75% Cap</text>
+                    <line
+                      x1="200"
+                      y1="10"
+                      x2="200"
+                      y2="50"
+                      stroke="#ef4444"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
+                    <text
+                      x="202"
+                      y="18"
+                      fill="#ef4444"
+                      fontSize="8"
+                      fontFamily="monospace"
+                    >
+                      75% Cap
+                    </text>
 
                     {/* Linear Curve: y = 50 - r * 40 */}
                     <path
@@ -777,17 +810,36 @@ export const GearEventsHudLab: React.FC = () => {
                       const cy = 50 - (1 - Math.pow(1 - curR, 2)) * 40;
                       return (
                         <g>
-                          <circle cx={cx} cy={cy} r="3.5" fill="#fbbf24" stroke="#000" strokeWidth="1" />
-                          <text x={Math.min(210, Math.max(30, cx - 18))} y={Math.max(12, cy - 5)} fill="#fbbf24" fontSize="8" fontWeight="bold" fontFamily="monospace">
-                            {gearStats.effectiveMitigationPct.toFixed(0)}% Mitigated
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r="3.5"
+                            fill="#fbbf24"
+                            stroke="#000"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={Math.min(210, Math.max(30, cx - 18))}
+                            y={Math.max(12, cy - 5)}
+                            fill="#fbbf24"
+                            fontSize="8"
+                            fontWeight="bold"
+                            fontFamily="monospace"
+                          >
+                            {gearStats.effectiveMitigationPct.toFixed(0)}%
+                            Mitigated
                           </text>
                         </g>
                       );
                     })()}
                   </svg>
                   <div className="flex justify-between text-[9px] text-slate-500 mt-0.5">
-                    <span className="text-sky-400">--- Linear Direct Hit (1-r)</span>
-                    <span className="text-emerald-400 font-bold">— Quadratic DoT (1-r)²</span>
+                    <span className="text-sky-400">
+                      --- Linear Direct Hit (1-r)
+                    </span>
+                    <span className="text-emerald-400 font-bold">
+                      — Quadratic DoT (1-r)²
+                    </span>
                     <span className="text-rose-400">Hardcap (0.75)</span>
                   </div>
                 </div>
@@ -1145,7 +1197,8 @@ export const GearEventsHudLab: React.FC = () => {
                       480×270 Virtual Screen Radar
                     </span>
                     <span className="text-slate-500">
-                      Center: (240, 135) • fit: {hudAndChartStats.fit.toFixed(2)}
+                      Center: (240, 135) • fit:{" "}
+                      {hudAndChartStats.fit.toFixed(2)}
                     </span>
                   </div>
                   <svg
@@ -1154,29 +1207,103 @@ export const GearEventsHudLab: React.FC = () => {
                   >
                     {/* Safe Margins Shading */}
                     {/* Top 84u Header Banner */}
-                    <rect x="0" y="0" width="240" height="42" fill="#f59e0b" fillOpacity="0.08" />
-                    <line x1="0" y1="42" x2="240" y2="42" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.4" />
-                    <text x="4" y="10" fill="#f59e0b" fontSize="7" fontFamily="monospace">84u Dawn / Omen Header</text>
+                    <rect
+                      x="0"
+                      y="0"
+                      width="240"
+                      height="42"
+                      fill="#f59e0b"
+                      fillOpacity="0.08"
+                    />
+                    <line
+                      x1="0"
+                      y1="42"
+                      x2="240"
+                      y2="42"
+                      stroke="#f59e0b"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                      strokeOpacity="0.4"
+                    />
+                    <text
+                      x="4"
+                      y="10"
+                      fill="#f59e0b"
+                      fontSize="7"
+                      fontFamily="monospace"
+                    >
+                      84u Dawn / Omen Header
+                    </text>
 
                     {/* Bottom Boss Bar Margin (46u or 18u -> 23px or 9px) */}
                     {(() => {
                       const bH = bossBarActive ? 23 : 9;
                       return (
                         <g>
-                          <rect x="0" y={135 - bH} width="240" height={bH} fill="#f43f5e" fillOpacity="0.1" />
-                          <line x1="0" y1={135 - bH} x2="240" y2={135 - bH} stroke="#f43f5e" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.4" />
-                          <text x="4" y={131} fill="#f43f5e" fontSize="7" fontFamily="monospace">{bossBarActive ? "46u Boss Bar Margin" : "18u Margin"}</text>
+                          <rect
+                            x="0"
+                            y={135 - bH}
+                            width="240"
+                            height={bH}
+                            fill="#f43f5e"
+                            fillOpacity="0.1"
+                          />
+                          <line
+                            x1="0"
+                            y1={135 - bH}
+                            x2="240"
+                            y2={135 - bH}
+                            stroke="#f43f5e"
+                            strokeWidth="1"
+                            strokeDasharray="2 2"
+                            strokeOpacity="0.4"
+                          />
+                          <text
+                            x="4"
+                            y={131}
+                            fill="#f43f5e"
+                            fontSize="7"
+                            fontFamily="monospace"
+                          >
+                            {bossBarActive
+                              ? "46u Boss Bar Margin"
+                              : "18u Margin"}
+                          </text>
                         </g>
                       );
                     })()}
 
                     {/* Left & Right 18u Margins (9px) */}
-                    <line x1="9" y1="0" x2="9" y2="135" stroke="#334155" strokeWidth="1" strokeDasharray="2 2" />
-                    <line x1="231" y1="0" x2="231" y2="135" stroke="#334155" strokeWidth="1" strokeDasharray="2 2" />
+                    <line
+                      x1="9"
+                      y1="0"
+                      x2="9"
+                      y2="135"
+                      stroke="#334155"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
+                    <line
+                      x1="231"
+                      y1="0"
+                      x2="231"
+                      y2="135"
+                      stroke="#334155"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
 
                     {/* Center Crosshair (Player) */}
                     <circle cx="120" cy="67.5" r="3" fill="#38bdf8" />
-                    <text x="124" y="66" fill="#38bdf8" fontSize="7" fontFamily="monospace">Player (0,0)</text>
+                    <text
+                      x="124"
+                      y="66"
+                      fill="#38bdf8"
+                      fontSize="7"
+                      fontFamily="monospace"
+                    >
+                      Player (0,0)
+                    </text>
 
                     {/* Target Ray */}
                     {(() => {
@@ -1190,15 +1317,42 @@ export const GearEventsHudLab: React.FC = () => {
                       return (
                         <g>
                           {/* Ray line to pin */}
-                          <line x1={sx} y1={sy} x2={px} y2={py} stroke="#fbbf24" strokeWidth="1.5" />
+                          <line
+                            x1={sx}
+                            y1={sy}
+                            x2={px}
+                            y2={py}
+                            stroke="#fbbf24"
+                            strokeWidth="1.5"
+                          />
                           {/* Dashed beyond screen */}
                           {hudAndChartStats.offscreen && (
-                            <line x1={px} y1={py} x2={rawTx} y2={rawTy} stroke="#64748b" strokeWidth="1" strokeDasharray="3 3" />
+                            <line
+                              x1={px}
+                              y1={py}
+                              x2={rawTx}
+                              y2={rawTy}
+                              stroke="#64748b"
+                              strokeWidth="1"
+                              strokeDasharray="3 3"
+                            />
                           )}
                           {/* Pin Marker */}
-                          <circle cx={px} cy={py} r="4" fill="#fbbf24" stroke="#000" strokeWidth="1" />
+                          <circle
+                            cx={px}
+                            cy={py}
+                            r="4"
+                            fill="#fbbf24"
+                            stroke="#000"
+                            strokeWidth="1"
+                          />
                           {/* Raw Target marker */}
-                          <circle cx={rawTx} cy={rawTy} r="2.5" fill="#f43f5e" />
+                          <circle
+                            cx={rawTx}
+                            cy={rawTy}
+                            r="2.5"
+                            fill="#f43f5e"
+                          />
                         </g>
                       );
                     })()}
