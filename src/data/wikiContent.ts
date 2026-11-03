@@ -1023,16 +1023,16 @@ $$\\text{decayRate} = \\text{baseRate} \\times \\text{weatherDecayMultiplier}$$
 - **\`Thunder.cpp\`:** Storm fronts periodically charge localized lightning strikes, rendering jagged procedural \`Arc\` bolts, illuminating the entire offscreen lightmap with an HDR flash, and triggering delayed acoustic thunder rolls.
 
 #### 3. Nocturnal Omens (\`Night.cpp\`)
-At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **Omen** (\`OMENS[omen]\`) that alters nocturnal rules and awards a permanent score handicap multiplier—culminating in Blood Moon surges and the final Dawn survival threshold.
+At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **Omen** (\`OMENS[omen]\`) that alters nocturnal rules and awards a permanent score handicap multiplier, culminating in Blood Moon surges and the final Dawn survival threshold.
 
 #### 4. The 24-Hour Diurnal Illumination Equation
 The celestial solar/lunar arc is evaluated as a continuous trigonometric angle:
 $$\\theta(t) = \\frac{t - 6}{24} \\times 2\\pi$$
 Ambient light is smoothly interpolated across four distinct chromatic keyframes:
-- **Dawn (05:00 - 08:00):** Warm rose and peach hues ($65\\%$ ambient luminance) with elongated westward ground shadows.
-- **Daylight (08:00 - 17:00):** Clear emerald and azure sunlight ($100\\%$ ambient luminance) with compact vertical shadows.
-- **Dusk (17:00 - 20:00):** Fiery amber and deep crimson tones ($60\\%$ ambient luminance) with eastward shadows.
-- **Night (20:00 - 05:00):** Nocturnal indigo ($25\\%$ ambient baseline), revealing player lantern cones and dynamic lightfield casters.
+- **Dawn (05:00 to 08:00):** Warm rose and peach hues ($65\\%$ ambient luminance) with elongated westward ground shadows.
+- **Daylight (08:00 to 17:00):** Clear emerald and azure sunlight ($100\\%$ ambient luminance) with compact vertical shadows.
+- **Dusk (17:00 to 20:00):** Fiery amber and deep crimson tones ($60\\%$ ambient luminance) with eastward shadows.
+- **Night (20:00 to 05:00):** Nocturnal indigo ($25\\%$ ambient baseline), revealing player lantern cones and dynamic lightfield casters.
 `,
     mermaidCharts: [
       {
@@ -2302,7 +2302,7 @@ Because auto-tiling and morphological filtering query neighboring tiles \`(x + d
 
 ---
 
-#### Stage 5: Hydrology — Lowland Lakes, Dry Moats & Highland Tarns (\`Terrain.cpp\`)
+#### Stage 5: Hydrology: Lowland Lakes, Dry Moats & Highland Tarns (\`Terrain.cpp\`)
 - **Lowland Lakes (\`level == 0\`):** \`lake(x, y, margin)\` blends per-biome water table biases \`LAKES[BIOME_COUNT]\`. To prevent players or buildings from spawning underwater, \`rawWaterAt\` passes \`margin = -std::max(spawnDry(x, y), structureDry(x, y))\`, pushing shorelines away from \`(0, 0)\` and away from any \`Structure\` within 6 tiles!
 - **Highland Tarns (\`level > 0\`):** \`tarn(x, y, level)\` creates mountain pools on elevated plateaus only when the entire **5×5 neighborhood** shares the exact same \`heightAt(x + dx, y + dy) == level\`, ensuring water never spills over a cliff edge.
 
@@ -2320,7 +2320,7 @@ Because auto-tiling and morphological filtering query neighboring tiles \`(x + d
 2. **Cumulative Alpha-Over Barycentric Blending (\`FloorPainter::blend\`):**
    To blend up to 3 biomes on a single tile using sequential sprite draws, \`FloorPainter::blend\` draws the owning biome first at \`alpha = 1.0\` and each subsequent biome \`k\` at \`alpha = blend.weight[k] / cumulative\`. Mathematically:
    - After Pass 1: \`C = w0/(w0+w1) * C0 + w1/(w0+w1) * C1\`
-   - After Pass 2: \`C = w0 * C0 + w1 * C1 + w2 * C2\` — an exact barycentric linear combination!
+   - After Pass 2: \`C = w0 * C0 + w1 * C1 + w2 * C2\` , an exact barycentric linear combination!
 3. **Drop Shadows, Ramps & Inner Cliff Corners (\`FloorPainter::wall\` & \`cliff\`):**
    Casts translucent dark rectangles below south and east cliff edges, renders 3-tile \`atlas::stairs(material, part)\` on ramps, draws \`atlas::cliff(material, RIM[mask])\` along outer cliff faces, and stamps \`4×4\` / \`4×8\` concave corner sub-sprites (\`CORNERS[4][5]\`) when all 4 cardinal neighbors are elevated (\`mask == 15\`) but a diagonal neighbor drops off!
 `,
@@ -3555,7 +3555,7 @@ flowchart TD
       "src/entity/Ally.hpp",
       "src/entity/Ally.cpp",
       "src/item/weapon/form/Summon.cpp",
-      "src/item/weapon/FormRegistry.cpp",
+      "src/item/weapon/form/FormBehavior.cpp",
     ],
     content: `
 ### 1. Contributing a New Diablo Gear Base (\`src/item/loot/ItemBase.cpp\`)
@@ -3736,7 +3736,7 @@ If a weapon needs a brand-new geometric attack pattern beyond the 16 built-in \`
 1. Append the new identifier to \`enum class Form : uint8_t\` in \`src/item/weapon/Recipe.hpp\`.
 2. Create \`src/item/weapon/form/MyForm.cpp\` implementing \`class MyForm : public FormBehavior\` with \`void fire(const Context &c) const override\`.
 3. Use \`c.aimDir(ox, oy)\` to resolve target direction, \`c.payload(damageScale)\` to snapshot the \`HitPayload\` (including evolved status effects and hero luck/edge), and \`landHit(payload, enemy, fromX, fromY, by)\` (\`src/item/weapon/form/FormCommon.hpp\`) to apply damage, status procs, and floating combat numbers.
-4. Register the singleton in \`formFor(Form f)\` inside \`src/item/weapon/FormRegistry.cpp\`.
+4. Register the singleton in \`formFor(Form f)\` inside \`src/item/weapon/form/FormBehavior.cpp\`.
 `,
     mermaidCharts: [
       {
@@ -4596,9 +4596,9 @@ flowchart TD
     sourceFiles: [
       "src/level/Level.cpp",
       "src/entity/enemy/ai/Plans.cpp",
-      "src/render/Screen.cpp",
+      "src/gfx/Screen.cpp",
       "src/campaign/Townsfolk.cpp",
-      "src/item/loot/LootSim.cpp",
+      "src/item/loot/Loot.cpp",
       "src/other/Ouroboros.hpp",
     ],
     content: `
@@ -4929,7 +4929,7 @@ When interpreted directly as an unsigned 32-bit integer (\`std::bit_cast<uint32_
 
 #### The Mellangan Monotonic Invariant Function
 
-To allow Radix Sort to sort continuous Y-coordinates with zero comparisons, \`src/render/Screen.cpp\` transforms the raw float bits via:
+To allow Radix Sort to sort continuous Y-coordinates with zero comparisons, \`src/gfx/Screen.cpp\` transforms the raw float bits via:
 
 \`\`\`cpp
 uint32_t orderedBits(float f) {

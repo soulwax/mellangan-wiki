@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/verify-all.js",
+    "test:math": "node scripts/verify-math.js",
+    "test:escapes": "node scripts/verify-escapes.js",
+    "test:prose": "node scripts/verify-prose.js",
+    "test:integrity": "node scripts/verify-integrity.js"
   },
   "dependencies": {
     "katex": "^0.16.21",
