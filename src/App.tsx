@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { WIKI_SECTIONS, WikiSection } from "./data/wikiContent";
 import { MermaidChart } from "./components/MermaidChart";
 import { InteractiveGameLoop } from "./components/InteractiveGameLoop";
@@ -251,6 +251,121 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "campaign-settlements-delves",
         shortTitle: "Settlements, Sanctuary Seekers & Delves",
+      },
+    ],
+  },
+];
+
+interface FeaturedTopic {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: React.ElementType;
+  badge?: string;
+}
+
+interface FeaturedTopicGroup {
+  groupName: string;
+  topics: FeaturedTopic[];
+}
+
+const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
+  {
+    groupName: "Core Engine & Math",
+    topics: [
+      {
+        id: "engine-mathematics",
+        title: "Game Math & Invariants",
+        subtitle: "8 Mathematical Models & Proofs",
+        icon: Calculator,
+        badge: "LAB",
+      },
+      {
+        id: "ouroboros-deep-dive",
+        title: "How Ouroboros Works",
+        subtitle: "Bit twiddling & 4 serpents",
+        icon: Cpu,
+        badge: "LAB",
+      },
+      {
+        id: "renderer-in-context",
+        title: "Renderer Architecture",
+        subtitle: "Vulkan, LightField & Radix Sort",
+        icon: Layers,
+        badge: "LAB",
+      },
+      {
+        id: "terrain-construction",
+        title: "Terrain Construction",
+        subtitle: "7 Procedural Synthesis Stages",
+        icon: Compass,
+        badge: "LAB",
+      },
+    ],
+  },
+  {
+    groupName: "AI & World Simulation",
+    topics: [
+      {
+        id: "goal-ai",
+        title: "Goal AI & Concurrency",
+        subtitle: "Steering, ringbuffer & 4-barrier",
+        icon: Workflow,
+        badge: "LAB",
+      },
+      {
+        id: "night-spawner-director",
+        title: "Wave Director & Shrines",
+        subtitle: "Nocturnal pacing & escalation",
+        icon: Swords,
+        badge: "LAB",
+      },
+      {
+        id: "weather-sky",
+        title: "Sky, Weather & Footprints",
+        subtitle: "Diurnal cycle & storm particles",
+        icon: Sparkles,
+        badge: "LAB",
+      },
+      {
+        id: "audio-qa",
+        title: "32-Voice Audio Mixer",
+        subtitle: "LRU stealing & QA frequency view",
+        icon: Terminal,
+        badge: "LAB",
+      },
+    ],
+  },
+  {
+    groupName: "Gameplay & Workshop",
+    topics: [
+      {
+        id: "diablo-loot-runrules",
+        title: "0.5.14+ Diablo Loot",
+        subtitle: "30 Affixes, RunRules & Rarities",
+        icon: Sparkles,
+        badge: "LAB",
+      },
+      {
+        id: "campaign-settlements-delves",
+        title: "Sanctuary & Delves",
+        subtitle: "Seekers, watchtowers & dungeons",
+        icon: Compass,
+        badge: "LAB",
+      },
+      {
+        id: "tutorial-pixel-shader",
+        title: "Pixel Art & Shaders",
+        subtitle: "16×16 sprites & Slang kernels",
+        icon: FileCode2,
+        badge: "LAB",
+      },
+      {
+        id: "contribute-basics",
+        title: "Contributor Sandbox",
+        subtitle: "Build flags, QA & --dev mode",
+        icon: Wrench,
+        badge: "LAB",
       },
     ],
   },
@@ -558,6 +673,8 @@ export const App: React.FC = () => {
   });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [isTopicsOpen, setIsTopicsOpen] = useState<boolean>(false);
+  const topicsRef = useRef<HTMLDivElement>(null);
   const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>(
     "all",
   );
@@ -626,6 +743,31 @@ export const App: React.FC = () => {
       );
     }
   }, [activeSection]);
+
+  // Handle outside click & Escape key for Topics dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        topicsRef.current &&
+        !topicsRef.current.contains(event.target as Node)
+      ) {
+        setIsTopicsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsTopicsOpen(false);
+      }
+    };
+    if (isTopicsOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isTopicsOpen]);
 
   // Listen to browser Back/Forward (popstate) and in-page hash navigation
   useEffect(() => {
@@ -735,6 +877,7 @@ export const App: React.FC = () => {
     setActiveHash("");
     setActiveDiagramTab("all");
     setIsMobileMenuOpen(false);
+    setIsTopicsOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -773,7 +916,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-dark-950 text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
-      <header className="sticky top-0 z-40 h-[58px] bg-dark-950/95 backdrop-blur-md border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-40 h-[58px] bg-dark-950/98 backdrop-blur-md border-b border-dark-800/90 px-4 lg:px-6 flex items-center justify-between gap-4">
         <div className="max-w-[1340px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
@@ -841,86 +984,151 @@ export const App: React.FC = () => {
                 Serif
               </button>
             </div>
+            {/* Direct Quick Link 1: Contribute */}
             <a
               href="/contribute-basics"
               onClick={(e) => selectChapter("contribute-basics", e)}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gold-500/15 hover:bg-gold-500/25 border border-gold-500/40 text-xs font-mono text-gold-300 font-semibold transition-colors"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-900/90 hover:bg-gold-500/10 border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
+              title="Contribution Guide &amp; Dev Toolchain"
             >
-              <Wrench className="w-3.5 h-3.5" />
+              <Wrench className="w-3.5 h-3.5 text-gold-400" />
               <span>Contribute</span>
             </a>
 
-            <a
-              href="/diablo-loot-runrules"
-              onClick={(e) => selectChapter("diablo-loot-runrules", e)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-mono text-amber-300 font-semibold transition-colors"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>0.5.14+ Loot</span>
-            </a>
-
-            <a
-              href="/goal-ai"
-              onClick={(e) => selectChapter("goal-ai", e)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-xs font-mono text-purple-300 font-semibold transition-colors"
-            >
-              <Workflow className="w-3.5 h-3.5" />
-              <span>AI &amp; Goals</span>
-            </a>
-
-            <a
-              href="/renderer-in-context"
-              onClick={(e) => selectChapter("renderer-in-context", e)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/40 text-xs font-mono text-teal-300 font-semibold transition-colors"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Renderer</span>
-            </a>
-
-            <a
-              href="/terrain-construction"
-              onClick={(e) => selectChapter("terrain-construction", e)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-xs font-mono text-sky-300 font-semibold transition-colors"
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>Terrain</span>
-            </a>
-
-            <a
-              href="/night-spawner-director"
-              onClick={(e) => selectChapter("night-spawner-director", e)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-xs font-mono text-rose-300 font-semibold transition-colors"
-            >
-              <Swords className="w-3.5 h-3.5" />
-              <span>Director</span>
-            </a>
-
-            <a
-              href="/ouroboros-deep-dive"
-              onClick={(e) => selectChapter("ouroboros-deep-dive", e)}
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-xs font-mono text-purple-300 font-semibold transition-colors"
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>Ouroboros</span>
-            </a>
-
+            {/* Direct Quick Link 2: Game Math */}
             <a
               href="/engine-mathematics"
               onClick={(e) => selectChapter("engine-mathematics", e)}
-              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-xs font-mono text-indigo-300 font-semibold transition-colors"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-900/90 hover:bg-indigo-500/10 border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
+              title="Game Mathematics, Invariants &amp; Proofs"
             >
-              <Calculator className="w-3.5 h-3.5" />
+              <Calculator className="w-3.5 h-3.5 text-indigo-400" />
               <span>Game Math</span>
             </a>
 
-            <a
-              href="/campaign-settlements-delves"
-              onClick={(e) => selectChapter("campaign-settlements-delves", e)}
-              className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-mono text-amber-300 font-semibold transition-colors"
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>Hearth &amp; Delves</span>
-            </a>
+            {/* Unified Topics & Labs Dropdown Menu */}
+            <div className="relative" ref={topicsRef}>
+              <button
+                type="button"
+                onClick={() => setIsTopicsOpen(!isTopicsOpen)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                  isTopicsOpen
+                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/50 shadow-md shadow-gold-500/10"
+                    : "bg-dark-900/90 hover:bg-dark-850 text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
+                }`}
+                aria-expanded={isTopicsOpen}
+                aria-haspopup="true"
+              >
+                <Layers className="w-3.5 h-3.5 text-gold-400" />
+                <span>Topics</span>
+                <span className="hidden sm:inline-block px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px] font-semibold">
+                  12 Labs
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    isTopicsOpen ? "rotate-180 text-gold-300" : ""
+                  }`}
+                />
+              </button>
+
+              {isTopicsOpen && (
+                <div
+                  className="absolute right-0 top-full mt-2 w-[calc(100vw-24px)] sm:w-[640px] md:w-[720px] max-h-[82vh] overflow-y-auto bg-dark-950/98 backdrop-blur-xl border border-dark-750/90 rounded-2xl shadow-2xl p-4 sm:p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                  role="menu"
+                >
+                  {/* Menu header */}
+                  <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-dark-800">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-gold-400 animate-pulse"></span>
+                      <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-200">
+                        Featured Topics &amp; Interactive Labs
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
+                      Press <kbd className="px-1.5 py-0.5 rounded bg-dark-850 border border-dark-700 text-slate-400">Esc</kbd> to close
+                    </span>
+                  </div>
+
+                  {/* 3 Categories Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                    {FEATURED_TOPIC_GROUPS.map((group) => (
+                      <div key={group.groupName} className="flex flex-col gap-1.5">
+                        <div className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-400 px-1 py-0.5">
+                          {group.groupName}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          {group.topics.map((t) => {
+                            const IconComponent = t.icon;
+                            const isActive = activeSectionId === t.id;
+                            return (
+                              <a
+                                key={t.id}
+                                href={`/${t.id}`}
+                                onClick={(e) => {
+                                  selectChapter(t.id, e);
+                                  setIsTopicsOpen(false);
+                                }}
+                                className={`group p-2 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
+                                  isActive
+                                    ? "bg-gold-500/15 border-gold-500/50 shadow-sm"
+                                    : "bg-dark-900/60 hover:bg-dark-850 border-dark-800/80 hover:border-dark-700"
+                                }`}
+                              >
+                                <div
+                                  className={`p-1.5 rounded-lg border shrink-0 mt-0.5 transition-colors ${
+                                    isActive
+                                      ? "bg-gold-500/20 border-gold-500/40 text-gold-300"
+                                      : "bg-dark-850 border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/30"
+                                  }`}
+                                >
+                                  <IconComponent className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span
+                                      className={`text-xs font-semibold truncate ${
+                                        isActive
+                                          ? "text-gold-200"
+                                          : "text-slate-200 group-hover:text-gold-300"
+                                      }`}
+                                    >
+                                      {t.title}
+                                    </span>
+                                    {t.badge && (
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold shrink-0">
+                                        {t.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                    {t.subtitle}
+                                  </p>
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Footer link to full index */}
+                  <div className="mt-4 pt-3 border-t border-dark-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
+                    <span className="text-[11px]">32 Chapters across 6 modules</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTopicsOpen(false);
+                        setIsMobileMenuOpen(true);
+                      }}
+                      className="text-gold-400 hover:text-gold-300 text-[11px] font-semibold flex items-center gap-1 hover:underline"
+                    >
+                      Browse full index in sidebar &rarr;
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <a
               href="https://github.com/soulwax/Mellangan"
