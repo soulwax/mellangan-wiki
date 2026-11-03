@@ -4912,7 +4912,7 @@ $$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times 250}{\\text{raw
 
 ### 6. Floating-Point Monotonic Transform: \`orderedBits(f)\`
 
-The key challenge in Mellangan's zero-comparison rendering pipeline is sorting entities by their continuous Y-coordinate ($y \in \mathbb{R}$) using an integer **Radix Sort**.
+The key challenge in Mellangan's zero-comparison rendering pipeline is sorting entities by their continuous Y-coordinate ($y \\in \\mathbb{R}$) using an integer **Radix Sort**.
 
 #### The IEEE 754 Representation Problem
 
@@ -4921,11 +4921,11 @@ An IEEE 754 32-bit single-precision floating point number consists of:
 - 8 Exponent bits $e$ (bits 30..23, biased by 127)
 - 23 Mantissa / Fraction bits $m$ (bits 22..0)
 
-$$f = (-1)^s \cdot 2^{e - 127} \cdot \left(1 + \sum_{i=1}^{23} m_i 2^{-i}\right)$$
+$$f = (-1)^s \\cdot 2^{e - 127} \\cdot \\left(1 + \\sum_{i=1}^{23} m_i 2^{-i}\\right)$$
 
 When interpreted directly as an unsigned 32-bit integer (\`std::bit_cast<uint32_t>(f)\`):
-- Positive numbers ($s = 0$) already have integer order: $0.0 < 1.0 < 100.0 \implies \text{bits}(0.0) < \text{bits}(1.0) < \text{bits}(100.0)$.
-- **Negative numbers ($s = 1$) have their order backwards:** Because bit 31 is 1, all negative numbers appear larger than positive numbers ($u \ge \text{0x80000000u}$). Furthermore, $-100.0$ has a larger exponent than $-1.0$, meaning $\text{bits}(-100.0) > \text{bits}(-1.0)$, the exact reverse of numerical ordering!
+- Positive numbers ($s = 0$) already have integer order: $0.0 < 1.0 < 100.0 \\implies \\text{bits}(0.0) < \\text{bits}(1.0) < \\text{bits}(100.0)$.
+- **Negative numbers ($s = 1$) have their order backwards:** Because bit 31 is 1, all negative numbers appear larger than positive numbers ($u \\ge \\text{0x80000000u}$). Furthermore, $-100.0$ has a larger exponent than $-1.0$, meaning $\\text{bits}(-100.0) > \\text{bits}(-1.0)$, the exact reverse of numerical ordering!
 
 #### The Mellangan Monotonic Invariant Function
 
@@ -4938,44 +4938,44 @@ uint32_t orderedBits(float f) {
 }
 \`\`\`
 
-$$\text{orderedBits}(f) = u \oplus \Big( (u \gg_{\text{arith}} 31) \lor \text{0x80000000u} \Big)$$
+$$\\text{orderedBits}(f) = u \\oplus \\Big( (u \\gg_{\\text{arith}} 31) \\lor \\text{0x80000000u} \\Big)$$
 
 #### Proof of Monotonicity:
 
-1. **Case A: $f \ge 0$ (Non-Negative Numbers):**
+1. **Case A: $f \\ge 0$ (Non-Negative Numbers):**
    The sign bit is $0$.
    Arithmetic right shift of a non-negative integer preserves the zero sign bit: \`int32_t(u) >> 31 == 0\`.
    The bitwise mask becomes:
-   $$\text{mask} = 0 \lor \text{0x80000000u} = \text{0x80000000u}$$
-   XORing $u$ with $\text{0x80000000u}$ flips **strictly bit 31**, leaving bits $0..30$ completely unchanged:
-   $$\text{orderedBits}(f) = u \oplus \text{0x80000000u} = u + \text{0x80000000u}$$
-   This maps positive floats $[+0.0, +\infty)$ into the upper unsigned integer interval:
-   $$[\text{0x80000000u}, \text{0xFFFFFFFFu}]$$
+   $$\\text{mask} = 0 \\lor \\text{0x80000000u} = \\text{0x80000000u}$$
+   XORing $u$ with $\\text{0x80000000u}$ flips **strictly bit 31**, leaving bits $0..30$ completely unchanged:
+   $$\\text{orderedBits}(f) = u \\oplus \\text{0x80000000u} = u + \\text{0x80000000u}$$
+   This maps positive floats $[+0.0, +\\infty)$ into the upper unsigned integer interval:
+   $$[\\text{0x80000000u}, \\text{0xFFFFFFFFu}]$$
 
 2. **Case B: $f < 0$ (Strictly Negative Numbers):**
    The sign bit is $1$.
    Arithmetic right shift of a negative integer propagates the sign bit across all 32 bits: \`int32_t(u) >> 31 == -1\` (\`0xFFFFFFFFu\`).
    The bitwise mask becomes:
-   $$\text{mask} = \text{0xFFFFFFFFu} \lor \text{0x80000000u} = \text{0xFFFFFFFFu}$$
-   XORing $u$ with $\text{0xFFFFFFFFu}$ inverts every single one of the 32 bits:
-   $$\text{orderedBits}(f) = u \oplus \text{0xFFFFFFFFu} = \sim u$$
-   Inverting all bits reverses the inverted exponent magnitude, mapping negative floats $(-\infty, -0.0]$ into the lower unsigned integer interval:
-   $$[\text{0x00000000u}, \text{0x7FFFFFFFu}]$$
+   $$\\text{mask} = \\text{0xFFFFFFFFu} \\lor \\text{0x80000000u} = \\text{0xFFFFFFFFu}$$
+   XORing $u$ with $\\text{0xFFFFFFFFu}$ inverts every single one of the 32 bits:
+   $$\\text{orderedBits}(f) = u \\oplus \\text{0xFFFFFFFFu} = \\sim u$$
+   Inverting all bits reverses the inverted exponent magnitude, mapping negative floats $(-\\infty, -0.0]$ into the lower unsigned integer interval:
+   $$[\\text{0x00000000u}, \\text{0x7FFFFFFFu}]$$
 
 3. **Conclusion:**
-   For any two floating point numbers $a, b \in \mathbb{R}$:
-   $$a < b \iff \text{orderedBits}(a) < \text{orderedBits}(b)$$
+   For any two floating point numbers $a, b \\in \\mathbb{R}$:
+   $$a < b \\iff \\text{orderedBits}(a) < \\text{orderedBits}(b)$$
    The transformation is a strictly monotonic mapping that preserves numerical order across all real numbers.
 
 #### 3-Pass 12-Bit LSD Radix Sort Complexity
 
 Mellangan packs the scene sort key into a 64-bit integer:
 
-$$\text{Key} = (\text{layer} \ll 56) \mathbin{|} (\text{orderedBits}(y) \ll 24) \mathbin{|} (\text{seq} \mathbin{\&} \text{0x00FFFFFF})$$
+$$\\text{Key} = (\\text{layer} \\ll 56) \\mathbin{|} (\\text{orderedBits}(y) \\ll 24) \\mathbin{|} (\\text{seq} \\mathbin{\\&} \\text{0x00FFFFFF})$$
 
 Three passes of 12-bit Least Significant Digit (LSD) Radix Sort with $2^{12} = 4096$ histogram buckets sort all $N$ entities:
 
-$$\text{Operations} = 3 \times (N + 4096) = O(N)$$
+$$\\text{Operations} = 3 \\times (N + 4096) = O(N)$$
 
 Zero comparisons, zero branch mispredictions, and deterministic execution time regardless of scene distribution!
 
@@ -4983,13 +4983,13 @@ Zero comparisons, zero branch mispredictions, and deterministic execution time r
 
 To understand why float bit twiddling is necessary, examine how four representative floating-point numbers look in raw hexadecimal IEEE 754 notation:
 
-- $+10.0f \implies \text{0x41200000}$ (Sign bit 0, Exponent \`10000010\`, Fraction \`010000...\`)
-- $+0.0f \implies \text{0x00000000}$ (Sign bit 0, Exponent \`00000000\`, Fraction \`000000...\`)
-- $-0.0f \implies \text{0x80000000}$ (Sign bit 1, Exponent \`00000000\`, Fraction \`000000...\`)
-- $-10.0f \implies \text{0xC1200000}$ (Sign bit 1, Exponent \`10000010\`, Fraction \`010000...\`)
+- $+10.0f \\implies \\text{0x41200000}$ (Sign bit 0, Exponent \`10000010\`, Fraction \`010000...\`)
+- $+0.0f \\implies \\text{0x00000000}$ (Sign bit 0, Exponent \`00000000\`, Fraction \`000000...\`)
+- $-0.0f \\implies \\text{0x80000000}$ (Sign bit 1, Exponent \`00000000\`, Fraction \`000000...\`)
+- $-10.0f \\implies \\text{0xC1200000}$ (Sign bit 1, Exponent \`10000010\`, Fraction \`010000...\`)
 
 If we feed these raw bits directly into an unsigned integer sort, the order becomes completely inverted:
-$$\text{0x00000000} (+0.0f) < \text{0x41200000} (+10.0f) < \text{0x80000000} (-0.0f) < \text{0xC1200000} (-10.0f)$$
+$$\\text{0x00000000} (+0.0f) < \\text{0x41200000} (+10.0f) < \\text{0x80000000} (-0.0f) < \\text{0xC1200000} (-10.0f)$$
 
 Negative ten is treated as the largest number, and negative zero is treated as greater than positive ten!
 
@@ -5007,33 +5007,33 @@ uint32_t orderedBits(float f) {
 4. For $-10.0f$, mask is \`0xFFFFFFFF\`. Inverting \`0xC1200000\` bitwise gives \`0x3EDFFFFF\`.
 
 Now look at the transformed unsigned integers:
-$$\text{0x3EDFFFFF} (-10.0f) < \text{0x7FFFFFFF} (-0.0f) < \text{0x80000000} (+0.0f) < \text{0xC1200000} (+10.0f)$$
+$$\\text{0x3EDFFFFF} (-10.0f) < \\text{0x7FFFFFFF} (-0.0f) < \\text{0x80000000} (+0.0f) < \\text{0xC1200000} (+10.0f)$$
 
-The unsigned values match the mathematical ordering $-10.0 < -0.0 \le +0.0 < +10.0$ with zero branching, allowing Radix Sort to process continuous scene depths in linear time.
+The unsigned values match the mathematical ordering $-10.0 < -0.0 \\le +0.0 < +10.0$ with zero branching, allowing Radix Sort to process continuous scene depths in linear time.
 
 ---
 
 ### 7. Discrete Parity Calculus & De Bruijn Spirals (\`Ouroboros.hpp\`)
 
-In \`src/other/Ouroboros.hpp\`, Mellangan demonstrates compile-time bit twiddling by verifying integer parity ($n \pmod 2 == 0$) without using the modulo operator \`%\`.
+In \`src/other/Ouroboros.hpp\`, Mellangan demonstrates compile-time bit twiddling by verifying integer parity ($n \\pmod 2 == 0$) without using the modulo operator \`%\`.
 
 #### The Parity Cancellation Identity (\`Gray\`)
 
 Let $P(x)$ denote the global XOR parity (whether the total number of set bits is odd or even) of an integer $x$:
 
-$$P(n) = \bigoplus_{i=0}^{31} b_i = b_0 \oplus \bigoplus_{i=1}^{31} b_i$$
+$$P(n) = \\bigoplus_{i=0}^{31} b_i = b_0 \\oplus \\bigoplus_{i=1}^{31} b_i$$
 
-Consider the shifted value $n \gg 1$, where bit $i$ occupies position $i-1$:
+Consider the shifted value $n \\gg 1$, where bit $i$ occupies position $i-1$:
 
-$$P(n \gg 1) = 0 \oplus \bigoplus_{i=1}^{31} b_i = \bigoplus_{i=1}^{31} b_i$$
+$$P(n \\gg 1) = 0 \\oplus \\bigoplus_{i=1}^{31} b_i = \\bigoplus_{i=1}^{31} b_i$$
 
 Computing the XOR sum of their parities:
 
-$$P(n) \oplus P(n \gg 1) = \left( b_0 \oplus \bigoplus_{i=1}^{31} b_i \right) \oplus \left( \bigoplus_{i=1}^{31} b_i \right)$$
+$$P(n) \\oplus P(n \\gg 1) = \\left( b_0 \\oplus \\bigoplus_{i=1}^{31} b_i \\right) \\oplus \\left( \\bigoplus_{i=1}^{31} b_i \\right)$$
 
-By the associativity and commutativity of XOR ($x \oplus x = 0$ and $x \oplus 0 = x$):
+By the associativity and commutativity of XOR ($x \\oplus x = 0$ and $x \\oplus 0 = x$):
 
-$$P(n) \oplus P(n \gg 1) = b_0 \oplus 0 = b_0$$
+$$P(n) \\oplus P(n \\gg 1) = b_0 \\oplus 0 = b_0$$
 
 Every bit from 1 through 31 cancels out with itself, leaving strictly bit 0! Negating with \`!\` returns \`!b_0\`, which is \`true\` for even numbers and \`false\` for odd numbers.
 
@@ -5047,24 +5047,24 @@ Mellangan uses the canonical generator **\`0x077CB531u\`**:
 \`\`\`
 
 1. Two's complement LSB isolation:
-   $$\text{LSB}(v) = v \ \&\ (-v) = 2^k$$
+   $$\\text{LSB}(v) = v \\mathbin{\\&} (-v) = 2^k$$
 
 2. Multiplying $2^k$ by \`0x077CB531u\` left-shifts the sequence by $k$ positions:
-   $$\text{hash}(2^k) = (2^k \times \text{0x077CB531u}) \gg 27$$
+   $$\\text{hash}(2^k) = (2^k \\times \\text{0x077CB531u}) \\gg 27$$
 
-3. Because the sequence is De Bruijn, the top 5 bits (\`>> 27\`) uniquely identify the trailing zero count $k \in [0..31]$ with zero hash collisions!
+3. Because the sequence is De Bruijn, the top 5 bits (\`>> 27\`) uniquely identify the trailing zero count $k \\in [0..31]$ with zero hash collisions!
 
-#### Parity Inversion in $\mathbb{Z}_2$ (\`Rebecca\`)
+#### Parity Inversion in $\\mathbb{Z}_2$ (\`Rebecca\`)
 
 Inside \`Rebecca\`, each byte is transformed by:
 
-$$f(b) = 1 \oplus \Big( \big( (b \times 0x5D) \oplus 0x2E \big) \ \&\ 1 \Big)$$
+$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 \\Big)$$
 
-- $0x5D = 93$ is odd, so multiplying by 93 preserves parity in $\mathbb{Z}_2$:
-  $$(b \times 93) \pmod 2 \equiv b \times 1 \equiv b \pmod 2$$
-- $0x2E = 46$ is even, so XORing with 46 does not change the lowest bit: $(X \oplus 46) \& 1 = X \& 1$.
-- Thus: $\big( (b \times 93) \oplus 46 \big) \& 1 = b_0$.
-- Inverting with $1 \oplus$ yields $!b_0$, which evaluates to 1 for even numbers and 0 for odd numbers.
+- $0x5D = 93$ is odd, so multiplying by 93 preserves parity in $\\mathbb{Z}_2$:
+  $$(b \\times 93) \\pmod 2 \\equiv b \\times 1 \\equiv b \\pmod 2$$
+- $0x2E = 46$ is even, so XORing with 46 does not change the lowest bit: $(X \\oplus 46) \\mathbin{\\&} 1 = X \\mathbin{\\&} 1$.
+- Thus: $\\big( (b \\times 93) \\oplus 46 \\big) \\mathbin{\\&} 1 = b_0$.
+- Inverting with $1 \\oplus$ yields $!b_0$, which evaluates to 1 for even numbers and 0 for odd numbers.
 
 #### Excourse: The 32-Tooth Bicycle Gear (Visualizing De Bruijn Sequences)
 
@@ -5077,7 +5077,7 @@ Visualizing De Bruijn sequences becomes effortless when pictured as a circular b
 The mathematical magic of this specific 32-bit word is that every single 5-bit combination (from \`00000\` up to \`11111\`, representing integers 0 through 31) appears along the circular sequence exactly once without a single repeat or omission.
 
 When an entity isolates its lowest set bit $2^k$, multiplying by $2^k$ is equivalent to rotating the entire gear by $k$ teeth:
-$$\text{hash}(2^k) = (2^k \times \text{0x077CB531u}) \gg 27$$
+$$\\text{hash}(2^k) = (2^k \\times \\text{0x077CB531u}) \\gg 27$$
 
 Shifting right by 27 bits isolates the 5 teeth currently positioned directly under the gear inspection window. Because all 32 combinations are distinct, those 5 bits form a unique, collision-free index between 0 and 31. A tiny 32-byte compile-time array \`SPIRAL\` immediately returns the exact bit position $k$ in a single CPU cycle, completely eliminating slow loops and branch instructions.
 
@@ -5089,39 +5089,39 @@ Mellangan's dynamic day and night cycle (\`src/level/Night.cpp\`) drives celesti
 
 #### Diurnal Solar and Lunar Orbit
 
-$$\theta(t) = \frac{t - 6.0}{24.0} \times 2\pi$$
+$$\\theta(t) = \\frac{t - 6.0}{24.0} \\times 2\\pi$$
 
-$$\mathbf{p}_{\text{sun}}(t) = \big( x_{\text{center}} + R_{\text{sky}} \cos(\theta(t)), \; y_{\text{center}} + R_{\text{sky}} \sin(\theta(t)) \big)$$
+$$\\mathbf{p}_{\\text{sun}}(t) = \\big( x_{\\text{center}} + R_{\\text{sky}} \\cos(\\theta(t)), \\; y_{\\text{center}} + R_{\\text{sky}} \\sin(\\theta(t)) \\big)$$
 
-$$\mathbf{p}_{\text{moon}}(t) = -\mathbf{p}_{\text{sun}}(t)$$
+$$\\mathbf{p}_{\\text{moon}}(t) = -\\mathbf{p}_{\\text{sun}}(t)$$
 
-At $t = 6.0$ h (dawn), $\theta = 0$, so the Sun rises at the horizon ($y = y_c$). At $t = 12.0$ h (noon), $\theta = \pi / 2$, so the Sun peaks at zenith ($y = y_c + R$). The Moon is maintained at exact opposite phase $\theta + \pi$.
+At $t = 6.0$ h (dawn), $\\theta = 0$, so the Sun rises at the horizon ($y = y_c$). At $t = 12.0$ h (noon), $\\theta = \\pi / 2$, so the Sun peaks at zenith ($y = y_c + R$). The Moon is maintained at exact opposite phase $\\theta + \\pi$.
 
 #### Footprint Differential Alpha Erosion
 
 Dynamic footsteps left on snow and grass decay according to:
 
-$$\frac{d\alpha}{dt} = -k_{\text{base}} \cdot \mu_{\text{weather}}$$
+$$\\frac{d\\alpha}{dt} = -k_{\\text{base}} \\cdot \\mu_{\\text{weather}}$$
 
-$$\alpha(t) = \max\big(0, \alpha_0 - k_{\text{base}} \cdot \mu_{\text{weather}} \cdot t\big)$$
+$$\\alpha(t) = \\max\\big(0, \\alpha_0 - k_{\\text{base}} \\cdot \\mu_{\\text{weather}} \\cdot t\\big)$$
 
-Where $\mu_{\text{weather}} = 1.0$ in clear weather, $1.6$ in rain, and $2.8$ in blizzards, ensuring footprints vanish rapidly under harsh atmospheric fronts!
+Where $\\mu_{\\text{weather}} = 1.0$ in clear weather, $1.6$ in rain, and $2.8$ in blizzards, ensuring footprints vanish rapidly under harsh atmospheric fronts!
 
 #### Excourse: The Blizzard Tracker (Dynamic Footprint Longevity)
 
 How does dynamic alpha erosion affect player experience in the wilderness?
 
-When any entity walks over grass or snow, the engine stamps a footprint particle into the ground layer with initial opacity $\alpha_0 = 1.0$. The footprint decays according to:
-$$\alpha(t) = \max(0, 1.0 - k_{\text{base}} \cdot \mu_{\text{weather}} \cdot t)$$
+When any entity walks over grass or snow, the engine stamps a footprint particle into the ground layer with initial opacity $\\alpha_0 = 1.0$. The footprint decays according to:
+$$\\alpha(t) = \\max(0, 1.0 - k_{\\text{base}} \\cdot \\mu_{\\text{weather}} \\cdot t)$$
 
-With base decay rate $k_{\text{base}} = 0.05$ per second:
+With base decay rate $k_{\\text{base}} = 0.05$ per second:
 
-1. **Clear Dawn Weather ($\mu_{\text{weather}} = 1.0$):**
-   $$\text{Lifetime} = \frac{1.0}{0.05 \times 1.0} = 20.0 \text{ seconds}$$
+1. **Clear Dawn Weather ($\\mu_{\\text{weather}} = 1.0$):**
+   $$\\text{Lifetime} = \\frac{1.0}{0.05 \\times 1.0} = 20.0 \\text{ seconds}$$
    Tracks linger on the trail for twenty full seconds. Players can easily spot predator pack movements, track elk through clearing groves, and navigate back to camp by tracing their own steps.
 
-2. **Raging Highland Blizzard ($\mu_{\text{weather}} = 2.8$):**
-   $$\text{Lifetime} = \frac{1.0}{0.05 \times 2.8} \approx 7.1 \text{ seconds}$$
+2. **Raging Highland Blizzard ($\\mu_{\\text{weather}} = 2.8$):**
+   $$\\text{Lifetime} = \\frac{1.0}{0.05 \\times 2.8} \\approx 7.1 \\text{ seconds}$$
    In a heavy snowstorm, tracks vanish almost three times faster. If a sanctuary seeker lags behind or the player loses visual contact for even a few seconds, the whiteout completely swallows the trail. Survival tension rises naturally through mathematical equations without requiring scripted cutscenes.
 
 `,
