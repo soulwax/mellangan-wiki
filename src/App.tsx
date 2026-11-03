@@ -915,13 +915,14 @@ export const App: React.FC = () => {
   }, [activeSection.content]);
 
   return (
-    <div className="min-h-screen bg-dark-950 text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
-      <header className="sticky top-0 z-40 h-[58px] bg-dark-950/98 backdrop-blur-md border-b border-dark-800/90 px-4 lg:px-6 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#07050b] text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
+      <header className="sticky top-0 z-40 h-[58px] bg-[#09070f] border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
         <div className="max-w-[1340px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg bg-dark-900 border border-dark-750 text-slate-300"
+              className="lg:hidden p-2 rounded-lg bg-[#120e1e] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#1a1429] transition-colors"
+              aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
             >
               {isMobileMenuOpen ? (
                 <X className="w-4 h-4" />
@@ -952,7 +953,7 @@ export const App: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <div
-              className="hidden sm:flex items-center bg-dark-900 p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
+              className="hidden sm:flex items-center bg-[#110d1c] p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
               title="Switch article reading typography between Plus Jakarta Sans and Source Serif 4"
             >
               <button
@@ -988,7 +989,7 @@ export const App: React.FC = () => {
             <a
               href="/contribute-basics"
               onClick={(e) => selectChapter("contribute-basics", e)}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-900/90 hover:bg-gold-500/10 border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
               title="Contribution Guide &amp; Dev Toolchain"
             >
               <Wrench className="w-3.5 h-3.5 text-gold-400" />
@@ -999,7 +1000,7 @@ export const App: React.FC = () => {
             <a
               href="/engine-mathematics"
               onClick={(e) => selectChapter("engine-mathematics", e)}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-900/90 hover:bg-indigo-500/10 border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
               title="Game Mathematics, Invariants &amp; Proofs"
             >
               <Calculator className="w-3.5 h-3.5 text-indigo-400" />
@@ -1013,8 +1014,8 @@ export const App: React.FC = () => {
                 onClick={() => setIsTopicsOpen(!isTopicsOpen)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                   isTopicsOpen
-                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/50 shadow-md shadow-gold-500/10"
-                    : "bg-dark-900/90 hover:bg-dark-850 text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
+                    ? "bg-[#1d1630] text-gold-300 border border-gold-500/60 shadow-lg shadow-black"
+                    : "bg-[#110d1c] hover:bg-[#181326] text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
                 }`}
                 aria-expanded={isTopicsOpen}
                 aria-haspopup="true"
@@ -1033,30 +1034,49 @@ export const App: React.FC = () => {
 
               {isTopicsOpen && (
                 <div
-                  className="absolute right-0 top-full mt-2 w-[calc(100vw-24px)] sm:w-[640px] md:w-[720px] max-h-[82vh] overflow-y-auto bg-dark-950/98 backdrop-blur-xl border border-dark-750/90 rounded-2xl shadow-2xl p-4 sm:p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                  className="fixed left-3 right-3 top-[64px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-80px)] overflow-y-auto bg-[#0a0712] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
                   role="menu"
                 >
                   {/* Menu header */}
-                  <div className="flex items-center justify-between pb-3 mb-3.5 border-b border-dark-800">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-gold-400 animate-pulse"></span>
-                      <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-200">
-                        Featured Topics &amp; Interactive Labs
-                      </span>
+                  <div className="flex items-center justify-between p-4 sm:p-5 pb-3 sm:pb-3.5 border-b border-dark-800 bg-[#0e0a19]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-2 h-2 rounded-full bg-gold-400 animate-pulse"></div>
+                      <div>
+                        <div className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
+                          <span>Featured Topics &amp; Labs</span>
+                          <span className="px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px]">
+                            12 Labs Online
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-sans mt-0.5">
+                          Architectural deep-dives and deterministic interactive simulators
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
-                      Press <kbd className="px-1.5 py-0.5 rounded bg-dark-850 border border-dark-700 text-slate-400">Esc</kbd> to close
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
+                        Press <kbd className="px-1.5 py-0.5 rounded bg-dark-850 border border-dark-700 text-slate-400">Esc</kbd>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsTopicsOpen(false)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-dark-800 transition-colors"
+                        title="Close menu"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* 3 Categories Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 bg-[#0a0712]">
                     {FEATURED_TOPIC_GROUPS.map((group) => (
-                      <div key={group.groupName} className="flex flex-col gap-1.5">
-                        <div className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-400 px-1 py-0.5">
-                          {group.groupName}
+                      <div key={group.groupName} className="flex flex-col gap-2">
+                        <div className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-400 px-1 flex items-center justify-between">
+                          <span>{group.groupName}</span>
+                          <span className="text-slate-600 font-normal">({group.topics.length})</span>
                         </div>
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1.5">
                           {group.topics.map((t) => {
                             const IconComponent = t.icon;
                             const isActive = activeSectionId === t.id;
@@ -1068,17 +1088,17 @@ export const App: React.FC = () => {
                                   selectChapter(t.id, e);
                                   setIsTopicsOpen(false);
                                 }}
-                                className={`group p-2 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
+                                className={`group p-2.5 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
                                   isActive
-                                    ? "bg-gold-500/15 border-gold-500/50 shadow-sm"
-                                    : "bg-dark-900/60 hover:bg-dark-850 border-dark-800/80 hover:border-dark-700"
+                                    ? "bg-[#1d1630] border-gold-500/70 shadow-md shadow-black"
+                                    : "bg-[#130f1e] hover:bg-[#1a1428] border-dark-800 hover:border-dark-700"
                                 }`}
                               >
                                 <div
                                   className={`p-1.5 rounded-lg border shrink-0 mt-0.5 transition-colors ${
                                     isActive
-                                      ? "bg-gold-500/20 border-gold-500/40 text-gold-300"
-                                      : "bg-dark-850 border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/30"
+                                      ? "bg-[#271d42] border-gold-500/50 text-gold-300"
+                                      : "bg-[#0a0712] border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/40"
                                   }`}
                                 >
                                   <IconComponent className="w-3.5 h-3.5" />
@@ -1095,12 +1115,12 @@ export const App: React.FC = () => {
                                       {t.title}
                                     </span>
                                     {t.badge && (
-                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold shrink-0">
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/80 font-semibold shrink-0">
                                         {t.badge}
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                  <p className="text-[11px] text-slate-400 group-hover:text-slate-300 truncate mt-0.5">
                                     {t.subtitle}
                                   </p>
                                 </div>
@@ -1113,8 +1133,8 @@ export const App: React.FC = () => {
                   </div>
 
                   {/* Footer link to full index */}
-                  <div className="mt-4 pt-3 border-t border-dark-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
-                    <span className="text-[11px]">32 Chapters across 6 modules</span>
+                  <div className="p-3.5 sm:px-5 border-t border-dark-800 bg-[#0e0a19] flex items-center justify-between text-xs font-mono text-slate-400">
+                    <span className="text-[11px]">{orderedSectionIds.length} Chapters across 6 modules</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -1149,23 +1169,31 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex-1 flex max-w-[1340px] w-full mx-auto">
+      <div className="flex-1 flex max-w-[1440px] w-full mx-auto relative">
+        {/* Mobile menu backdrop */}
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 top-[58px] bg-black/80 z-20 lg:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         <aside
-          className={`fixed lg:sticky top-[58px] z-30 w-72 shrink-0 h-[calc(100vh-58px)] bg-dark-950/98 lg:bg-dark-950/60 border-r border-dark-800/90 flex flex-col transition-transform duration-200 ${
+          className={`fixed lg:sticky top-[58px] z-30 w-72 shrink-0 h-[calc(100vh-58px)] bg-[#09070f] border-r border-dark-800 flex flex-col transition-transform duration-200 ${
             isMobileMenuOpen
               ? "translate-x-0"
               : "-translate-x-full lg:translate-x-0"
           }`}
         >
-          <div className="p-3 border-b border-dark-800/80 bg-dark-950/90 space-y-2">
+          <div className="p-3 border-b border-dark-800 bg-[#09070f] space-y-2">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter 30 chapters, files..."
-                className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
+                placeholder={`Filter ${orderedSectionIds.length} chapters, files...`}
+                className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (
                 <button
@@ -1326,7 +1354,7 @@ export const App: React.FC = () => {
             })}
           </nav>
 
-          <div className="p-2.5 border-t border-dark-800/80 bg-dark-950/90 text-[10px] font-mono text-slate-400">
+          <div className="p-2.5 border-t border-dark-800 bg-[#09070f] text-[10px] font-mono text-slate-400">
             <div className="flex items-center justify-between text-gold-400 font-semibold mb-1">
               <span className="flex items-center gap-1.5">
                 <Terminal className="w-3 h-3" />
@@ -1351,8 +1379,8 @@ export const App: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 px-5 sm:px-8 lg:px-12 py-7">
-          <div className="max-w-[680px] mx-auto">
+        <main className="flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
+          <div className="max-w-[820px] xl:max-w-[860px] mx-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
               <div className="flex items-center gap-1.5 min-w-0">
                 <a
@@ -1682,30 +1710,33 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <aside className="hidden xl:block sticky top-[58px] w-56 shrink-0 h-[calc(100vh-58px)] border-l border-dark-800/70 p-4 overflow-y-auto">
+        <aside className="hidden xl:block sticky top-[58px] w-60 shrink-0 h-[calc(100vh-58px)] border-l border-dark-800 bg-[#09070f] p-4 overflow-y-auto">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-3 flex items-center gap-1.5">
             <Hash className="w-3.5 h-3.5 text-gold-400" />
             <span>On This Page</span>
           </div>
 
-          <div className="space-y-1 border-l border-dark-800 pl-2.5">
-            {activeHeadings.map((h) => (
-              <a
-                key={h.slug}
-                href={`/${activeSection.id}#${h.slug}`}
-                onClick={(e) => scrollToAnchor(h.slug, e)}
-                className={`w-full text-left py-1 transition-colors block truncate ${
-                  activeHash === h.slug
-                    ? "text-gold-300 font-semibold"
-                    : h.level === 4
-                      ? "pl-2.5 text-[11px] font-mono text-slate-400 hover:text-slate-200"
-                      : "text-xs text-slate-200 hover:text-gold-300 font-medium"
-                }`}
-                title={h.text}
-              >
-                {h.text}
-              </a>
-            ))}
+          <div className="space-y-0.5 border-l border-dark-800 pl-2.5">
+            {activeHeadings.map((h) => {
+              const isActive = activeHash === h.slug;
+              return (
+                <a
+                  key={h.slug}
+                  href={`/${activeSection.id}#${h.slug}`}
+                  onClick={(e) => scrollToAnchor(h.slug, e)}
+                  className={`w-full text-left py-1 px-1.5 rounded transition-all block truncate ${
+                    isActive
+                      ? "text-gold-300 font-semibold -ml-[11px] pl-2 border-l-2 border-gold-400 bg-gold-500/10"
+                      : h.level === 4
+                        ? "pl-2.5 text-[11px] font-mono text-slate-400 hover:text-slate-200 hover:bg-dark-850/60"
+                        : "text-xs text-slate-300 hover:text-gold-300 font-medium hover:bg-dark-850/60"
+                  }`}
+                  title={h.text}
+                >
+                  {h.text}
+                </a>
+              );
+            })}
             {activeSection.interactiveComponent && (
               <a
                 href={`/${activeSection.id}#interactive-lab-anchor`}
@@ -1731,14 +1762,13 @@ export const App: React.FC = () => {
         </aside>
       </div>
 
-      <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono">
+      <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono bg-[#09070f]">
         <p>
           Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT •
           SDL3
         </p>
         <p className="mt-1 text-[11px] text-slate-600">
-          Submodule <code className="text-slate-400">./extern/wiki</code> • 25
-          Chapters • 50 Architecture Diagrams • 14 Interactive Simulators
+          Submodule <code className="text-slate-400">./extern/wiki</code> • {orderedSectionIds.length} Chapters • 50+ Architecture Diagrams • 15 Interactive Simulators
         </p>
       </footer>
     </div>

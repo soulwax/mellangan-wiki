@@ -50,7 +50,7 @@
   line-height: 1.84;
   letter-spacing: -0.006em;
   color: #e2e8f0;
-  max-width: 68ch;
+  width: 100%;
 }
 
 .wiki-prose.prose-serif {
@@ -58,6 +58,12 @@
   font-size: 1.045rem; /* 16.7px */
   line-height: 1.86;
   letter-spacing: -0.003em;
+}
+
+.wiki-prose p,
+.wiki-prose ul,
+.wiki-prose ol {
+  max-width: 74ch;
 }
 
 .wiki-prose p {
