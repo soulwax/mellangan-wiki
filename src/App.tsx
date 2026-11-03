@@ -16,7 +16,8 @@ import { CombatDirectorSimulator } from "./components/CombatDirectorSimulator";
 import { GoalAiConcurrencyLab } from "./components/GoalAiConcurrencyLab";
 import { LootAffixSimulator } from "./components/LootAffixSimulator";
 import { GearEventsHudLab } from "./components/GearEventsHudLab";
-import { highlightCodeToHtml } from "./utils/highlightCode";
+import { highlightCodeToHtml, escapeHtml } from "./utils/highlightCode";
+import katex from "katex";
 import {
   Cpu,
   Layers,
@@ -245,6 +246,7 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
 function slugify(raw: string): string {
   return raw
     .replace(/`/g, "")
+    .replace(/\$/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
@@ -261,10 +263,10 @@ function extractHeadings(markdown: string): PageHeading[] {
   const lines = markdown.split("\n");
   for (const line of lines) {
     if (line.startsWith("### ")) {
-      const text = line.slice(4).trim().replace(/`/g, "");
+      const text = line.slice(4).trim().replace(/`/g, "").replace(/\$/g, "");
       out.push({ level: 3, text, slug: slugify(text) });
     } else if (line.startsWith("#### ")) {
-      const text = line.slice(5).trim().replace(/`/g, "");
+      const text = line.slice(5).trim().replace(/`/g, "").replace(/\$/g, "");
       out.push({ level: 4, text, slug: slugify(text) });
     }
   }
@@ -272,16 +274,36 @@ function extractHeadings(markdown: string): PageHeading[] {
 }
 
 function formatInlineMarkdown(text: string): string {
-  return text
+  const inlineCodes: string[] = [];
+  const textWithoutCodes = text.replace(/`([^`\n]+)`/g, (_m, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(
+      `<code class="px-1.5 py-0.5 rounded-md bg-dark-900/95 text-gold-300 border border-dark-750 text-[12.5px] font-mono">${escapeHtml(code)}</code>`,
+    );
+    return `@@INLINE_CODE_${idx}@@`;
+  });
+
+  const withMath = textWithoutCodes.replace(/\$([^\$\n]+?)\$/g, (_m, tex) => {
+    try {
+      return katex.renderToString(tex.trim(), {
+        displayMode: false,
+        throwOnError: false,
+      });
+    } catch {
+      return `<code class="text-rose-400 font-mono">${escapeHtml(tex)}</code>`;
+    }
+  });
+
+  const formatted = withMath
     .replace(
       /\*\*(.*?)\*\*/g,
       '<strong class="text-slate-100 font-semibold">$1</strong>',
     )
-    .replace(/\*(.*?)\*/g, '<em class="text-slate-200 italic">$1</em>')
-    .replace(
-      /`([^`\n]+)`/g,
-      '<code class="px-1.5 py-0.5 rounded-md bg-dark-900/95 text-gold-300 border border-dark-750 text-[12.5px] font-mono">$1</code>',
-    );
+    .replace(/\*(.*?)\*/g, '<em class="text-slate-200 italic">$1</em>');
+
+  return formatted.replace(/@@INLINE_CODE_(\d+)@@/g, (_m, idx) => {
+    return inlineCodes[Number(idx)];
+  });
 }
 
 function renderMarkdownToHtml(markdown: string): string {
@@ -307,11 +329,31 @@ function renderMarkdownToHtml(markdown: string): string {
       const html = `<div class="my-5 rounded-xl overflow-hidden border border-dark-750 bg-[#0a0811] shadow-lg"><div class="px-3.5 py-2 bg-dark-950/90 border-b border-dark-800 flex items-center justify-between text-[11px] font-mono text-slate-400"><div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gold-400/80"></span><span class="font-semibold text-gold-300 uppercase tracking-wider">${label}</span></span><span class="text-slate-600">•</span><span class="text-slate-500">Mellangan Source</span></div><button type="button" data-copy-code="${encodedRaw}" class="px-2 py-0.5 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-gold-500/40 text-[10px] font-mono text-slate-300 hover:text-gold-300 transition-colors">Copy Code</button></div><pre class="py-3.5 px-2 overflow-x-auto text-[13px] font-mono text-slate-200 leading-[1.68]">${highlighted}</pre></div>`;
       const idx = codeBlocks.length;
       codeBlocks.push(html);
-      return `\n@@CODE_BLOCK_${idx}@@\n`;
+      return `\n\n@@CODE_BLOCK_${idx}@@\n\n`;
     },
   );
 
-  const lines = withPlaceholders.split("\n");
+  const mathBlocks: string[] = [];
+  const withMathBlocks = withPlaceholders.replace(
+    /\$\$([\s\S]*?)\$\$/g,
+    (_m, tex) => {
+      let rendered = "";
+      try {
+        rendered = katex.renderToString(tex.trim(), {
+          displayMode: true,
+          throwOnError: false,
+        });
+      } catch {
+        rendered = `<code class="text-rose-400 font-mono">${escapeHtml(tex.trim())}</code>`;
+      }
+      const html = `<div class="my-5 overflow-x-auto py-3 text-center text-slate-100 flex justify-center bg-dark-900/40 rounded-lg border border-dark-800/60 shadow-inner px-4">${rendered}</div>`;
+      const idx = mathBlocks.length;
+      mathBlocks.push(html);
+      return `\n\n@@MATH_BLOCK_${idx}@@\n\n`;
+    },
+  );
+
+  const lines = withMathBlocks.split("\n");
   const out: string[] = [];
   let inUl = false;
   let inOl = false;
@@ -350,6 +392,19 @@ function renderMarkdownToHtml(markdown: string): string {
       flushParagraph();
       closeLists();
       out.push(codeBlocks[Number(codeMatch[1])]);
+      continue;
+    }
+
+    const mathMatch = line.match(/^@@MATH_BLOCK_(\d+)@@$/);
+    if (mathMatch) {
+      flushParagraph();
+      const mathHtml = mathBlocks[Number(mathMatch[1])];
+      if ((inUl || inOl) && out.length > 0 && out[out.length - 1].endsWith("</li>")) {
+        out[out.length - 1] = out[out.length - 1].slice(0, -5) + mathHtml + "</li>";
+      } else {
+        closeLists();
+        out.push(mathHtml);
+      }
       continue;
     }
 
@@ -407,7 +462,7 @@ function renderMarkdownToHtml(markdown: string): string {
       continue;
     }
 
-    const olMatch = rawLine.match(/^\s*\d+\.\s+(.*)$/);
+    const olMatch = rawLine.match(/^\s*(\d+)\.\s+(.*)$/);
     if (olMatch) {
       flushParagraph();
       if (inUl) {
@@ -415,10 +470,11 @@ function renderMarkdownToHtml(markdown: string): string {
         inUl = false;
       }
       if (!inOl) {
-        out.push("<ol>");
+        const startNum = parseInt(olMatch[1], 10);
+        out.push(startNum > 1 ? `<ol start="${startNum}">` : "<ol>");
         inOl = true;
       }
-      out.push(`<li>${formatInlineMarkdown(olMatch[1].trim())}</li>`);
+      out.push(`<li>${formatInlineMarkdown(olMatch[2].trim())}</li>`);
       continue;
     }
 

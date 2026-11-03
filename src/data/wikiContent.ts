@@ -767,7 +767,7 @@ Sense Enemy::sense() const {
 3. **The 113° Forward Sight Cone (\`s.seen\`):**
    Since \`(s.xn, s.yn)\` points from the **enemy to the target**, its negation \`(-s.xn, -s.yn)\` points from the **target to the enemy**. Taking the dot product with the target's unit aim vector \`(p.xAim, p.yAim)\` yields $\\cos(\\theta)$:
    \`-(p.xAim * s.xn + p.yAim * s.yn) > 0.55\`.
-   Because $\\arccos(0.55) \\approx 56.6^\\circ$, \`s.seen\` is \`true\` whenever the enemy stands within \`300 px\` inside a **\`113.2°\` forward vision cone** centered on the player's aim!
+   Because $\\arccos(0.55) \\approx 56.6^{\\circ}$, \`s.seen\` is \`true\` whenever the enemy stands within \`300 px\` inside a **\`113.2°\` forward vision cone** centered on the player's aim!
 
 ---
 
@@ -793,7 +793,7 @@ Mob *Ally::pick() const {
 \`\`\`
 
 - **Leash & Sight Envelope (\`LEASH = 170 px\`, \`SIGHT = 150 px\`):** An ally only engages enemies within \`150 px\` of itself that are also within \`170 px\` of the player. If the player dashes away (\`hx² + hy² > LEASH²\`), \`pick()\` returns \`nullptr\` and the ally immediately breaks off combat to sprint back at \`1.2×\` speed!
-- **Golden-Angle Phyllotaxis Idle Orbit (\`2.39996 rad\`):** When no target is in range, allies do not clump onto a single point; each ally is assigned a monotonic \`slot = nextSlot++\` and orbits the player at \`HOME = 24 px\` using the **golden angle** ($2\\pi(1 - 1/\\varphi) \\approx 2.39996\\text{ rad} \\approx 137.5^\\circ$):
+- **Golden-Angle Phyllotaxis Idle Orbit (\`2.39996 rad\`):** When no target is in range, allies do not clump onto a single point; each ally is assigned a monotonic \`slot = nextSlot++\` and orbits the player at \`HOME = 24 px\` using the **golden angle** ($2\\pi(1 - 1/\\varphi) \\approx 2.39996\\text{ rad} \\approx 137.5^{\\circ}$):
   \`\`\`cpp
   double a = slot * 2.39996 + age * 0.6;
   stride(p.x + std::cos(a) * HOME, p.y + std::sin(a) * HOME * 0.7, def.speed * 1.2f);
@@ -2990,7 +2990,7 @@ On every tick until \`stop > 0 && s.dist < stop && e.cooldown <= 0\`, \`Approach
    double spread = (int(e.seed >> 3 & 7) - 3.5) * 0.14 *
                    std::clamp((s.dist - 50) / 160, 0.0, 1.0);
    \`\`\`
-   Bits \`[5..3]\` of the enemy's seed assign it to one of 8 angular approach lanes spanning $\\pm 3.5 \\times 0.14 = \\pm 0.49\\text{ rad}$ ($\\approx \\pm 28^\\circ$) when \`s.dist >= 210 px\`. As the monster closes from \`210 px\` to \`50 px\`, the spread linearly collapses to \`0°\`, creating natural pincer envelopes that converge directly onto the player at melee range!
+   Bits \`[5..3]\` of the enemy's seed assign it to one of 8 angular approach lanes spanning $\\pm 3.5 \\times 0.14 = \\pm 0.49\\text{ rad}$ ($\\approx \\pm 28^{\\circ}$) when \`s.dist >= 210 px\`. As the monster closes from \`210 px\` to \`50 px\`, the spread linearly collapses to \`0°\`, creating natural pincer envelopes that converge directly onto the player at melee range!
 
 ---
 
@@ -4061,17 +4061,24 @@ Now calculate the parity ($popcount \\pmod 2$) for every 4-bit integer from 0 to
 Reading these parity values from index 0 to index 15 yields: **\`0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0\`**! This is the exact 16-bit binary pattern of \`0x6996u\`. Thus, shifting \`0x6996u\` right by \`(v & 15)\` and masking with \`1\` computes the global parity of \`v\` with zero memory loads and zero branches!
 
 #### Step 3: The Parity Cancellation Theorem
-Why does \`!(fold(n) ^ fold(n >> 1))\` determine whether $n$ is even?
-Let $P(x)$ denote the global parity of an integer $x$:
+
+Why does \`!(fold(n) ^ fold(n >> 1))\` determine whether $n$ is even? Let $P(x)$ denote the global parity of an integer $x$:
+
 $$P(n) = \\bigoplus_{i=0}^{31} b_i = b_0 \\oplus \\bigoplus_{i=1}^{31} b_i$$
+
 Now consider the right-shifted value $n \\gg 1$:
+
 $$P(n \\gg 1) = 0 \\oplus \\bigoplus_{i=1}^{31} b_i = \\bigoplus_{i=1}^{31} b_i$$
+
 When we compute the XOR sum of their parities:
+
 $$P(n) \\oplus P(n \\gg 1) = \\left( b_0 \\oplus \\bigoplus_{i=1}^{31} b_i \\right) \\oplus \\left( \\bigoplus_{i=1}^{31} b_i \\right)$$
+
 By the associativity and commutativity of XOR ($x \\oplus x = 0$ and $x \\oplus 0 = x$):
+
 $$P(n) \\oplus P(n \\gg 1) = b_0 \\oplus 0 = b_0$$
-**Every single bit from 1 through 31 cancels itself out completely!** Only bit 0 survives!
-Negating the result with \`!\` returns \`!b_0\`, which is \`true\` (1) for even numbers and \`false\` (0) for odd numbers.
+
+**Every single bit from 1 through 31 cancels itself out completely!** Only bit 0 survives! Negating the result with \`!\` returns \`!b_0\`, which is \`true\` (1) for even numbers and \`false\` (0) for odd numbers.
 
 ---
 
@@ -4110,7 +4117,7 @@ for (uint32_t i = 0; i < 32; i++)
 Because \`0x077CB531u\` is a De Bruijn cycle, multiplying by any isolated power-of-two bit $2^i$ circularly shifts the 32-bit sequence by $i$ positions. The top 5 bits (\`>> 27\`) uniquely identify the power $i \\in [0..31]$ with zero hash collisions!
 
 #### The Sentinel and Parity Decision
-1. **Sentinel Mask (\`v = n | 0x80000000u\`):** If $n = 0$, $v \\& -v$ would be 0, leading to undefined behavior in table indexing. Or-ing with \`0x80000000u\` (bit 31) guarantees $v \\neq 0$ while leaving bit 0 completely untouched.
+1. **Sentinel Mask (\`v = n | 0x80000000u\`):** If $n = 0$, $v \\mathbin{\\&} -v$ would be 0, leading to undefined behavior in table indexing. Or-ing with \`0x80000000u\` (bit 31) guarantees $v \\neq 0$ while leaving bit 0 completely untouched.
 2. **Two's Complement LSB Isolation (\`v & (~v + 1)\`):** This is the classic bitwise operation \`v & -v\`, which strips away all set bits except the lowest one ($2^k$).
 3. **Parity Check:**
    - If $n$ is **odd**, bit 0 is set $\\implies LSB = 2^0 = 1$. The trailing zero count is $0 \\implies SPIRAL[...] = 0$.
@@ -4141,20 +4148,31 @@ struct Rebecca : Charlotte<Rebecca> {
 C++20's \`std::rotr(n, 8)\` performs a circular right rotation of 8 bits. The lowest byte of $n$ (byte 0) wraps around into the highest byte position (bits $24..31$). Right-shifting by 24 (\`>> 24\`) isolates this original low byte ($b \\in [0..255]$).
 
 #### Step 2: The Affine Galois Parity Proof
+
 Inside the compile-time lambda, each byte is transformed by:
-$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\& \\ 1 \\Big)$$
+
+$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 \\Big)$$
+
 Why is this mathematically guaranteed to yield the even/odd parity of $b$?
+
 1. **Multiplication by $0x5D$ (93):**
    In binary arithmetic modulo 2, $93 = 2 \\times 46 + 1 \\equiv 1 \\pmod 2$.
    Because 93 is odd, $\\gcd(93, 2) = 1$. Multiplication by an odd scalar in $\\mathbb{Z}_2$ is an automorphism (invertible permutation):
+
    $$(b \\times 93) \\pmod 2 \\equiv (b \\pmod 2) \\times (93 \\pmod 2) \\equiv b \\times 1 \\equiv b \\pmod 2$$
+
    The parity of $b$ is perfectly conserved!
+
 2. **XOR with $0x2E$ (46):**
    In binary, $46 = 00101110_2$. Notice that its least significant bit is **0** ($46 \\equiv 0 \\pmod 2$).
    XORing any integer with an even number does not alter its lowest bit:
-   $$(X \\oplus 46) \\ \\& \\ 1 = (X \\ \\& \\ 1) \\oplus (46 \\ \\& \\ 1) = (X \\ \\& \\ 1) \\oplus 0 = X \\ \\& \\ 1$$
+
+   $$(X \\oplus 46) \\mathbin{\\&} 1 = (X \\mathbin{\\&} 1) \\oplus (46 \\mathbin{\\&} 1) = (X \\mathbin{\\&} 1) \\oplus 0 = X \\mathbin{\\&} 1$$
+
    Therefore:
-   $$\\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\& \\ 1 = b \\ \\& \\ 1 = b_0$$
+
+   $$\\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 = b \\mathbin{\\&} 1 = b_0$$
+
 3. **Inversion with $1 \\oplus$:**
    - If $b$ is even, $b_0 = 0 \\implies 1 \\oplus 0 = 1$.
    - If $b$ is odd, $b_0 = 1 \\implies 1 \\oplus 1 = 0$.
