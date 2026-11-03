@@ -1268,7 +1268,9 @@ export const App: React.FC = () => {
                         <span>Interactive Systems Laboratory Online</span>
                       </div>
                       <div className="text-[11px] text-slate-400">
-                        Manipulate runtime parameters below to observe deterministic state transitions, memory layout, and engine math.
+                        Manipulate runtime parameters below to observe
+                        deterministic state transitions, memory layout, and
+                        engine math.
                       </div>
                     </div>
                   </div>
