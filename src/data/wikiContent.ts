@@ -4662,6 +4662,22 @@ $$d(\\mathbf{p}, \\mathbf{t}) = \\|\\mathbf{p} - \\mathbf{t}\\|_2 = \\sqrt{(p_x 
 - **Tether Limit:** If distance $d(\\mathbf{p}, \\mathbf{t}) > 260.0$ px, the leash snaps into \`Mode::Lost\`.
 - **Catch-Up Invariant:** The $1.05\\times$ speed factor allows followers to keep pace with a running hero, while the $50.0$ px/s cap prevents unnatural speed surges.
 
+#### Excourse: The Orbit Explosion Test (Explicit Euler vs. Semi-Implicit Euler)
+
+Why does standard explicit forward Euler fail in games? Consider an entity in circular orbit or oscillating on a spring with restoring acceleration $\\mathbf{a} = -\\omega^2 \\mathbf{x}$.
+
+Under standard explicit forward Euler, position updates using old velocity:
+$$\\mathbf{x}_{t+1} = \\mathbf{x}_t + \\mathbf{v}_t \\Delta t$$
+$$\\mathbf{v}_{t+1} = \\mathbf{v}_t + \\mathbf{a}_t \\Delta t = \\mathbf{v}_t - \\omega^2 \\mathbf{x}_t \\Delta t$$
+
+Because the displacement vector $\\mathbf{v}_t \\Delta t$ is tangent to the circle and therefore perpendicular to inward acceleration, every single step overshoots slightly outward. Total energy multiplies by $(1 + \\omega^2 \\Delta t^2)$ on every tick. Within just 20 seconds of simulation (1,200 ticks at 60 Hz), an entity spirals wildly off-screen as energy blows up to infinity!
+
+Under semi-implicit Euler, we update velocity first, then update position using that fresh velocity:
+$$\\mathbf{v}_{t+1} = \\mathbf{v}_t - \\omega^2 \\mathbf{x}_t \\Delta t$$
+$$\\mathbf{x}_{t+1} = \\mathbf{x}_t + \\mathbf{v}_{t+1} \\Delta t$$
+
+Substituting $\\mathbf{v}_{t+1}$ into $\\mathbf{x}_{t+1}$ introduces an automatic corrective term $-\\omega^2 \\Delta t^2 \\mathbf{x}_t$ that pulls position back inward. Instead of spiraling away, the trajectory traces a closed, bounded ellipse. Total physical energy oscillates within tight bounds forever, providing stability across hours of continuous gameplay with zero memory overhead.
+
 ---
 
 ### 2. Vision Cones & Vector Geometry Without Trigonometry (\`Plans.cpp\`)
@@ -4710,6 +4726,19 @@ $$\\hat{\\mathbf{d}}^{\\perp} = (-d_y, d_x) \\implies \\mathbf{d} \\cdot \\hat{\
 
 Blending this perpendicular vector with the pursuit direction produces smooth sliding around trees and rocks without pathfinding grid allocations.
 
+#### Excourse: The 1,000-Mob Benchmark (Trigonometry vs. The Dot Product)
+
+What actually happens inside modern CPU hardware during an AI vision check?
+
+Calling \`std::atan2(dy, dx)\` relies on iterative polynomial approximations (such as CORDIC or multi-term Chebyshev expansions). On x86-64 and ARM processors, each call typically costs 50 to 80 clock cycles. Worse, comparing the returned angle with the entity facing direction requires circular wrap-around branches (\`if (diff < -PI) diff += 2*PI\`), which trigger CPU branch mispredictions costing another 15 to 20 cycles whenever targets cross boundaries.
+
+With 256 active enemies checking targets 60 times every second, trigonometry burns over 1.2 million expensive transcendental evaluations per second, heating up mobile cores and stealing precious frame time from rendering.
+
+The vector dot product formula:
+$$f_x d_x + f_y d_y \\ge 0.5519 \\cdot \\sqrt{d_x^2 + d_y^2}$$
+
+replaces transcendental pipelines with basic arithmetic: two multiplications, one addition, and one reciprocal square root instruction (\`rsqrtss\` or \`vrsqrtsd\`). Using SIMD, four mob vision checks evaluate concurrently inside a single 128-bit vector register in just 3 to 4 clock cycles, leaving 98% of the AI frame budget available for high-level tactical goal selection.
+
 ---
 
 ### 3. Singularity-Free Quadratic Attenuation in Lighting & Audio
@@ -4748,6 +4777,25 @@ Here $d$ is Euclidean distance and $R$ is the falloff radius.
    For large distances ($d \\gg R$):
    $$A(d, R) \\approx \\frac{R^2}{d^2}$$
    At distance $d = 2R$, power drops to 20% ($1 / (1 + 4)$). At $d = 3R$, power drops to 10% ($1 / (1 + 9)$).
+
+#### Excourse: The "Torch in the Face" Experiment
+
+Why does real-world physics break down when copied directly into a game engine?
+
+Suppose the hero walks right up to a campfire or torch with source intensity 100, bringing distance $d$ down to 0.05 pixels. Under standard physical $1 / d^2$ falloff:
+$$I(0.05) = \\frac{100}{(0.05)^2} = \\frac{100}{0.0025} = 40,000$$
+
+The received brightness explodes to 400 times normal. The 8-bit color channels clamp violently to maximum white (\`#FFFFFF\`), blowing out texture detail and washing out the entire screen. Even worse, if distance reaches $d = 0.0$, the hardware encounters division by zero, resulting in IEEE 754 floating-point infinity (\`+inf\`) or \`NaN\`, which poisons neighboring tiles in lightfield blurs.
+
+Spatial audio suffers an identical crisis: an explosion spawning directly on the listener coordinate produces ear-shattering digital clipping when scaled by $1 / d^2$.
+
+Under Mellangan's singularity-free quadratic formula:
+$$A(d, R) = \\frac{1.0}{1.0 + (d / R)^2}$$
+
+At distance $d = 0$, the formula simplifies cleanly:
+$$A(0, R) = \\frac{1.0}{1.0 + 0} = 1.0$$
+
+The brightness never exceeds 100% emitter power, division by zero is mathematically impossible, and the zero first derivative creates a smooth, gentle plateau at the core. Players enjoy visually convincing illumination and clean 32-voice audio without blowout artifacts or epsilon hacks.
 
 ---
 
@@ -4789,6 +4837,32 @@ $$\\text{Mitigation}(r) = 1 - (1 - r)^2 = 2r - r^2$$
 **Why Mellangan caps resistance at $75\\%$ (\`std::min(r, 0.75f)\`):**
 A seemingly modest $75\\%$ resistance rating in reality allows only **$6.25\\%$** of full burn, bleed, and poison damage to penetrate. If resistance were allowed to reach $90\\%$, incoming damage would drop to $(0.10)^2 = 1\\%$, making players completely invulnerable to environmental boss mechanics!
 
+#### Excourse: The "Why 75% Resistance Stops 94% Damage" Combat Lab
+
+To see why quadratic mitigation changes player survival so drastically, consider an actual in-game boss encounter:
+
+A dungeon boss casts a Toxic Mire that inflicts a raw base DoT of 100 damage per second for 10 seconds.
+$$\\text{Base Total Damage} = 100 \\text{ DPS} \\times 10 \\text{ s} = 1,000 \\text{ damage}$$
+
+Here is what happens to three different characters:
+
+1. **Unarmored Character ($r = 0.00$):**
+   - DPS taken: $100 \\times (1 - 0) = 100 \\text{ DPS}$
+   - Duration: $10 \\times (1 - 0) = 10 \\text{ s}$
+   - Total damage: $100 \\times 10 = 1,000$ (Full lethal damage, character dies)
+
+2. **Mid-Tier Armored Character ($r = 0.50$):**
+   - DPS taken: $100 \\times (1 - 0.50) = 50 \\text{ DPS}$
+   - Duration: $10 \\times (1 - 0.50) = 5 \\text{ s}$
+   - Total damage: $50 \\times 5 = 250$ (Damage drops to $(0.50)^2 = 25\\%$, 75% mitigated!)
+
+3. **Endgame Resistance Cap ($r = 0.75$):**
+   - DPS taken: $100 \\times (1 - 0.75) = 25 \\text{ DPS}$
+   - Duration: $10 \\times (1 - 0.75) = 2.5 \\text{ s}$
+   - Total damage: $25 \\times 2.5 = 62.5$ (Damage drops to $(0.25)^2 = 6.25\\%$, 93.75% mitigated!)
+
+The player at 75% resistance takes only 62.5 damage instead of 1,000 damage. Because both the burning rate and the duration shrink together, increasing resistance from 50% to 75% cuts remaining damage by another factor of four (from 250 down to 62.5). This quadratic compounding gives defensive item crafting tremendous impact in high-tier delves.
+
 ---
 
 ### 5. Hyperbolic Diminishing Returns Magic Find (\`LootSim.cpp\`)
@@ -4814,6 +4888,25 @@ $$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times C}{\\text{raw} 
 3. **Horizontal Asymptote (Hard Upper Bound):**
    $$\\lim_{\\text{raw} \\to \\infty} \\frac{\\text{raw} \\times 250}{\\text{raw} + 250} = 250.0\\%$$
    No matter how many hundreds of MF points a player stacks, effective Magic Find can **never exceed $250\\%$**!
+
+#### Excourse: The "1,000 Hours of Farming" Economy Simulation
+
+What happens when an action RPG implements linear Magic Find instead of a hyperbolic curve?
+
+In games with linear drop scaling, stacking +500% MF multiplies rare drop rates by a full $6\\times$. Min-maxing guilds farm thousands of unique items per day, causing catastrophic inflation in the player trade economy and rendering normal crafting materials worthless. To compensate, game designers are forced to slash base drop chances to microscopic lottery levels (such as 0.0001%), punishing casual players who cannot stack maximum gear affixes.
+
+Mellangan solves this dilemma with the hyperbolic saturation curve:
+$$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times 250}{\\text{raw} + 250}$$
+
+1. **Early Progression is Fair and Rewarding:**
+   A player equipping their first charm with +30% MF receives:
+   $$\\text{Effective MF}(30) = \\frac{30 \\times 250}{280} \\approx 26.8\\%$$
+   Early points translate almost 1:1 into higher quality drops without penalty.
+
+2. **Diminishing Returns Prevent Runaway Loot Floods:**
+   A dedicated endgame farmer stacking +750% MF across all item slots receives:
+   $$\\text{Effective MF}(750) = \\frac{750 \\times 250}{1000} = 187.5\\%$$
+   Even with twenty times the gear investment of a casual player, drop rates reach less than triple base odds. The loot hunt remains exhilarating, relic drops retain their legendary status, and the settlement trade economy never collapses.
 
 ---
 
@@ -4886,6 +4979,38 @@ $$\text{Operations} = 3 \times (N + 4096) = O(N)$$
 
 Zero comparisons, zero branch mispredictions, and deterministic execution time regardless of scene distribution!
 
+#### Excourse: Walking the Bits Under the Microscope
+
+To understand why float bit twiddling is necessary, examine how four representative floating-point numbers look in raw hexadecimal IEEE 754 notation:
+
+- $+10.0f \implies \text{0x41200000}$ (Sign bit 0, Exponent \`10000010\`, Fraction \`010000...\`)
+- $+0.0f \implies \text{0x00000000}$ (Sign bit 0, Exponent \`00000000\`, Fraction \`000000...\`)
+- $-0.0f \implies \text{0x80000000}$ (Sign bit 1, Exponent \`00000000\`, Fraction \`000000...\`)
+- $-10.0f \implies \text{0xC1200000}$ (Sign bit 1, Exponent \`10000010\`, Fraction \`010000...\`)
+
+If we feed these raw bits directly into an unsigned integer sort, the order becomes completely inverted:
+$$\text{0x00000000} (+0.0f) < \text{0x41200000} (+10.0f) < \text{0x80000000} (-0.0f) < \text{0xC1200000} (-10.0f)$$
+
+Negative ten is treated as the largest number, and negative zero is treated as greater than positive ten!
+
+Now apply \`orderedBits(f)\`:
+\`\`\`cpp
+uint32_t orderedBits(float f) {
+    uint32_t u = std::bit_cast<uint32_t>(f);
+    return u ^ (uint32_t(int32_t(u) >> 31) | 0x80000000u);
+}
+\`\`\`
+
+1. For $+10.0f$, \`int32_t(u) >> 31\` yields \`0x0\`. Mask is \`0x80000000\`. Flipping bit 31 gives \`0xC1200000\`.
+2. For $+0.0f$, mask is \`0x80000000\`. Flipping bit 31 gives \`0x80000000\`.
+3. For $-0.0f$, \`int32_t(u) >> 31\` yields \`0xFFFFFFFF\`. Mask is \`0xFFFFFFFF\`. Flipping all 32 bits gives \`0x7FFFFFFF\`.
+4. For $-10.0f$, mask is \`0xFFFFFFFF\`. Inverting \`0xC1200000\` bitwise gives \`0x3EDFFFFF\`.
+
+Now look at the transformed unsigned integers:
+$$\text{0x3EDFFFFF} (-10.0f) < \text{0x7FFFFFFF} (-0.0f) < \text{0x80000000} (+0.0f) < \text{0xC1200000} (+10.0f)$$
+
+The unsigned values match the mathematical ordering $-10.0 < -0.0 \le +0.0 < +10.0$ with zero branching, allowing Radix Sort to process continuous scene depths in linear time.
+
 ---
 
 ### 7. Discrete Parity Calculus & De Bruijn Spirals (\`Ouroboros.hpp\`)
@@ -4941,6 +5066,21 @@ $$f(b) = 1 \oplus \Big( \big( (b \times 0x5D) \oplus 0x2E \big) \ \&\ 1 \Big)$$
 - Thus: $\big( (b \times 93) \oplus 46 \big) \& 1 = b_0$.
 - Inverting with $1 \oplus$ yields $!b_0$, which evaluates to 1 for even numbers and 0 for odd numbers.
 
+#### Excourse: The 32-Tooth Bicycle Gear (Visualizing De Bruijn Sequences)
+
+Visualizing De Bruijn sequences becomes effortless when pictured as a circular bicycle gear with 32 teeth, where each tooth is stamped with a 0 or 1 from generator constant \`0x077CB531u\`:
+
+\`\`\`text
+0x077CB531 = 0000 0111 0111 1100 1011 0101 0011 0001 (binary)
+\`\`\`
+
+The mathematical magic of this specific 32-bit word is that every single 5-bit combination (from \`00000\` up to \`11111\`, representing integers 0 through 31) appears along the circular sequence exactly once without a single repeat or omission.
+
+When an entity isolates its lowest set bit $2^k$, multiplying by $2^k$ is equivalent to rotating the entire gear by $k$ teeth:
+$$\text{hash}(2^k) = (2^k \times \text{0x077CB531u}) \gg 27$$
+
+Shifting right by 27 bits isolates the 5 teeth currently positioned directly under the gear inspection window. Because all 32 combinations are distinct, those 5 bits form a unique, collision-free index between 0 and 31. A tiny 32-byte compile-time array \`SPIRAL\` immediately returns the exact bit position $k$ in a single CPU cycle, completely eliminating slow loops and branch instructions.
+
 ---
 
 ### 8. Diurnal Celestial Mechanics & Weather Decay
@@ -4966,6 +5106,24 @@ $$\frac{d\alpha}{dt} = -k_{\text{base}} \cdot \mu_{\text{weather}}$$
 $$\alpha(t) = \max\big(0, \alpha_0 - k_{\text{base}} \cdot \mu_{\text{weather}} \cdot t\big)$$
 
 Where $\mu_{\text{weather}} = 1.0$ in clear weather, $1.6$ in rain, and $2.8$ in blizzards, ensuring footprints vanish rapidly under harsh atmospheric fronts!
+
+#### Excourse: The Blizzard Tracker (Dynamic Footprint Longevity)
+
+How does dynamic alpha erosion affect player experience in the wilderness?
+
+When any entity walks over grass or snow, the engine stamps a footprint particle into the ground layer with initial opacity $\alpha_0 = 1.0$. The footprint decays according to:
+$$\alpha(t) = \max(0, 1.0 - k_{\text{base}} \cdot \mu_{\text{weather}} \cdot t)$$
+
+With base decay rate $k_{\text{base}} = 0.05$ per second:
+
+1. **Clear Dawn Weather ($\mu_{\text{weather}} = 1.0$):**
+   $$\text{Lifetime} = \frac{1.0}{0.05 \times 1.0} = 20.0 \text{ seconds}$$
+   Tracks linger on the trail for twenty full seconds. Players can easily spot predator pack movements, track elk through clearing groves, and navigate back to camp by tracing their own steps.
+
+2. **Raging Highland Blizzard ($\mu_{\text{weather}} = 2.8$):**
+   $$\text{Lifetime} = \frac{1.0}{0.05 \times 2.8} \approx 7.1 \text{ seconds}$$
+   In a heavy snowstorm, tracks vanish almost three times faster. If a sanctuary seeker lags behind or the player loses visual contact for even a few seconds, the whiteout completely swallows the trail. Survival tension rises naturally through mathematical equations without requiring scripted cutscenes.
+
 `,
     mermaidCharts: [
       {
