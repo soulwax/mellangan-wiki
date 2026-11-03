@@ -19,6 +19,7 @@ import { GearEventsHudLab } from "./components/GearEventsHudLab";
 import { RefugeeEscortWatchtowerLab } from "./components/RefugeeEscortWatchtowerLab";
 import { AudioMixerVoiceStealingLab } from "./components/AudioMixerVoiceStealingLab";
 import { SkyWeatherFootprintsLab } from "./components/SkyWeatherFootprintsLab";
+import { EngineMathLab } from "./components/EngineMathLab";
 import { highlightCodeToHtml, escapeHtml } from "./utils/highlightCode";
 import katex from "katex";
 import {
@@ -44,6 +45,7 @@ import {
   Workflow,
   Link2,
   Check,
+  Calculator,
 } from "lucide-react";
 
 interface NavTreeItem {
@@ -208,6 +210,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
       {
         id: "ouroboros-deep-dive",
         shortTitle: "How Ouroboros Really Works",
+      },
+      {
+        id: "engine-mathematics",
+        shortTitle: "Game Math, Invariants & Proofs",
       },
     ],
   },
@@ -899,6 +905,15 @@ export const App: React.FC = () => {
             </a>
 
             <a
+              href="/engine-mathematics"
+              onClick={(e) => selectChapter("engine-mathematics", e)}
+              className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/40 text-xs font-mono text-indigo-300 font-semibold transition-colors"
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              <span>Game Math</span>
+            </a>
+
+            <a
               href="/campaign-settlements-delves"
               onClick={(e) => selectChapter("campaign-settlements-delves", e)}
               className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-mono text-amber-300 font-semibold transition-colors"
@@ -1356,6 +1371,9 @@ export const App: React.FC = () => {
                 )}
                 {activeSection.interactiveComponent === "weather" && (
                   <SkyWeatherFootprintsLab />
+                )}
+                {activeSection.interactiveComponent === "engine-math" && (
+                  <EngineMathLab />
                 )}
               </div>
             )}

@@ -36,7 +36,8 @@ export interface WikiSection {
     | "gearevents"
     | "refugee"
     | "audiomixer"
-    | "weather";
+    | "weather"
+    | "engine-math";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -4584,5 +4585,439 @@ flowchart TD
       },
     ],
     interactiveComponent: "refugee",
+  },
+  {
+    id: "engine-mathematics",
+    title:
+      "32. The Mathematical Foundations of Mellangan: Proofs, Attenuation, Spatial Topology & Bit Calculus",
+    category: "core",
+    summary:
+      "A dedicated mathematical compendium of the algorithms and analytical models powering Mellangan: 60 Hz fixed-step Euler kinematics, 113° sight-cone dot products, singularity-free inverse quadratic attenuation, (1-r)² quadratic status mitigation, hyperbolic Magic Find diminishing returns, IEEE 754 monotonic orderedBits bit twiddling, and De Bruijn B(2, 5) Galois fields.",
+    sourceFiles: [
+      "src/level/Level.cpp",
+      "src/entity/enemy/ai/Plans.cpp",
+      "src/render/Screen.cpp",
+      "src/campaign/Townsfolk.cpp",
+      "src/item/loot/LootSim.cpp",
+      "src/other/Ouroboros.hpp",
+    ],
+    content: `
+### The Mathematical Ethos of Mellangan
+
+A high-performance C++20 game engine cannot rely on ad-hoc heuristics or floating-point approximations in its inner loops. In **Mellangan**, every system—from camera depth sorting and spatial collision hashing to sound falloff, vision cones, combat mitigation, and compile-time bit twiddling—is anchored in strict discrete mathematics, analytical geometry, and numerical invariants:
+
+\`\`\`
+       [ Kinematics & Integration ]       [ Discrete Bit Calculus ]
+         DT = 1.0 / 60.0 (Euler)             SWAR 32b Flip & Galois
+                    |                                   |
+                    v                                   v
+         [ Analytical Geometry ] ---------> [ Continuous Attenuation ]
+          113° Sight-Cone Dot                  A(d) = 1 / (1 + (d/R)²)
+                    |                                   |
+                    v                                   v
+         [ Topological Sorting ]            [ Damage Scaling Calculus ]
+           orderedBits(f) & Radix               DoT = Base × (1 - r)²
+\`\`\`
+
+---
+
+### 1. Fixed-Step 60 Hz Kinematics & Integration (\`DT = 1.0 / 60.0\`)
+
+Mellangan separates the simulation tick rate from the display render refresh rate. The global simulation timestep is strictly constant:
+
+$$\\Delta t = \\frac{1}{60} \\approx 0.016667\\text{ s}$$
+
+#### Semi-Implicit Euler Integration
+
+Rather than using explicit forward Euler (which suffers from numerical energy gain in oscillatory systems) or full Verlet integration (which requires storing historical positions $\\mathbf{x}_{t-\\Delta t}$ across thousands of mob slabs), Mellangan implements **symplectic / semi-implicit Euler integration**:
+
+$$\\mathbf{v}_{t+\\Delta t} = \\mathbf{v}_t + \\frac{\\mathbf{F}_t}{m} \\Delta t$$
+
+$$\\mathbf{x}_{t+\\Delta t} = \\mathbf{x}_t + \\mathbf{v}_{t+\\Delta t} \\Delta t$$
+
+Because the updated velocity $\\mathbf{v}_{t+\\Delta t}$ is immediately used to calculate position $\\mathbf{x}_{t+\\Delta t}$, this integrator preserves phase-space volume (symplectic property), providing remarkable numerical stability for physical collisions, projectile arcs, and repulsive spatial separation at zero heap cost.
+
+#### Linear & Exponential Drag Damping
+
+To model air resistance and ground friction without calling transcendental exponential functions (\`std::exp\`) in entity hot loops, linear velocity damping is applied per tick:
+
+$$\\mathbf{v}_{t+1} = \\mathbf{v}_t \\cdot \\max(0, 1 - \\mu \\cdot \\Delta t)$$
+
+Where $\\mu$ is the drag coefficient. Over a continuous interval $t$, repeated application approximates exponential decay:
+
+$$\\lim_{\\Delta t \\to 0} (1 - \\mu \\Delta t)^{t / \\Delta t} = e^{-\\mu t}$$
+
+#### Adaptive Leash Kinematics (\`Townsfolk.cpp\`)
+
+Civilian sanctuary seekers and allied companions implement a bounded pursuit equation that dynamically scales with player velocity:
+
+$$v_{\\text{trail}} = \\min(50.0, v_{\\text{player}} \\times 1.05)$$
+
+$$d(\\mathbf{p}, \\mathbf{t}) = \\|\\mathbf{p} - \\mathbf{t}\\|_2 = \\sqrt{(p_x - t_x)^2 + (p_y - t_y)^2}$$
+
+- **Tether Constraint:** If $d(\\mathbf{p}, \\mathbf{t}) > 260.0$, the leash snaps into \`Mode::Lost\`.
+- **Catch-Up Invariant:** The $1.05\\times$ speed factor guarantees that a briskly running hero does not outpace the follower, while the $50.0$ px/s ceiling prevents unnatural speed bursts.
+
+---
+
+### 2. Vision Cones & Vector Geometry Without Trigonometry (\`Plans.cpp\`)
+
+In typical AI systems, checking whether a hostile entity sees a target requires computing \`std::atan2(dy, dx)\` followed by angular difference checks. In Mellangan, computing inverse trigonometric functions for 256 mobs across 4 parallel thread workers would stall the CPU pipeline with high latency (typically 50-100 clock cycles per \`atan2\`).
+
+Instead, Mellangan uses **pure 2D vector dot products**.
+
+#### The Sight-Cone Dot Product Theorem
+
+Let the observer be situated at position $\\mathbf{x}_o$ facing a normalized unit vector $\\hat{\\mathbf{f}} = (\\cos \\phi, \\sin \\phi)$. Let a candidate target quarry be at position $\\mathbf{x}_t$.
+
+1. Construct the relative displacement vector:
+   $$\\mathbf{d} = \\mathbf{x}_t - \\mathbf{x}_o = (x_t - x_o, y_t - y_o)$$
+
+2. Compute the Euclidean distance:
+   $$\\|\\mathbf{d}\\| = \\sqrt{d_x^2 + d_y^2}$$
+
+3. By the geometric definition of the vector dot product:
+   $$\\hat{\\mathbf{f}} \\cdot \\mathbf{d} = \\|\\hat{\\mathbf{f}}\\| \\cdot \\|\\mathbf{d}\\| \\cos \\theta = \\|\\mathbf{d}\\| \\cos \\theta$$
+
+   $$\\cos \\theta = \\frac{\\hat{\\mathbf{f}} \\cdot \\mathbf{d}}{\\|\\mathbf{d}\\|} = \\frac{f_x d_x + f_y d_y}{\\sqrt{d_x^2 + d_y^2}}$$
+
+4. The target lies within the entity's field-of-view cone of aperture $\\Phi = 113^{\\circ}$ if and only if $|\\theta| \\le \\frac{\\Phi}{2} = 56.5^{\\circ}$. Because the cosine function is strictly monotonically decreasing on the interval $[0, \\pi]$:
+
+   $$\\cos \\theta \\ge \\cos(56.5^{\\circ}) \\approx 0.5519$$
+
+5. Clearing the denominator yields the single comparison:
+   $$\\hat{\\mathbf{f}} \\cdot \\mathbf{d} \\ge 0.5519 \\cdot \\|\\mathbf{d}\\|$$
+
+\`\`\`cpp
+// src/entity/enemy/ai/Plans.cpp
+bool inSight(double ox, double oy, double fx, double fy, double tx, double ty) {
+    double dx = tx - ox, dy = ty - oy;
+    double d2 = dx * dx + dy * dy;
+    if (d2 > 240.0 * 240.0) return false;
+    double d = std::sqrt(d2);
+    return (fx * dx + fy * dy) >= 0.5519 * d;
+}
+\`\`\`
+
+**Performance Implication:** Zero transcendental functions, zero branching lookup tables, and fully auto-vectorizable with SSE/AVX SIMD instructions!
+
+#### Orthogonal Tangential Avoidance Steering
+
+When an entity detects an obstacle along its forward vector $\\mathbf{d}$, it computes an orthogonal avoidance tangent $\\hat{\\mathbf{d}}^{\\perp}$ by swapping components:
+
+$$\\hat{\\mathbf{d}}^{\\perp} = (-d_y, d_x) \\implies \\mathbf{d} \\cdot \\hat{\\mathbf{d}}^{\\perp} = -d_x d_y + d_y d_x = 0$$
+
+Blending the pursuit vector with $\\hat{\\mathbf{d}}^{\\perp}$ produces smooth, natural flocking around trees, ruins, and stone barriers without pathfinding grid allocations.
+
+---
+
+### 3. Singularity-Free Quadratic Attenuation in Lighting & Audio
+
+In classical physics, radiation flux (both photon luminosity and acoustic wave power) obeys the inverse-square law:
+
+$$I(d) \\propto \\frac{1}{d^2}$$
+
+#### The Physical Singularity Dilemma
+
+In a discrete coordinate 2D game engine, naive $\\frac{1}{d^2}$ attenuation poses a fatal computational problem:
+
+$$\\lim_{d \\to 0} \\frac{1}{d^2} = +\\infty$$
+
+When an entity stands directly on top of a torch ($d = 0$), raw inverse-square produces division by zero, float overflow (\`+inf\`), or extreme visual blowouts that require artificial epsilon clamping ($\frac{1}{d^2 + \\epsilon}$).
+
+#### Mellangan's Normalized Quadratic Model
+
+Both \`LightField::cast\` (\`src/render/Screen.cpp\`) and \`Audio::playAt\` (\`src/audio/Audio.cpp\`) implement the **singularity-free inverse quadratic attenuation function**:
+
+$$A(d, R) = \\frac{1.0}{1.0 + \\left(\\frac{d}{R}\\right)^2}$$
+
+Where $d$ is Euclidean distance and $R$ is the nominal falloff radius.
+
+#### Mathematical Properties:
+1. **Bounded Range:** For all distances $d \\in [0, \\infty)$:
+   $$A(0, R) = \\frac{1.0}{1.0 + 0} = 1.0$$
+   $$A(d, R) \\in (0, 1.0]$$
+   The function is mathematically guaranteed never to exceed $1.0$ or produce division by zero!
+
+2. **The Half-Power Boundary:** At distance $d = R$:
+   $$A(R, R) = \\frac{1.0}{1.0 + 1^2} = \\frac{1}{2} = 0.50$$
+   $R$ represents the exact distance at which light intensity and sound volume drop to **$50\\%$ of their emitter source power**!
+
+3. **Smooth Gradient (Zero First Derivative at Origin):**
+   $$\\frac{dA}{dd} = -\\frac{2d}{R^2 \\left(1 + (d/R)^2\\right)^2} \\implies \\left.\\frac{dA}{dd}\\right|_{d=0} = 0$$
+   Because the first derivative vanishes at $d = 0$, point lights exhibit a soft, natural radial plateau at their center rather than a harsh, sharp crease!
+
+4. **Long-Distance Quadratic Behavior:**
+   For large distances ($d \\gg R$):
+   $$A(d, R) \\approx \\frac{R^2}{d^2}$$
+   At distance $d = 2R$, $A(2R) = \\frac{1}{1 + 4} = 0.20$ ($80\\%$ reduction). At $d = 3R$, $A(3R) = \\frac{1}{1 + 9} = 0.10$ ($90\\%$ reduction).
+
+---
+
+### 4. Quadratic Resistance Calculus: The $(1 - r)^2$ Mitigation Theorem
+
+In standard RPGs, armor resistance $r \\in [0, 1]$ simply scales incoming damage linearly: $D_{\\text{taken}} = D_{\\text{raw}} \\cdot (1 - r)$.
+
+In Mellangan's status effect system (\`src/entity/mob/Status.cpp\`), resistance acts upon **two distinct dimensions simultaneously**:
+
+1. **Damage Rate Scaling:** Peak Damage per Second (DPS) is reduced by $(1 - r)$:
+   $$\\text{DPS}(r) = \\text{DPS}_0 \\cdot (1 - r)$$
+
+2. **Ailment Duration Scaling:** The total lifetime duration of the ailment is reduced by $(1 - r)$:
+   $$T(r) = T_0 \\cdot (1 - r)$$
+
+#### Derivation of Total Damage Over Time (DoT)
+
+Because total damage is the definite integral of the damage rate over the ailment duration:
+
+$$\\text{Total DoT}(r) = \\int_0^{T(r)} \\text{DPS}(r) \\, dt = \\text{DPS}(r) \\times T(r)$$
+
+$$\\text{Total DoT}(r) = \\big( \\text{DPS}_0 \\cdot (1 - r) \\big) \\times \\big( T_0 \\cdot (1 - r) \\big) = (\\text{DPS}_0 \\times T_0) \\cdot (1 - r)^2$$
+
+$$\\text{Total DoT}(r) = \\text{Base DoT} \\cdot (1 - r)^2$$
+
+#### The Resistance Cap Theorem ($r_{\\max} = 0.75$)
+
+Because damage scales as $(1 - r)^2$, effective mitigation follows a convex quadratic progression:
+
+$$\\text{Mitigation}(r) = 1 - (1 - r)^2 = 2r - r^2$$
+
+| Resistance $r$ | Damage Multiplier $(1 - r)^2$ | Effective Mitigation | Real-World Combat Impact |
+|:---|:---|:---|:---|
+| **$0.00$ ($0\\%$)** | $(1.00)^2 = 1.0000$ | **$0.00\\%$** | Raw unarmored damage |
+| **$0.25$ ($25\\%$)** | $(0.75)^2 = 0.5625$ | **$43.75\\%$** | Nearly half of all DoT neutralized |
+| **$0.50$ ($50\\%$)** | $(0.50)^2 = 0.2500$ | **$75.00\\%$** | Three-quarters of all DoT eliminated |
+| **$0.75$ ($75\\%$)** | $(0.25)^2 = 0.0625$ | **$93.75\\%$** | **$93.75\\%$ Effective Damage Mitigation!** |
+
+**Why Mellangan caps resistance at $75\\%$ (\`level.vendor.discount = 0.25f\`):**
+A seemingly modest $75\\%$ resistance rating in reality allows only **$6.25\\%$** of full burn, bleed, and poison damage to penetrate. If resistance were allowed to reach $90\\%$, incoming damage would drop to $(0.10)^2 = 1\\%$, making players completely invulnerable to environmental boss mechanics!
+
+---
+
+### 5. Hyperbolic Diminishing Returns Magic Find (\`LootSim.cpp\`)
+
+In ARPG itemization (\`src/item/loot/\`), players can stack Magic Find (MF) affixes across their weapon, charms, off-hand, and armor. If Magic Find increased drop rates linearly, endgame characters would see hundreds of unique and relic items per hour, collapsing the economy.
+
+Mellangan uses a **hyperbolic rational saturation function**:
+
+$$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times C}{\\text{raw} + C}, \\quad C = 250$$
+
+#### Analytical Properties:
+
+1. **Initial Unit Slope (No Penalty for Beginners):**
+   $$\\frac{d(\\text{Effective MF})}{d\\text{raw}} = \\frac{C (\\text{raw} + C) - \\text{raw} \\cdot C}{(\\text{raw} + C)^2} = \\frac{C^2}{(\\text{raw} + C)^2}$$
+
+   $$\\left.\\frac{d(\\text{Effective MF})}{d\\text{raw}}\\right|_{\\text{raw}=0} = \\frac{C^2}{C^2} = 1.0$$
+   For low MF values ($0\\% \\dots 50\\%$), every percentage point of raw gear MF translates into a full $1.0\\%$ increase in effective drop quality!
+
+2. **The Half-Saturation Constant ($C = 250$):**
+   $$\\text{Effective MF}(250) = \\frac{250 \\times 250}{250 + 250} = \\frac{62500}{500} = 125.0\\%$$
+   At $250\\%$ raw MF, the return rate is exactly half of raw investment.
+
+3. **Horizontal Asymptote (Hard Upper Bound):**
+   $$\\lim_{\\text{raw} \\to \\infty} \\frac{\\text{raw} \\times 250}{\\text{raw} + 250} = 250.0\\%$$
+   No matter how many hundreds of MF points a player stacks, effective Magic Find can **never exceed $250\\%$**!
+
+---
+
+### 6. Floating-Point Monotonic Transform: \`orderedBits(f)\`
+
+The most critical mathematical challenge in Mellangan's zero-comparison rendering pipeline is sorting entities by their continuous Y-coordinate ($y \\in \\mathbb{R}$) using an integer **Radix Sort**.
+
+#### The IEEE 754 Representation Problem
+
+An IEEE 754 32-bit single-precision floating point number consists of:
+- 1 Sign bit $s$ (bit 31)
+- 8 Exponent bits $e$ (bits 30..23, biased by 127)
+- 23 Mantissa / Fraction bits $m$ (bits 22..0)
+
+$$f = (-1)^s \\cdot 2^{e - 127} \\cdot \\left(1 + \\sum_{i=1}^{23} m_i 2^{-i}\\right)$$
+
+When interpreted directly as an unsigned 32-bit integer (\`std::bit_cast<uint32_t>(f)\`):
+- Positive numbers ($s = 0$) already have integer order: $0.0 < 1.0 < 100.0 \\implies \\text{bits}(0.0) < \\text{bits}(1.0) < \\text{bits}(100.0)$.
+- **Negative numbers ($s = 1$) have their order completely inverted!** Because the sign bit is 1, all negative numbers appear larger than positive numbers ($u \\ge \\text{0x80000000u}$). Furthermore, $-100.0$ has a larger exponent than $-1.0$, meaning $\\text{bits}(-100.0) > \\text{bits}(-1.0)$, the exact reverse of numerical ordering!
+
+#### The Mellangan Monotonic Invariant Function
+
+To allow Radix Sort to sort continuous Y-coordinates with zero comparisons, \`src/render/Screen.cpp\` transforms the raw float bits via:
+
+\`\`\`cpp
+uint32_t orderedBits(float f) {
+    uint32_t u = std::bit_cast<uint32_t>(f);
+    return u ^ (uint32_t(int32_t(u) >> 31) | 0x80000000u);
+}
+\`\`\`
+
+$$\\text{orderedBits}(f) = u \\oplus \\Big( (u \\gg_{\\text{arith}} 31) \\lor \\text{0x80000000u} \\Big)$$
+
+#### Formal Proof of Monotonicity:
+
+1. **Case A: $f \\ge 0$ (Non-Negative Numbers):**
+   The sign bit is $0$.
+   Arithmetic right shift of a non-negative integer preserves the zero sign bit: \`int32_t(u) >> 31 == 0\`.
+   The bitwise mask becomes:
+   $$\\text{mask} = 0 \\lor \\text{0x80000000u} = \\text{0x80000000u}$$
+   XORing $u$ with $\\text{0x80000000u}$ flips **strictly bit 31**, leaving bits $0..30$ completely unchanged:
+   $$\\text{orderedBits}(f) = u \\oplus \\text{0x80000000u} = u + \\text{0x80000000u}$$
+   This maps the positive float domain $[+0.0, +\\infty)$ monotonically into the unsigned integer interval:
+   $$[\\text{0x80000000u}, \\text{0xFFFFFFFFu}]$$
+
+2. **Case B: $f < 0$ (Strictly Negative Numbers):**
+   The sign bit is $1$.
+   Arithmetic right shift of a negative integer propagates the sign bit across all 32 bits: \`int32_t(u) >> 31 == -1\` (\`0xFFFFFFFFu\`).
+   The bitwise mask becomes:
+   $$\\text{mask} = \\text{0xFFFFFFFFu} \\lor \\text{0x80000000u} = \\text{0xFFFFFFFFu}$$
+   XORing $u$ with $\\text{0xFFFFFFFFu}$ inverts **every single one of the 32 bits** (one's complement):
+   $$\\text{orderedBits}(f) = u \\oplus \\text{0xFFFFFFFFu} = \\sim u$$
+   Inverting all bits reverses the inverted IEEE 754 exponent magnitude, mapping the negative float domain $(-\\infty, -0.0]$ monotonically into the unsigned integer interval:
+   $$[\\text{0x00000000u}, \\text{0x7FFFFFFFu}]$$
+
+3. **Conclusion:**
+   For any two IEEE 754 floating point numbers $a, b \\in \\mathbb{R}$:
+   $$a < b \\iff \\text{orderedBits}(a) < \\text{orderedBits}(b)$$
+   The transformation is a **strictly monotonic bijection** preserving total ordering over all normal and subnormal real numbers!
+
+#### 3-Pass 12-Bit LSD Radix Sort Complexity
+
+Mellangan packs the scene sort key into a 64-bit integer:
+
+$$\\text{Key} = (\\text{layer} \\ll 56) \\mathbin{|} (\\text{orderedBits}(y) \\ll 24) \\mathbin{|} (\\text{seq} \\mathbin{\\&} \\text{0x00FFFFFF})$$
+
+Three passes of 12-bit Least Significant Digit (LSD) Radix Sort with $2^{12} = 4096$ histogram buckets sort all $N$ entities:
+
+$$\\text{Operations} = 3 \\times (N + 4096) = O(N)$$
+
+Zero comparisons, zero branch mispredictions, and deterministic execution time regardless of scene distribution!
+
+---
+
+### 7. Discrete Parity Calculus & De Bruijn Spirals (\`Ouroboros.hpp\`)
+
+In \`src/other/Ouroboros.hpp\`, Mellangan demonstrates compile-time bit twiddling by verifying integer parity ($n \\pmod 2 == 0$) without using the modulo operator \`%\`.
+
+#### The Parity Cancellation Identity (\`Gray\`)
+
+Let $P(x)$ denote the global XOR parity (population count modulo 2) of an integer $x$:
+
+$$P(n) = \\bigoplus_{i=0}^{31} b_i = b_0 \\oplus \\bigoplus_{i=1}^{31} b_i$$
+
+Consider the shifted value $n \\gg 1$, where bit $i$ occupies position $i-1$:
+
+$$P(n \\gg 1) = 0 \\oplus \\bigoplus_{i=1}^{31} b_i = \\bigoplus_{i=1}^{31} b_i$$
+
+Computing the XOR sum of their parities:
+
+$$P(n) \\oplus P(n \\gg 1) = \\left( b_0 \\oplus \\bigoplus_{i=1}^{31} b_i \\right) \\oplus \\left( \\bigoplus_{i=1}^{31} b_i \\right)$$
+
+By the associativity and commutativity of XOR ($x \\oplus x = 0$ and $x \\oplus 0 = x$):
+
+$$P(n) \\oplus P(n \\gg 1) = b_0 \\oplus 0 = b_0$$
+
+Every bit from 1 through 31 cancels out pairwise, leaving strictly bit 0! Negating with \`!\` returns \`!b_0\`, which is \`true\` for even numbers and \`false\` for odd numbers.
+
+#### The De Bruijn $B(2, 5)$ Multiplier (\`Bruijn\`)
+
+A binary De Bruijn sequence of order $k=5$ contains every possible 5-bit pattern exactly once as a contiguous circular substring of length $2^5 = 32$.
+
+Mellangan uses the canonical generator **\`0x077CB531u\`**:
+\`\`\`text
+0x077CB531 = 0000 0111 0111 1100 1011 0101 0011 0001 (binary)
+\`\`\`
+
+1. Two's complement LSB isolation:
+   $$\\text{LSB}(v) = v \\ \\&\\ (-v) = 2^k$$
+
+2. Multiplying $2^k$ by \`0x077CB531u\` left-shifts the sequence by $k$ positions:
+   $$\\text{hash}(2^k) = (2^k \\times \\text{0x077CB531u}) \\gg 27$$
+
+3. Because the sequence is De Bruijn, the top 5 bits (\`>> 27\`) uniquely identify the trailing zero count $k \\in [0..31]$ with zero hash collisions!
+
+#### Affine Galois Field Inversion in $\\mathbb{Z}_2$ (\`Rebecca\`)
+
+Inside \`Rebecca\`, each byte is transformed by:
+
+$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\ \\&\\ 1 \\Big)$$
+
+- $0x5D = 93 = 2 \\times 46 + 1 \\equiv 1 \\pmod 2$. Multiplication by an odd scalar is an automorphism in $\\mathbb{Z}_2$:
+  $$(b \\times 93) \\pmod 2 \\equiv b \\times 1 \\equiv b \\pmod 2$$
+- $0x2E = 46$ is even ($46 \\equiv 0 \\pmod 2$), so $(X \\oplus 46) \\& 1 = X \\& 1$.
+- Thus: $\\big( (b \\times 93) \\oplus 46 \\big) \\& 1 = b_0$.
+- Inverting with $1 \\oplus$ yields $!b_0$, proving that the affine mapping perfectly preserves and inverts parity!
+
+---
+
+### 8. Diurnal Celestial Mechanics & Weather Decay
+
+Mellangan's dynamic day/night system (\`src/level/Night.cpp\`) drives celestial bodies and footprint persistence via continuous parametric functions:
+
+#### Diurnal Solar/Lunar Orbit
+
+$$\\theta(t) = \\frac{t - 6.0}{24.0} \\times 2\\pi$$
+
+$$\\mathbf{p}_{\\text{sun}}(t) = \\big( x_{\\text{center}} + R_{\\text{sky}} \\cos(\\theta(t)), \\; y_{\\text{center}} + R_{\\text{sky}} \\sin(\\theta(t)) \\big)$$
+
+$$\\mathbf{p}_{\\text{moon}}(t) = -\\mathbf{p}_{\\text{sun}}(t)$$
+
+At $t = 6.0$ h (dawn), $\\theta = 0 \\implies$ Sun rises at the horizon ($y = y_c$). At $t = 12.0$ h (noon), $\\theta = \\pi / 2 \\implies$ Sun peaks at zenith ($y = y_c + R$). The Moon is maintained at exact antipodal phase $\\theta + \\pi$.
+
+#### Footprint Differential Alpha Erosion
+
+Dynamic footsteps left on snow and grass decay according to:
+
+$$\\frac{d\\alpha}{dt} = -k_{\\text{base}} \\cdot \\mu_{\\text{weather}}$$
+
+$$\\alpha(t) = \\max\\big(0, \\alpha_0 - k_{\\text{base}} \\cdot \\mu_{\\text{weather}} \\cdot t\\big)$$
+
+Where $\\mu_{\\text{weather}} = 1.0$ in clear weather, $1.6$ in rain, and $2.8$ in blizzards, ensuring footprints vanish rapidly under harsh atmospheric fronts!
+`,
+    mermaidCharts: [
+      {
+        title: "The Mathematical Architecture of Mellangan",
+        chart: `
+flowchart TD
+    classDef math fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef sort fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef combat fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef bit fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Kinematics["Fixed-Step Kinematics<br/>DT = 1/60 (Semi-Implicit Euler)<br/>v = min(50, v_player * 1.05)"]:::math
+    Sight["Vision Geometry<br/>u · v >= cos(56.5°)<br/>Zero-Trigonometry Hot Loops"]:::math
+
+    Sort["Floating-Point Bijective Transform<br/>orderedBits(f) = u ^ (u>>31 | 0x80000000)<br/>3-Pass 12-Bit LSD Radix Sort O(N)"]:::sort
+    Atten["Singularity-Free Attenuation<br/>A(d) = 1.0 / (1.0 + (d/R)²)<br/>LightField & 32-Voice Audio"]:::combat
+
+    Combat["Quadratic Mitigation Theorem<br/>DPS * Duration = Base * (1-r)²<br/>75% Resist Cap = 93.75% Mitigation"]:::combat
+    MF["Hyperbolic Diminishing Returns<br/>Eff MF = (MF * 250) / (MF + 250)<br/>Asymptotic Ceiling 250%"]:::combat
+
+    Bit["Discrete Bit Twiddling<br/>Gray Parity Cancellation b0<br/>De Bruijn B(2, 5) 0x077CB531u Multiplier<br/>Affine Galois Field Z₂"]:::bit
+
+    Kinematics & Sight --> Sort
+    Atten & Combat --> MF
+    Sort & Combat --> Bit
+`,
+      },
+      {
+        title: "Comparative Mitigation Curve: Linear vs Quadratic (1-r)²",
+        chart: `
+flowchart LR
+    classDef lin fill:#181524,stroke:#ef4444,stroke-width:2px,color:#f8fafc;
+    classDef quad fill:#181524,stroke:#10b981,stroke-width:2px,color:#f8fafc;
+
+    L0["r = 0%<br/>100% Taken"]:::lin
+    L25["r = 25%<br/>75% Taken"]:::lin
+    L50["r = 50%<br/>50% Taken"]:::lin
+    L75["r = 75%<br/>25% Taken"]:::lin
+
+    Q0["r = 0%<br/>100% Taken"]:::quad
+    Q25["r = 25%<br/>56.25% Taken (-43.75%)"]:::quad
+    Q50["r = 50%<br/>25.00% Taken (-75.00%)"]:::quad
+    Q75["r = 75% (Cap)<br/>6.25% Taken (-93.75%!)"]:::quad
+
+    L0 --> L25 --> L50 --> L75
+    Q0 --> Q25 --> Q50 --> Q75
+`,
+      },
+    ],
+    interactiveComponent: "engine-math",
   },
 ];
