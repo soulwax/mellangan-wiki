@@ -14,16 +14,17 @@ async function sleep(ms) {
 
 export async function capturePage({ targetUrl, targetHeading, outputFilename }) {
   const outputFile = path.join(outputDir, outputFilename);
-  console.log(`\nCapturing '${targetHeading || "Page Top"}' from ${targetUrl}...`);
+  const port = 9200 + Math.floor(Math.random() * 500);
+  console.log(`\nCapturing '${targetHeading || "Page Top"}' on port ${port} from ${targetUrl}...`);
 
   const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
   const chrome = spawn(chromePath, [
     "--headless=new",
     "--no-sandbox",
     "--disable-gpu",
-    "--remote-debugging-port=9222",
+    `--remote-debugging-port=${port}`,
     "--window-size=1600,2200",
-    `--user-data-dir=${path.join(process.env.TEMP || "C:\\Temp", "chrome_cdp_" + Date.now())}`,
+    `--user-data-dir=${path.join(process.env.TEMP || "C:\\Temp", "chrome_cdp_" + Date.now() + "_" + port)}`,
     targetUrl,
   ]);
 
@@ -31,7 +32,7 @@ export async function capturePage({ targetUrl, targetHeading, outputFilename }) 
   for (let i = 0; i < 30; i++) {
     await sleep(400);
     try {
-      const res = await fetch("http://127.0.0.1:9222/json/list");
+      const res = await fetch(`http://127.0.0.1:${port}/json/list`);
       const list = await res.json();
       const page = list.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
       if (page) {
@@ -109,21 +110,16 @@ export async function capturePage({ targetUrl, targetHeading, outputFilename }) 
   await sleep(500);
 }
 
-// Standalone execution: capture section 1 and section 8
+// Standalone execution: capture sections
 if (process.argv[1]?.endsWith("capture-live-screen.js")) {
   (async () => {
     try {
       await capturePage({
         targetUrl: "https://mel.bluesix.dev/engine-mathematics#",
-        targetHeading: "1. Fixed-Step 60 Hz Kinematics",
-        outputFilename: "math_section1_rendered_live.png",
+        targetHeading: "10. Swarm Pathfinding & Steering",
+        outputFilename: "math_section10_rendered_live.png",
       });
-      await capturePage({
-        targetUrl: "https://mel.bluesix.dev/engine-mathematics#",
-        targetHeading: "Diurnal Celestial Mechanics",
-        outputFilename: "math_section8_rendered_live.png",
-      });
-      console.log("\nAll live verification screenshots captured successfully.");
+      console.log("\nLive verification screenshot for Section 10 captured successfully.");
       process.exit(0);
     } catch (err) {
       console.error("Capture failure:", err);

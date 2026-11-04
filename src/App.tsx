@@ -276,7 +276,7 @@ const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
       {
         id: "engine-mathematics",
         title: "Game Math & Invariants",
-        subtitle: "8 Mathematical Models & Proofs",
+        subtitle: "10 Mathematical Models & Proofs",
         icon: Calculator,
         badge: "LAB",
       },

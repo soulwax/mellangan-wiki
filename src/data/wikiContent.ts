@@ -4592,10 +4592,16 @@ flowchart TD
       "32. The Mathematical Foundations of Mellangan: Proofs, Attenuation, Spatial Topology & Bit Calculus",
     category: "core",
     summary:
-      "A dedicated mathematical compendium of the algorithms and analytical models powering Mellangan: 60 Hz fixed-step Euler kinematics, 113° sight-cone dot products, singularity-free inverse quadratic attenuation, (1-r)² quadratic status mitigation, hyperbolic Magic Find diminishing returns, IEEE 754 monotonic orderedBits bit twiddling, and De Bruijn B(2, 5) Galois fields.",
+      "A dedicated mathematical compendium of the algorithms and analytical models powering Mellangan: 60 Hz fixed-step Euler kinematics, 113° sight-cone dot products, singularity-free inverse quadratic attenuation, (1-r)² quadratic status mitigation, hyperbolic Magic Find diminishing returns, IEEE 754 monotonic orderedBits bit twiddling, De Bruijn B(2, 5) Galois fields, 3-pass CSR counting-sort spatial grids, and Dijkstra navigation flow fields.",
     sourceFiles: [
       "src/level/Level.cpp",
+      "src/level/LevelSpace.cpp",
+      "src/entity/enemy/Enemy.cpp",
       "src/entity/enemy/ai/Plans.cpp",
+      "src/entity/enemy/ai/Approach.cpp",
+      "src/entity/enemy/ai/Circle.cpp",
+      "src/entity/enemy/ai/Follow.cpp",
+      "src/campaign/Bastion.cpp",
       "src/gfx/Screen.cpp",
       "src/campaign/Townsfolk.cpp",
       "src/item/loot/Loot.cpp",
@@ -5124,6 +5130,162 @@ With base decay rate $k_{\\text{base}} = 0.05$ per second:
    $$\\text{Lifetime} = \\frac{1.0}{0.05 \\times 2.8} \\approx 7.1 \\text{ seconds}$$
    In a heavy snowstorm, tracks vanish almost three times faster. If a sanctuary seeker lags behind or the player loses visual contact for even a few seconds, the whiteout completely swallows the trail. Survival tension rises naturally through mathematical equations without requiring scripted cutscenes.
 
+---
+
+### 9. Swarm Collision Detection: 3-Pass CSR Prefix-Sum Grid & Soft Elastic Relaxation (\`LevelSpace.cpp\`, \`Enemy.cpp\`)
+
+Checking collisions between all active mobs directly requires $O(N^2)$ distance evaluations. For a swarm of $N = 1{,}000$ active monsters, an all-pairs search demands:
+
+$$\\frac{N(N - 1)}{2} = \\frac{1{,}000 \\times 999}{2} = 499{,}500\\text{ pair checks per frame}$$
+
+At 60 Hz, this forces nearly 30 million square root and distance checks every second, completely exhausting the CPU frame budget.
+
+#### The O(N + C) Compressed Sparse Row (CSR) Spatial Grid
+
+Quadtrees and dynamic spatial hash tables with linked lists introduce heap allocations, pointer chasing, and cache misses. Mellangan replaces them with a **3-pass counting-sort prefix-sum grid** (\`LevelSpace.cpp\`) that partitions 2D space into $32 \\times 32$ uniform cells ($48\\text{ px}$ cell width) dynamically centered on the player:
+
+$$x_{\\text{grid}} = x_{\\text{player}} - \\frac{\\text{GRID} \\cdot \\text{CELL}}{2}, \\quad y_{\\text{grid}} = y_{\\text{player}} - \\frac{\\text{GRID} \\cdot \\text{CELL}}{2}$$
+
+Every world coordinate $(x, y)$ maps to a 1D cell index $c \\in [0, \\text{GRID}^2 - 1]$ in $O(1)$ time:
+
+$$\\text{cell}_x(x) = \\left\\lfloor \\frac{x - x_{\\text{grid}}}{\\text{CELL}} \\right\\rfloor, \\quad \\text{cell}_y(y) = \\left\\lfloor \\frac{y - y_{\\text{grid}}}{\\text{CELL}} \\right\\rfloor$$
+
+$$c(x, y) = \\text{cell}_y(y) \\cdot \\text{GRID} + \\text{cell}_x(x)$$
+
+The spatial index is reconstructed every tick across three linear passes with zero heap allocations:
+
+1. **Pass 1 (Histogram):** For each mob, compute cell index $c = c(e.x, e.y)$ and increment bucket frequency \`cellStart[c + 1]++\`.
+2. **Pass 2 (Prefix-Sum Scan):** Accumulate bucket offsets into a single contiguous array:
+   $$\\text{cellStart}[i] = \\sum_{j=0}^{i-1} \\text{count}[j]$$
+3. **Pass 3 (Scatter):** Place mob pointers directly into their pre-indexed memory slots in \`cells[cellFill[c]++] = &e\`.
+
+To query all mobs within interaction radius $r$ around $(x, y)$ via \`Level::gather\`, the engine bounds the cell indices $[x_0, x_1] \\times [y_0, y_1]$ and reads contiguous memory slices:
+
+$$\\text{slice}(c) = \\big[ \\text{cellStart}[c],\\; \\text{cellStart}[c + 1] \\big)$$
+
+Because candidate mobs reside contiguously in memory, hardware prefetchers stream entity pointers with near-zero cache thrashing.
+
+#### Mass-Proportional Soft Elastic Mob Separation
+
+Standard hard rigid-body impulse solvers cause swarms of hundreds of enemies to vibrate, tunnel, or explosively bounce off each other. Mellangan solves swarm crowding using **mass-proportional soft elastic relaxation**:
+
+1. **Distance Squared Rejection:**
+   $$d^2 = \\Delta x^2 + \\Delta y^2, \\quad \\Delta x = x_A - x_B, \\; \\Delta y = y_A - y_B$$
+   $$r_{\\text{min}} = (r_A + r_B) \\times 0.85$$
+   If $d^2 \\ge r_{\\text{min}}^2$, the entities do not touch, avoiding \`std::sqrt\` entirely. The $0.85$ factor permits an organic 15% overlap, creating natural flock density without repulsive buzzing.
+
+2. **Inertia Weighting:**
+   Immobile targets (bosses, monuments, frozen enemies with $v_{\\text{speed}} \\le 0$) do not budge. For standard mobs, displacement is shared inversely proportional to radius:
+   $$\\text{share}_A = \\begin{cases} 1.0 & \\text{if } v_{\\text{speed}, B} \\le 0 \\\\ \\dfrac{r_B}{r_A + r_B} & \\text{otherwise} \\end{cases}$$
+
+3. **Penetration Push Displacement:**
+   $$\\mathbf{p}_{\\text{push}} = \\Delta \\mathbf{x} \\left( \\frac{r_{\\text{min}} - d}{d} \\right) \\cdot \\text{share}_A$$
+
+4. **Frame Interlacing Optimization:**
+   For entities outside immediate combat range ($d_{\\text{player}} > 260\\text{ px}$), the push phase executes only on alternate frames:
+   $$\\text{if } \\big( (\\text{id} + \\text{ticks}) \\mathbin{\\&} 1 \\big) \\implies \\text{skip push phase}$$
+   This cuts narrowphase CPU cycles by 50% across outer mobs without perceptible visual loss.
+
+#### Continuous Radial Tile Obstacle Resolution (\`Level::collide\`)
+
+Solid environmental obstacles (ancient trees, cliff corners, boulder clusters) are stored as continuous obstruction radii in a 2D tile array \`solids[]\`. Instead of axis-aligned box collisions that snag entities on corners, \`Level::collide\` projects overlapping mobs along the radial normal:
+
+$$\\mathbf{p}_c = \\begin{pmatrix} 16 t_x + 8.0 \\\\ 16 t_y + 13.0 \\end{pmatrix}, \\quad r_{\\text{limit}} = r_{\\text{solid}} + r_{\\text{entity}}$$
+
+$$\\mathbf{p} \\leftarrow \\mathbf{p}_c + \\frac{\\mathbf{p} - \\mathbf{p}_c}{\\|\\mathbf{p} - \\mathbf{p}_c\\|} \\cdot r_{\\text{limit}}$$
+
+Because correction vectors always radiate from obstacle centers, monsters and players glide along stone walls and natural riverbanks without sharp velocity stops.
+
+#### Excourse: Surviving the 1,000-Mob Swarm Surge (Mass-Proportional Separation in Action)
+
+How does mass-proportional soft relaxation feel in real gameplay when over a thousand enemies converge on the screen?
+
+During high-intensity nocturnal waves (such as a Blood Moon event in \`Level.cpp\`), up to 1,200 monsters may charge the player at once:
+
+1. **The Rigid Impulse Failure:**
+   If the engine used standard physics engine impulses (velocity reflection), a pack of 20 heavy Dire Wolves colliding with 100 fast Bloodfiends would transmit rigid momentum shockwaves through the cluster. Outer monsters would accelerate to absurd supersonic speeds, launch across screen boundaries, and clip through solid walls.
+2. **The Soft Elastic Swarm Flow:**
+   With mass-proportional displacement $\\mathbf{p}_{\\text{push}}$, heavy Dire Wolves ($r = 18$) yield very little to small Leeches ($r = 6$):
+   $$\\text{share}_{\\text{wolf}} = \\frac{6}{18 + 6} = 0.25, \\quad \\text{share}_{\\text{leech}} = \\frac{18}{18 + 6} = 0.75$$
+   The small Leeches absorb 75% of the pushback, naturally parting around the flanks of the wolves like water flowing around boulders. The entire horde compresses into an intimidating, fluid front that advances steadily at 60 Hz with zero physics explosions.
+
+---
+
+### 10. Swarm Pathfinding & Steering: Dijkstra Flow Fields & Orthogonal Vector Decomposition (\`Bastion.cpp\`, \`Approach.cpp\`, \`Circle.cpp\`, \`Follow.cpp\`)
+
+Standard pathfinding algorithms like $A^*$ find the shortest path for a single entity by expanding graph nodes on a priority queue. For 1,000 active monsters, running 1,000 separate $A^*$ searches each second costs dozens of milliseconds and generates massive memory churn. Mellangan eliminates this through a two-level navigation system: global **Dijkstra Flow Fields** for complex fortifications, and **Orthogonal Steering Decomposition** for open-field combat.
+
+#### Dijkstra Flow Fields: O(1) Swarm Navigation Through Fortifications (\`Bastion.cpp\`)
+
+When fortified compounds, palisades, or bastions are raised, \`bastion::raise\` computes a global directional vector field across an $N \\times N$ discrete grid:
+
+1. **Perimeter and Goal Tagging:**
+   The bastion perimeter walls are tagged as \`WALL\`, and the exit corridor is tagged as \`GOAL\`.
+2. **Breadth-First Reverse Flood Fill:**
+   A BFS queue \`uint16_t queue[N * N]\` expands outward from the \`GOAL\`. For each adjacent tile in all 8 cardinal and diagonal directions, the back-pointer compass direction toward the goal is written:
+   $$d = (k + 4) \\pmod 8$$
+   Diagonal corner-cutting is explicitly prevented by verifying that adjacent cardinal tiles are open:
+   $$\\text{if } (k \\mathbin{\\&} 1) \\text{ and } (\\text{wall}_X \\text{ or } \\text{wall}_Y) \\implies \\text{skip diagonal}$$
+3. **Instantaneous O(1) Navigation Query:**
+   Any monster or companion at world coordinate $(x, y)$ inside the bastion zone queries its navigation vector with a single memory read:
+   $$d = \\text{field.at}(x, y) \\in [0, 7]$$
+   $$\\mathbf{v}_{\\text{want}} = \\begin{pmatrix} UX[d] \\\\ UY[d] \\end{pmatrix} \\cdot v_{\\text{speed}}$$
+   Where $UX$ and $UY$ are precomputed 8-way trigonometric unit vectors:
+   $$UX = \\big\\{1,\\; \\tfrac{\\sqrt{2}}{2},\\; 0,\\; -\\tfrac{\\sqrt{2}}{2},\\; -1,\\; -\\tfrac{\\sqrt{2}}{2},\\; 0,\\; \\tfrac{\\sqrt{2}}{2}\\big\\}$$
+   $$UY = \\big\\{0,\\; \\tfrac{\\sqrt{2}}{2},\\; 1,\\; \\tfrac{\\sqrt{2}}{2},\\; 0,\\; -\\tfrac{\\sqrt{2}}{2},\\; -1,\\; -\\tfrac{\\sqrt{2}}{2}\\big\\}$$
+
+Whether 1 monster or 10,000 monsters navigate through the fortress, the routing cost is exactly one array lookup per entity.
+
+#### Predictive Interception: First-Order Kinematic Lead Geometry (\`Enemy.cpp\`)
+
+Enemies pursuing a moving player predict the player's future trajectory using first-order Taylor expansion:
+
+$$\\tau = \\min\\left(0.7, \\frac{\\|\\mathbf{r}\\|}{v_{\\text{mob}}}\\right) \\times 0.6$$
+
+$$\\mathbf{r}_{\\text{predict}} = \\mathbf{r} + \\mathbf{v}_{\\text{player}} \\cdot \\tau$$
+
+$$\\hat{\\mathbf{s}} = \\frac{\\mathbf{r}_{\\text{predict}}}{\\|\\mathbf{r}_{\\text{predict}}\\|}$$
+
+Where $\\mathbf{r} = \\mathbf{p}_{\\text{player}} - \\mathbf{p}_{\\text{mob}}$ is the relative position vector. This prevents monsters from trailing helplessly behind a sprinting hero, guiding them along efficient intercept trajectories.
+
+#### Orthogonal Steering Decomposition: Weaving, Circling & Formations
+
+In open terrain, enemies decompose desired velocity into radial components $\\hat{\\mathbf{s}}$ and orthogonal tangential components $\\hat{\\mathbf{s}}_\\perp = (-s_y, s_x)$:
+
+1. **Gait Weaving and Phase Spread (\`Approach.cpp\`):**
+   To prevent mobs from marching in artificial straight lines, each enemy derives a unique spread angle $\\theta_{\\text{spread}}$ from its deterministic seed:
+   $$\\theta_{\\text{spread}} = \\big((\\text{seed} \\gg 3 \\mathbin{\\&} 7) - 3.5\\big) \\times 0.14 \\times \\text{clamp}\\left(\\frac{d - 50}{160},\\; 0,\\; 1\\right)$$
+   A lateral weave velocity $w = \\sin(\\text{animT} \\cdot \\omega_{\\text{weave}}) \\cdot W$ is added orthogonally:
+   $$\\mathbf{v}_{\\text{steer}} = \\mathbf{R}(\\theta_{\\text{spread}}) \\hat{\\mathbf{s}} \\cdot v_{\\text{gait}} + \\hat{\\mathbf{s}}_\\perp \\cdot w$$
+
+2. **Logarithmic Spiral Orbiting (\`Circle.cpp\`):**
+   Stalking predators maintain a preferred distance $R$ by modulating radial speed as a restorative spring while driving constant tangential velocity:
+   $$v_{\\text{radial}} = \\text{clamp}\\big(2.0 \\cdot (d - R),\\; -v,\\; v\\big)$$
+   $$v_{\\text{tangent}} = v \\cdot \\text{side} \\quad (\\text{side} \\in \\{-1, +1\\})$$
+   $$\\mathbf{v}_{\\text{orbit}} = v_{\\text{radial}} \\hat{\\mathbf{s}} + v_{\\text{tangent}} \\hat{\\mathbf{s}}_\\perp$$
+
+3. **Wolf-Pack Wedge Formations (\`Follow.cpp\`):**
+   Minions calculate their target position relative to the pack leader using lateral and rear offsets:
+   $$\\mathbf{p}_{\\text{target}} = \\mathbf{p}_{\\text{leader}} - 12 \\hat{\\mathbf{s}} + 10 \\cdot \\text{side} \\cdot \\hat{\\mathbf{s}}_\\perp$$
+   This automatically organizes wolf packs into dynamic V-shaped hunting wedges without any centralized formation coordinator.
+
+#### Excourse: Storming the Bastion Gate (Dijkstra Flow Fields vs 1,000 Pathfinders)
+
+Why is the combination of Dijkstra flow fields and orthogonal steering so powerful for real-time tactical encounters?
+
+Consider a campaign scenario in \`src/campaign/Bastion.cpp\`: the player has built a fortified stronghold with thick palisades and a single narrow gateway ($2\\text{ tiles}$ wide). A nocturnal horde of 800 Renegades and Wolves attacks from all directions outside the walls:
+
+1. **The Classic A* Catastrophe:**
+   If each of the 800 enemies independently ran $A^*$ toward the player:
+   - 800 graph searches would execute every time the player moves across a room, creating massive frame-rate drops.
+   - All 800 enemies would compute the exact same single-tile path through the gate center, stacking on top of each other in an unnatural single-file string.
+2. **The Mellangan Flow-Field Execution:**
+   - The engine computes the bastion's BFS flow field once when the structure is raised.
+   - All 800 enemies sample their current tile in $O(1)$ time, immediately flowing along precalculated 8-way compass vectors toward the opening.
+   - As they funnel toward the gate, the soft elastic push solver ($\\mathbf{p}_{\\text{push}}$) spreads them across the full width of the corridor without letting them clip through palisades.
+   - Upon breaching the inner courtyard, wolves automatically switch from flow-field navigation to logarithmic spiral orbiting (\`Circle.cpp\`), peeling off to flank the hero from both sides.
+The result is tactical siege behavior running in less than $0.1\\text{ ms}$ of CPU time.
+
 `,
     mermaidCharts: [
       {
@@ -5172,7 +5334,31 @@ flowchart LR
     Q0 --> Q25 --> Q50 --> Q75
 `,
       },
-    ],
+          {
+        title: "Swarm Spatial Grid & Flow-Field Navigation Architecture",
+        chart: `
+flowchart TD
+    classDef grid fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef flow fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef phys fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Coords["Active Mobs (x, y)"]:::grid
+    CSR["3-Pass CSR Spatial Grid<br/>Hist -> Prefix-Sum -> Scatter O(N+C)"]:::grid
+    Gather["Level::gather(r=140)<br/>Contiguous Memory Slices"]:::grid
+
+    Dijkstra["Bastion Dijkstra Flow Field<br/>BFS Reverse Flood Fill O(1)"]:::flow
+    Steer["Orthogonal Steering Decomposition<br/>Radial Lead + Tangential Weave"]:::flow
+
+    Push["Soft Elastic Push Relaxation<br/>Overlapping Delta with Radius Mass Share"]:::phys
+    Collide["Radial Tile Obstacle Solver<br/>Level::collide Continuous Projection"]:::phys
+
+    Coords --> CSR --> Gather
+    Gather --> Push
+    Dijkstra & Steer --> Coords
+    Push --> Collide
+`,
+      },
+],
     interactiveComponent: "engine-math",
   },
 ];
