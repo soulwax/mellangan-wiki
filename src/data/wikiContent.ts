@@ -4685,4 +4685,49 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "menu-language",
+    title: "33. Menu Text and Language Overrides",
+    category: "contribute",
+    summary: "How menu strings, format arguments and the currently unwired override parser work.",
+    sourceFiles: [
+      "src/gui/Lang.hpp",
+      "src/gui/Lang.cpp",
+      "src/menu/SettingsMenu.cpp",
+      "src/menu/PauseMenu.cpp",
+      "src/menu/DeadMenu.cpp",
+      "src/menu/DawnMenu.cpp",
+      "src/test/LangTest.cpp",
+    ],
+    content: `
+### Where menu text lives
+
+\`src/gui/Lang.hpp\` defines English defaults as members of \`Lang\`. The global \`lang\` instance supplies text to the pause, settings, controls, death and dawn menus. Coverage is partial: other game text still lives elsewhere in the code. The settings menu stores pointers to \`Lang\` members in its row definitions, so it reads the current value when it renders.
+
+Strings with arguments pass through \`say()\`, a wrapper around runtime \`fmt::format\`. For example, \`say(lang.felledBy, by)\` inserts the cause of death into the default \`felled by {}\`. Input prompts such as the pause-menu controls also pass through \`Input::prompt()\` when rendered.
+
+### Reading overrides
+
+\`Lang::parse()\` accepts text already held in memory. Each recognized line has a case-sensitive key, one literal space, then the value. The remainder of the line is preserved as the value, including additional spaces. Lines beginning with \`#\`, lines without a space, unknown keys and values with a different number of opening braces from the English default are ignored. CRLF and LF line endings are accepted.
+
+For example:
+
+\`\`\`text
+# Example overrides passed to Lang::parse()
+paused PAUSA
+felledBy abattu par {}
+world monde {}
+\`\`\`
+
+The return value counts accepted lines, not distinct keys; if a key appears more than once, the last accepted value wins. Missing or rejected keys keep their current values. A freshly constructed \`Lang\` starts with English defaults. Parsed values are kept in static string storage, so their pointers remain valid after the input buffer goes away.
+
+**Current integration limit:** the source currently calls \`Lang::parse()\` in the language test, but does not wire a translation file or language selector into game startup. Supplying a file beside the executable therefore does not by itself change the menus.
+
+### Format strings and testing
+
+The parser counts \`{\` characters; it does not fully validate \`fmt\` syntax, argument types, or the order of placeholders. A translation can pass that check and still fail when \`say()\` formats it. Keep the placeholders compatible with the call site and test actual formatted output. For example, \`endlessRun\` has two arguments, while \`world\` has one.
+
+To add a menu string, define its English default in \`Lang\`, add its member to \`LANG_KEYS\`, use it at the render site, and extend \`src/test/LangTest.cpp\` for formatting or parsing behavior. The existing test checks nonempty defaults, unique keys and members, formats defaults containing braces, and checks accepted and rejected overrides. It does not validate every possible translation or exercise a startup file loader.
+`,
+  },
 ];

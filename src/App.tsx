@@ -204,6 +204,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         shortTitle: "Saves LRU, Codex Unlocks & Balance INI",
       },
       {
+        id: "menu-language",
+        shortTitle: "Menu Text & Language Overrides",
+      },
+      {
         id: "audio-qa",
         shortTitle: "32-Voice LRU Audio Mixer & QA Views",
       },
@@ -276,9 +280,8 @@ const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
       {
         id: "engine-mathematics",
         title: "Game Math & Invariants",
-        subtitle: "10 Mathematical Models & Proofs",
+        subtitle: "Geometry, probability & navigation",
         icon: Calculator,
-        badge: "LAB",
       },
       {
         id: "ouroboros-deep-dive",
