@@ -4578,776 +4578,111 @@ flowchart TD
   {
     id: "engine-mathematics",
     title:
-      "32. The Mathematical Foundations of Mellangan: Proofs, Attenuation, Spatial Topology & Bit Calculus",
+      "32. The Mathematics of Mellangan: Geometry, Probability, Sorting & Navigation",
     category: "core",
     summary:
-      "A dedicated mathematical compendium of the algorithms and analytical models powering Mellangan: 60 Hz fixed-step Euler kinematics, 113° sight-cone dot products, singularity-free inverse quadratic attenuation, (1-r)² quadratic status mitigation, hyperbolic Magic Find diminishing returns, IEEE 754 monotonic orderedBits bit twiddling, De Bruijn B(2, 5) Galois fields, 3-pass CSR counting-sort spatial grids, and Dijkstra navigation flow fields.",
+      "Worked derivations of target geometry, resistance, conditional loot odds, spatial indexing, stable radix sorting and bastion navigation, with their implementation limits.",
     sourceFiles: [
-      "src/level/Level.cpp",
-      "src/level/LevelSpace.cpp",
+      "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
-      "src/entity/enemy/ai/Plans.cpp",
-      "src/entity/enemy/ai/Approach.cpp",
-      "src/entity/enemy/ai/Circle.cpp",
-      "src/entity/enemy/ai/Follow.cpp",
-      "src/campaign/Bastion.cpp",
-      "src/gfx/Screen.cpp",
-      "src/campaign/Townsfolk.cpp",
+      "src/entity/Status.hpp",
       "src/item/loot/Loot.cpp",
-      "src/other/Ouroboros.hpp",
+      "src/level/LevelSpace.cpp",
+      "src/level/LevelRender.cpp",
+      "src/campaign/Bastion.cpp",
     ],
     content: `
-### The Mathematical Foundations of Mellangan
+### Mathematics in the engine
 
-A high-performance C++20 game engine cannot rely on guessing or approximations in its inner loops. In **Mellangan**, every system (camera depth sorting, spatial collision hashing, sound falloff, vision cones, combat mitigation, and compile-time bit twiddling) rests on strict discrete mathematics, geometry, and numerical invariants:
+The useful question is not just what a formula calculates, but what it assumes. These examples connect equations to the code paths that use them, including the cases where a neat model stops matching the implementation.
 
-\`\`\`
-       [ Kinematics & Integration ]       [ Discrete Bit Calculus ]
-         DT = 1.0 / 60.0 (Euler)             SWAR 32b Flip & Galois
-                    |                                   |
-                    v                                   v
-         [ Analytical Geometry ] ---------> [ Continuous Attenuation ]
-          113° Sight-Cone Dot                  A(d) = 1 / (1 + (d/R)²)
-                    |                                   |
-                    v                                   v
-         [ Topological Sorting ]            [ Damage Scaling Calculus ]
-           orderedBits(f) & Radix               DoT = Base × (1 - r)²
-\`\`\`
+### 1. Target prediction and the sight test
 
----
+\`Enemy::sense()\` starts with the displacement $\\mathbf{r}$ from enemy to quarry, the quarry velocity $\\mathbf{v}$, and the enemy's type speed $s$. It predicts a short distance ahead:
 
-### 1. Fixed-Step 60 Hz Kinematics & Integration (\`DT = 1.0 / 60.0\`)
+$$\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$$
 
-Mellangan separates the simulation tick rate from the display render refresh rate. The global simulation timestep is strictly constant:
+The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. This is a heuristic: it is not the exact solution of the moving-target interception equation, and it uses type speed rather than the enemy's current velocity.
 
-$$\\Delta t = \\frac{1}{60} \\approx 0.016667\\text{ s}$$
+For a living quarry, the code normalizes $\\mathbf{q}$ to $\\hat{\\mathbf{q}}$ when its length exceeds 0.001. The \`seen\` flag tests:
 
-#### Semi-Implicit Euler Integration
+$$\\|\\mathbf{q}\\|<300\\quad\\text{and}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$$
 
-Standard forward Euler integration adds false energy over time, causing wobbles and drift. Full Verlet integration avoids this, but it requires storing past positions $\\mathbf{x}_{t-\\Delta t}$ for thousands of active monsters.
+Here $\\mathbf{a}$ is the **quarry's aim**, not the enemy's facing. Thus the test asks whether the enemy is roughly in front of the quarry, using the predicted displacement. For unit aim, the strict dot threshold corresponds to a half-angle of $\\arccos(0.55)\\approx56.6^\\circ$, or an approximately $113.3^\\circ$ cone. At the boundary the strict comparison fails. If the selected quarry is dead, the code instead returns an unseen point 400 px away; nearby living allies can still be selected first.
 
-Mellangan instead uses **semi-implicit Euler integration**:
+### 2. Status resistance: a product of two reductions
 
-First, update velocity:
-$$\\mathbf{v}_{t+\\Delta t} = \\mathbf{v}_t + \\frac{\\mathbf{F}_t}{m} \\Delta t$$
+\`Status::apply()\` clamps resistance to $0\\le r\\le0.75$, then scales both the incoming power and duration by $1-r$. For an isolated damage-over-time effect with constant power $P$, duration $T$, no power or duration cap, and no reapplication:
 
-Then immediately use that new velocity to update position:
-$$\\mathbf{x}_{t+\\Delta t} = \\mathbf{x}_t + \\mathbf{v}_{t+\\Delta t} \\Delta t$$
+$$P_r=P(1-r),\\qquad T_r=T(1-r),\\qquad D_r=PT(1-r)^2$$
 
-Because the updated velocity is used right away, physical energy stays bounded across cycles without storing past history. This gives projectile arcs, knockbacks, and monster collisions clean numerical stability at zero memory cost.
+At 50% resistance, an effect of 40 damage per second for 4 seconds becomes 20 damage per second for 2 seconds: 40 damage instead of 160. At the 75% cap, the idealized result is $160(0.25)^2=10$.
 
-#### Linear and Exponential Drag Damping
+The tick implementation applies damage in 0.5-second intervals and pays out any remaining fractional interval on expiry. If $T_r=1.3$ s, the portions are $0.5+0.5+0.3=1.3$ s. This explains why the integral above is useful even when duration does not divide evenly into ticks.
 
-To simulate air resistance and ground friction without calling slow exponential math functions in hot loops, velocity slows down by a linear drag factor every tick:
+The square is not a universal combat multiplier. Power has a per-status cap, duration is capped at 60 seconds, and reapplication may retain a stronger or longer existing effect. Bleed stacks power and deals $1.6\\times$ while the target is moving. Death or removal can also end the sequence early.
 
-$$\\mathbf{v}_{t+1} = \\mathbf{v}_t \\cdot \\max(0, 1 - \\mu \\cdot \\Delta t)$$
+### 3. Loot odds: diminishing returns and conditional probability
 
-Here $\\mu$ is the drag factor. When repeated 60 times a second, this simple linear step closely matches real exponential decay:
+\`rarityOdds()\` uses $S=1+L/40$, where $L$ is item level, and the saturation function
 
-$$\\lim_{\\Delta t \\to 0} (1 - \\mu \\Delta t)^{t / \\Delta t} = e^{-\\mu t}$$
+$$f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$$
 
-#### Follower Leash Kinematics (\`Townsfolk.cpp\`)
+For nonnegative magic find $m$, each extra point adds less effective magic find than the previous one. Unique and rare checks use different constants: $k=250$ and $k=600$ respectively. The magic check uses raw magic find. Each check is capped at 1:
 
-Civilian sanctuary seekers and companions follow the player using a bounded pursuit formula:
+$$u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$$
+$$r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$$
 
-$$v_{\\text{trail}} = \\min(50.0, v_{\\text{player}} \\times 1.05)$$
+These are **conditional checks**, not three final probabilities that can simply be added. \`rollRarity()\` tests unique first, then rare only if unique failed, then magic only if both failed. Therefore:
 
-$$d(\\mathbf{p}, \\mathbf{t}) = \\|\\mathbf{p} - \\mathbf{t}\\|_2 = \\sqrt{(p_x - t_x)^2 + (p_y - t_y)^2}$$
+$$P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$$
 
-- **Tether Limit:** If distance $d(\\mathbf{p}, \\mathbf{t}) > 260.0$ px, the leash snaps into \`Mode::Lost\`.
-- **Catch-Up Invariant:** The $1.05\\times$ speed factor allows followers to keep pace with a running hero, while the $50.0$ px/s cap prevents unnatural speed surges.
+At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, while the rare check is 2.222%. The actual probability of reaching and passing the rare check is about $0.997143\\times0.022222=2.216\\%$. Item generation can subsequently impose a rarity floor or handle a unique result specially, so these equations describe the initial rarity roll, not every final drop outcome.
 
-#### Excourse: The Orbit Explosion Test (Explicit Euler vs. Semi-Implicit Euler)
+### 4. Prefix sums: turning a crowd into contiguous buckets
 
-Why does standard explicit forward Euler fail in games? Consider an entity in circular orbit or oscillating on a spring with restoring acceleration $\\mathbf{a} = -\\omega^2 \\mathbf{x}$.
+\`Level::buildGrid()\` counts non-buried enemies by grid cell, builds prefix sums, and scatters pointers into a contiguous array. Suppose four cells have counts $[2,0,3,1]$. The exclusive offsets are
 
-Under standard explicit forward Euler, position updates using old velocity:
-$$\\mathbf{x}_{t+1} = \\mathbf{x}_t + \\mathbf{v}_t \\Delta t$$
-$$\\mathbf{v}_{t+1} = \\mathbf{v}_t + \\mathbf{a}_t \\Delta t = \\mathbf{v}_t - \\omega^2 \\mathbf{x}_t \\Delta t$$
+$$[0,\\;2,\\;2,\\;5,\\;6]$$
 
-Because the displacement vector $\\mathbf{v}_t \\Delta t$ is tangent to the circle and therefore perpendicular to inward acceleration, every single step overshoots slightly outward. Total energy multiplies by $(1 + \\omega^2 \\Delta t^2)$ on every tick. Within just 20 seconds of simulation (1,200 ticks at 60 Hz), an entity spirals wildly off-screen as energy blows up to infinity!
+Cell $i$ occupies the half-open interval $[\\text{start}_i,\\text{start}_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3 and 4. The last offset is also the total number of binned enemies. Building the index takes $O(N+C)$ work for $N$ binned enemies and $C$ cells, plus the storage for those arrays.
 
-Under semi-implicit Euler, we update velocity first, then update position using that fresh velocity:
-$$\\mathbf{v}_{t+1} = \\mathbf{v}_t - \\omega^2 \\mathbf{x}_t \\Delta t$$
-$$\\mathbf{x}_{t+1} = \\mathbf{x}_t + \\mathbf{v}_{t+1} \\Delta t$$
+\`gather()\` visits the query's own cell first, then other cells touched by the query bounding square. It skips removed enemies and stops at the caller's maximum. This is a **broad-phase candidate collection**: cell membership alone does not prove a candidate lies within the requested circular radius. Buried enemies are placed in a separate \`loose\` list during grid construction.
 
-Substituting $\\mathbf{v}_{t+1}$ into $\\mathbf{x}_{t+1}$ introduces an automatic corrective term $-\\omega^2 \\Delta t^2 \\mathbf{x}_t$ that pulls position back inward. Instead of spiraling away, the trajectory traces a closed, bounded ellipse. Total physical energy oscillates within tight bounds forever, providing stability across hours of continuous gameplay with zero memory overhead.
+### 5. Sorting float depths with integers
 
----
+\`LevelRender.cpp\` converts the bits of a 32-bit float into an unsigned key. For a nonnegative value it flips the sign bit; for a negative value it flips all bits. For ordinary finite numbers this puts numeric order into unsigned integer order:
 
-### 2. Vision Cones & Vector Geometry Without Trigonometry (\`Plans.cpp\`)
+| Depth | Raw float bits | Ordered bits |
+|:---|:---|:---|
+| $-10$ | \`C1200000\` | \`3EDFFFFF\` |
+| $-0$ | \`80000000\` | \`7FFFFFFF\` |
+| $+0$ | \`00000000\` | \`80000000\` |
+| $+10$ | \`41200000\` | \`C1200000\` |
 
-In typical AI systems, checking whether an enemy sees a target uses \`std::atan2(dy, dx)\` and angle comparisons. But calling \`atan2\` for hundreds of enemies takes 50 to 100 CPU cycles per call, slowing down the worker threads.
+The two zeros compare equal numerically but get adjacent, distinct keys. NaNs do not have a normal numerical ordering, so the transformation should not be interpreted as a mathematical ordering of NaN values.
 
-Mellangan eliminates angles entirely and uses the **vector dot product** instead.
+The packed key contains layer in bits 56–63, ordered depth in bits 24–55, and the draw index in the low 24 bits. Three stable 12-bit counting passes at shifts 24, 36 and 48 sort the layer and depth. They do **not** sort the low index bits; stability preserves insertion order for equal layer and depth. Each pass scans the keys and 4096 buckets, giving $O(3(N+4096))$ work. The packed representation assumes the draw index fits in 24 bits.
 
-#### The Sight-Cone Dot Product Theorem
+### 6. A gate field as a graph problem
 
-Let the observer stand at position $\\mathbf{x}_o$ facing unit direction $\\hat{\\mathbf{f}} = (\\cos \\phi, \\sin \\phi)$, and let the quarry target be at $\\mathbf{x}_t$:
+\`bastion::raise()\` treats traversable cells as graph vertices and up to eight neighboring cells as edges. It seeds a FIFO queue with the gate opening, then floods outward. Each newly discovered cell stores the direction back toward the cell that discovered it. Diagonal expansion is rejected when either adjacent orthogonal cell is a wall, preventing a route through a blocked corner.
 
-1. Compute the displacement vector:
-   $$\\mathbf{d} = \\mathbf{x}_t - \\mathbf{x}_o = (x_t - x_o, y_t - y_o)$$
+Because every edge is assigned one queue step, breadth-first search minimizes the **number of grid moves**, not exact Euclidean travel distance. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. For example, moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally.
 
-2. Compute the straight-line distance:
-   $$\\|\\mathbf{d}\\| = \\sqrt{d_x^2 + d_y^2}$$
-
-3. From the geometric definition of the dot product:
-   $$\\hat{\\mathbf{f}} \\cdot \\mathbf{d} = \\|\\mathbf{d}\\| \\cos \\theta \\implies \\cos \\theta = \\frac{f_x d_x + f_y d_y}{\\|\\mathbf{d}\\|}$$
-
-4. The target lies within the enemy's $113^{\\circ}$ field of view if $|\\theta| \\le 56.5^{\\circ}$. Since the cosine decreases as the angle grows:
-   $$\\cos \\theta \\ge \\cos(56.5^{\\circ}) \\approx 0.5519$$
-
-5. Clearing the denominator yields a single comparison without trigonometry:
-   $$\\hat{\\mathbf{f}} \\cdot \\mathbf{d} \\ge 0.5519 \\cdot \\|\\mathbf{d}\\|$$
-
-\`\`\`cpp
-// src/entity/enemy/ai/Plans.cpp
-bool inSight(double ox, double oy, double fx, double fy, double tx, double ty) {
-    double dx = tx - ox, dy = ty - oy;
-    double d2 = dx * dx + dy * dy;
-    if (d2 > 240.0 * 240.0) return false;
-    double d = std::sqrt(d2);
-    return (fx * dx + fy * dy) >= 0.5519 * d;
-}
-\`\`\`
-
-This method uses zero trigonometry, avoids branching tables, and vectorizes cleanly with SIMD instructions.
-
-#### Tangential Obstacle Steering
-
-When an entity detects an obstacle along displacement $\\mathbf{d}$, it finds a perpendicular avoidance vector $\\hat{\\mathbf{d}}^{\\perp}$ by swapping coordinates:
-
-$$\\hat{\\mathbf{d}}^{\\perp} = (-d_y, d_x) \\implies \\mathbf{d} \\cdot \\hat{\\mathbf{d}}^{\\perp} = -d_x d_y + d_y d_x = 0$$
-
-Blending this perpendicular vector with the pursuit direction produces smooth sliding around trees and rocks without pathfinding grid allocations.
-
-#### Excourse: The 1,000-Mob Benchmark (Trigonometry vs. The Dot Product)
-
-What actually happens inside modern CPU hardware during an AI vision check?
-
-Calling \`std::atan2(dy, dx)\` relies on iterative polynomial approximations (such as CORDIC or multi-term Chebyshev expansions). On x86-64 and ARM processors, each call typically costs 50 to 80 clock cycles. Worse, comparing the returned angle with the entity facing direction requires circular wrap-around branches (\`if (diff < -PI) diff += 2*PI\`), which trigger CPU branch mispredictions costing another 15 to 20 cycles whenever targets cross boundaries.
-
-With 256 active enemies checking targets 60 times every second, trigonometry burns over 1.2 million expensive transcendental evaluations per second, heating up mobile cores and stealing precious frame time from rendering.
-
-The vector dot product formula:
-$$f_x d_x + f_y d_y \\ge 0.5519 \\cdot \\sqrt{d_x^2 + d_y^2}$$
-
-replaces transcendental pipelines with basic arithmetic: two multiplications, one addition, and one reciprocal square root instruction (\`rsqrtss\` or \`vrsqrtsd\`). Using SIMD, four mob vision checks evaluate concurrently inside a single 128-bit vector register in just 3 to 4 clock cycles, leaving 98% of the AI frame budget available for high-level tactical goal selection.
-
----
-
-### 3. Singularity-Free Quadratic Attenuation in Lighting & Audio
-
-In physics, light and sound fall off with the inverse-square law:
-
-$$I(d) \\propto \\frac{1}{d^2}$$
-
-#### The Physical Singularity Problem
-
-In a 2D game, this naive formula causes a division-by-zero disaster at the center:
-
-$$\\lim_{d \\to 0} \\frac{1}{d^2} = +\\infty$$
-
-Standing directly on a torch ($d = 0$) results in infinity, visual blowouts, or audio distortion.
-
-#### Mellangan's Normalized Quadratic Model
-
-Both lighting (\`Screen.cpp\`) and spatial audio (\`Audio.cpp\`) use a smooth, bounded quadratic formula:
-
-$$A(d, R) = \\frac{1.0}{1.0 + \\left(\\frac{d}{R}\\right)^2}$$
-
-Here $d$ is Euclidean distance and $R$ is the falloff radius.
-
-#### Mathematical Properties:
-1. **Safe Center:** At distance zero ($d = 0$):
-   $$A(0, R) = \\frac{1.0}{1.0 + 0} = 1.0$$
-   The value never exceeds $1.0$ and never divides by zero.
-2. **The Half-Power Boundary:** At distance $d = R$:
-   $$A(R, R) = \\frac{1.0}{1.0 + 1^2} = \\frac{1}{2} = 0.50$$
-   At radius $R$, light intensity and sound volume drop to exactly 50% of their source power.
-3. **Smooth Center Plateau:** The derivative at the center is zero:
-   $$\\frac{dA}{dd} = -\\frac{2d}{R^2 \\left(1 + (d/R)^2\\right)^2} \\implies \\left.\\frac{dA}{dd}\\right|_{d=0} = 0$$
-   Because the first derivative vanishes at $d = 0$, point lights exhibit a soft, natural radial plateau at their center rather than a harsh spike.
-4. **Smooth Falloff at Distance:**
-   For large distances ($d \\gg R$):
-   $$A(d, R) \\approx \\frac{R^2}{d^2}$$
-   At distance $d = 2R$, power drops to 20% ($1 / (1 + 4)$). At $d = 3R$, power drops to 10% ($1 / (1 + 9)$).
-
-#### Excourse: The "Torch in the Face" Experiment
-
-Why does real-world physics break down when copied directly into a game engine?
-
-Suppose the hero walks right up to a campfire or torch with source intensity 100, bringing distance $d$ down to 0.05 pixels. Under standard physical $1 / d^2$ falloff:
-$$I(0.05) = \\frac{100}{(0.05)^2} = \\frac{100}{0.0025} = 40,000$$
-
-The received brightness explodes to 400 times normal. The 8-bit color channels clamp violently to maximum white (\`#FFFFFF\`), blowing out texture detail and washing out the entire screen. Even worse, if distance reaches $d = 0.0$, the hardware encounters division by zero, resulting in IEEE 754 floating-point infinity (\`+inf\`) or \`NaN\`, which poisons neighboring tiles in lightfield blurs.
-
-Spatial audio suffers an identical crisis: an explosion spawning directly on the listener coordinate produces ear-shattering digital clipping when scaled by $1 / d^2$.
-
-Under Mellangan's singularity-free quadratic formula:
-$$A(d, R) = \\frac{1.0}{1.0 + (d / R)^2}$$
-
-At distance $d = 0$, the formula simplifies cleanly:
-$$A(0, R) = \\frac{1.0}{1.0 + 0} = 1.0$$
-
-The brightness never exceeds 100% emitter power, division by zero is mathematically impossible, and the zero first derivative creates a smooth, gentle plateau at the core. Players enjoy visually convincing illumination and clean 32-voice audio without blowout artifacts or epsilon hacks.
-
----
-
-### 4. Quadratic Resistance Calculus: The $(1 - r)^2$ Mitigation Theorem
-
-In most RPGs, armor resistance $r$ reduces incoming damage linearly: $D_{\\text{taken}} = D_{\\text{raw}} \\cdot (1 - r)$.
-
-In Mellangan's status effect system (\`Status.cpp\`), resistance protects against ailments (burn, bleed, poison) across two fronts at the same time:
-
-1. **Damage Rate Scaling:** Peak Damage per Second (DPS) is reduced by $(1 - r)$:
-   $$\\text{DPS}(r) = \\text{DPS}_0 \\cdot (1 - r)$$
-
-2. **Ailment Duration Scaling:** The total lifetime duration of the ailment is reduced by $(1 - r)$:
-   $$T(r) = T_0 \\cdot (1 - r)$$
-
-#### Derivation of Total Damage Over Time (DoT)
-
-Total damage equals the damage rate multiplied by total duration:
-
-$$\\text{Total DoT}(r) = \\int_0^{T(r)} \\text{DPS}(r) \\, dt = \\text{DPS}(r) \\times T(r)$$
-
-$$\\text{Total DoT}(r) = \\big( \\text{DPS}_0 \\cdot (1 - r) \\big) \\times \\big( T_0 \\cdot (1 - r) \\big) = (\\text{DPS}_0 \\times T_0) \\cdot (1 - r)^2$$
-
-$$\\text{Total DoT}(r) = \\text{Base DoT} \\cdot (1 - r)^2$$
-
-#### The Resistance Cap Theorem ($r_{\\max} = 0.75$)
-
-Because damage scales as $(1 - r)^2$, effective mitigation follows a quadratic progression:
-
-$$\\text{Mitigation}(r) = 1 - (1 - r)^2 = 2r - r^2$$
-
-| Resistance $r$ | Damage Multiplier $(1 - r)^2$ | Effective Mitigation | Real-World Combat Impact |
-|:---|:---|:---|:---|
-| **$0.00$ ($0\\%$)** | $(1.00)^2 = 1.0000$ | **$0.00\\%$** | Raw unarmored damage |
-| **$0.25$ ($25\\%$)** | $(0.75)^2 = 0.5625$ | **$43.75\\%$** | Nearly half of all DoT neutralized |
-| **$0.50$ ($50\\%$)** | $(0.50)^2 = 0.2500$ | **$75.00\\%$** | Three-quarters of all DoT eliminated |
-| **$0.75$ ($75\\%$)** | $(0.25)^2 = 0.0625$ | **$93.75\\%$** | **$93.75\\%$ Effective Damage Mitigation!** |
-
-**Why Mellangan caps resistance at $75\\%$ (\`std::min(r, 0.75f)\`):**
-A seemingly modest $75\\%$ resistance rating in reality allows only **$6.25\\%$** of full burn, bleed, and poison damage to penetrate. If resistance were allowed to reach $90\\%$, incoming damage would drop to $(0.10)^2 = 1\\%$, making players completely invulnerable to environmental boss mechanics!
-
-#### Excourse: The "Why 75% Resistance Stops 94% Damage" Combat Lab
-
-To see why quadratic mitigation changes player survival so drastically, consider an actual in-game boss encounter:
-
-A dungeon boss casts a Toxic Mire that inflicts a raw base DoT of 100 damage per second for 10 seconds.
-$$\\text{Base Total Damage} = 100 \\text{ DPS} \\times 10 \\text{ s} = 1,000 \\text{ damage}$$
-
-Here is what happens to three different characters:
-
-1. **Unarmored Character ($r = 0.00$):**
-   - DPS taken: $100 \\times (1 - 0) = 100 \\text{ DPS}$
-   - Duration: $10 \\times (1 - 0) = 10 \\text{ s}$
-   - Total damage: $100 \\times 10 = 1,000$ (Full lethal damage, character dies)
-
-2. **Mid-Tier Armored Character ($r = 0.50$):**
-   - DPS taken: $100 \\times (1 - 0.50) = 50 \\text{ DPS}$
-   - Duration: $10 \\times (1 - 0.50) = 5 \\text{ s}$
-   - Total damage: $50 \\times 5 = 250$ (Damage drops to $(0.50)^2 = 25\\%$, 75% mitigated!)
-
-3. **Endgame Resistance Cap ($r = 0.75$):**
-   - DPS taken: $100 \\times (1 - 0.75) = 25 \\text{ DPS}$
-   - Duration: $10 \\times (1 - 0.75) = 2.5 \\text{ s}$
-   - Total damage: $25 \\times 2.5 = 62.5$ (Damage drops to $(0.25)^2 = 6.25\\%$, 93.75% mitigated!)
-
-The player at 75% resistance takes only 62.5 damage instead of 1,000 damage. Because both the burning rate and the duration shrink together, increasing resistance from 50% to 75% cuts remaining damage by another factor of four (from 250 down to 62.5). This quadratic compounding gives defensive item crafting tremendous impact in high-tier delves.
-
----
-
-### 5. Hyperbolic Diminishing Returns Magic Find (\`LootSim.cpp\`)
-
-In ARPG itemization (\`src/item/loot/\`), players can stack Magic Find (MF) affixes across their weapon, charms, off-hand, and armor. If Magic Find increased drop rates linearly, endgame characters would see hundreds of unique and relic items per hour, collapsing the economy.
-
-Mellangan uses a **hyperbolic rational saturation function**:
-
-$$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times C}{\\text{raw} + C}, \\quad C = 250$$
-
-#### Analytical Properties:
-
-1. **Initial Unit Slope (No Penalty for Beginners):**
-   $$\\frac{d(\\text{Effective MF})}{d\\text{raw}} = \\frac{C (\\text{raw} + C) - \\text{raw} \\cdot C}{(\\text{raw} + C)^2} = \\frac{C^2}{(\\text{raw} + C)^2}$$
-
-   $$\\left.\\frac{d(\\text{Effective MF})}{d\\text{raw}}\\right|_{\\text{raw}=0} = \\frac{C^2}{C^2} = 1.0$$
-   For low MF values ($0\\% \\dots 50\\%$), every percentage point of raw gear MF translates into a full $1.0\\%$ increase in effective drop quality!
-
-2. **The Half-Saturation Constant ($C = 250$):**
-   $$\\text{Effective MF}(250) = \\frac{250 \\times 250}{250 + 250} = \\frac{62500}{500} = 125.0\\%$$
-   At $250\\%$ raw MF, the return rate is exactly half of raw investment.
-
-3. **Horizontal Asymptote (Hard Upper Bound):**
-   $$\\lim_{\\text{raw} \\to \\infty} \\frac{\\text{raw} \\times 250}{\\text{raw} + 250} = 250.0\\%$$
-   No matter how many hundreds of MF points a player stacks, effective Magic Find can **never exceed $250\\%$**!
-
-#### Excourse: The "1,000 Hours of Farming" Economy Simulation
-
-What happens when an action RPG implements linear Magic Find instead of a hyperbolic curve?
-
-In games with linear drop scaling, stacking +500% MF multiplies rare drop rates by a full $6\\times$. Min-maxing guilds farm thousands of unique items per day, causing catastrophic inflation in the player trade economy and rendering normal crafting materials worthless. To compensate, game designers are forced to slash base drop chances to microscopic lottery levels (such as 0.0001%), punishing casual players who cannot stack maximum gear affixes.
-
-Mellangan solves this dilemma with the hyperbolic saturation curve:
-$$\\text{Effective MF}(\\text{raw}) = \\frac{\\text{raw} \\times 250}{\\text{raw} + 250}$$
-
-1. **Early Progression is Fair and Rewarding:**
-   A player equipping their first charm with +30% MF receives:
-   $$\\text{Effective MF}(30) = \\frac{30 \\times 250}{280} \\approx 26.8\\%$$
-   Early points translate almost 1:1 into higher quality drops without penalty.
-
-2. **Diminishing Returns Prevent Runaway Loot Floods:**
-   A dedicated endgame farmer stacking +750% MF across all item slots receives:
-   $$\\text{Effective MF}(750) = \\frac{750 \\times 250}{1000} = 187.5\\%$$
-   Even with twenty times the gear investment of a casual player, drop rates reach less than triple base odds. The loot hunt remains exhilarating, relic drops retain their legendary status, and the settlement trade economy never collapses.
-
----
-
-### 6. Floating-Point Monotonic Transform: \`orderedBits(f)\`
-
-The key challenge in Mellangan's zero-comparison rendering pipeline is sorting entities by their continuous Y-coordinate ($y \\in \\mathbb{R}$) using an integer **Radix Sort**.
-
-#### The IEEE 754 Representation Problem
-
-An IEEE 754 32-bit single-precision floating point number consists of:
-- 1 Sign bit $s$ (bit 31)
-- 8 Exponent bits $e$ (bits 30..23, biased by 127)
-- 23 Mantissa / Fraction bits $m$ (bits 22..0)
-
-$$f = (-1)^s \\cdot 2^{e - 127} \\cdot \\left(1 + \\sum_{i=1}^{23} m_i 2^{-i}\\right)$$
-
-When interpreted directly as an unsigned 32-bit integer (\`std::bit_cast<uint32_t>(f)\`):
-- Positive numbers ($s = 0$) already have integer order: $0.0 < 1.0 < 100.0 \\implies \\text{bits}(0.0) < \\text{bits}(1.0) < \\text{bits}(100.0)$.
-- **Negative numbers ($s = 1$) have their order backwards:** Because bit 31 is 1, all negative numbers appear larger than positive numbers ($u \\ge \\text{0x80000000u}$). Furthermore, $-100.0$ has a larger exponent than $-1.0$, meaning $\\text{bits}(-100.0) > \\text{bits}(-1.0)$, the exact reverse of numerical ordering!
-
-#### The Mellangan Monotonic Invariant Function
-
-To allow Radix Sort to sort continuous Y-coordinates with zero comparisons, \`src/gfx/Screen.cpp\` transforms the raw float bits via:
-
-\`\`\`cpp
-uint32_t orderedBits(float f) {
-    uint32_t u = std::bit_cast<uint32_t>(f);
-    return u ^ (uint32_t(int32_t(u) >> 31) | 0x80000000u);
-}
-\`\`\`
-
-$$\\text{orderedBits}(f) = u \\oplus \\Big( (u \\gg_{\\text{arith}} 31) \\lor \\text{0x80000000u} \\Big)$$
-
-#### Proof of Monotonicity:
-
-1. **Case A: $f \\ge 0$ (Non-Negative Numbers):**
-   The sign bit is $0$.
-   Arithmetic right shift of a non-negative integer preserves the zero sign bit: \`int32_t(u) >> 31 == 0\`.
-   The bitwise mask becomes:
-   $$\\text{mask} = 0 \\lor \\text{0x80000000u} = \\text{0x80000000u}$$
-   XORing $u$ with $\\text{0x80000000u}$ flips **strictly bit 31**, leaving bits $0..30$ completely unchanged:
-   $$\\text{orderedBits}(f) = u \\oplus \\text{0x80000000u} = u + \\text{0x80000000u}$$
-   This maps positive floats $[+0.0, +\\infty)$ into the upper unsigned integer interval:
-   $$[\\text{0x80000000u}, \\text{0xFFFFFFFFu}]$$
-
-2. **Case B: $f < 0$ (Strictly Negative Numbers):**
-   The sign bit is $1$.
-   Arithmetic right shift of a negative integer propagates the sign bit across all 32 bits: \`int32_t(u) >> 31 == -1\` (\`0xFFFFFFFFu\`).
-   The bitwise mask becomes:
-   $$\\text{mask} = \\text{0xFFFFFFFFu} \\lor \\text{0x80000000u} = \\text{0xFFFFFFFFu}$$
-   XORing $u$ with $\\text{0xFFFFFFFFu}$ inverts every single one of the 32 bits:
-   $$\\text{orderedBits}(f) = u \\oplus \\text{0xFFFFFFFFu} = \\sim u$$
-   Inverting all bits reverses the inverted exponent magnitude, mapping negative floats $(-\\infty, -0.0]$ into the lower unsigned integer interval:
-   $$[\\text{0x00000000u}, \\text{0x7FFFFFFFu}]$$
-
-3. **Conclusion:**
-   For any two floating point numbers $a, b \\in \\mathbb{R}$:
-   $$a < b \\iff \\text{orderedBits}(a) < \\text{orderedBits}(b)$$
-   The transformation is a strictly monotonic mapping that preserves numerical order across all real numbers.
-
-#### 3-Pass 12-Bit LSD Radix Sort Complexity
-
-Mellangan packs the scene sort key into a 64-bit integer:
-
-$$\\text{Key} = (\\text{layer} \\ll 56) \\mathbin{|} (\\text{orderedBits}(y) \\ll 24) \\mathbin{|} (\\text{seq} \\mathbin{\\&} \\text{0x00FFFFFF})$$
-
-Three passes of 12-bit Least Significant Digit (LSD) Radix Sort with $2^{12} = 4096$ histogram buckets sort all $N$ entities:
-
-$$\\text{Operations} = 3 \\times (N + 4096) = O(N)$$
-
-Zero comparisons, zero branch mispredictions, and deterministic execution time regardless of scene distribution!
-
-#### Excourse: Walking the Bits Under the Microscope
-
-To understand why float bit twiddling is necessary, examine how four representative floating-point numbers look in raw hexadecimal IEEE 754 notation:
-
-- $+10.0f \\implies \\text{0x41200000}$ (Sign bit 0, Exponent \`10000010\`, Fraction \`010000...\`)
-- $+0.0f \\implies \\text{0x00000000}$ (Sign bit 0, Exponent \`00000000\`, Fraction \`000000...\`)
-- $-0.0f \\implies \\text{0x80000000}$ (Sign bit 1, Exponent \`00000000\`, Fraction \`000000...\`)
-- $-10.0f \\implies \\text{0xC1200000}$ (Sign bit 1, Exponent \`10000010\`, Fraction \`010000...\`)
-
-If we feed these raw bits directly into an unsigned integer sort, the order becomes completely inverted:
-$$\\text{0x00000000} (+0.0f) < \\text{0x41200000} (+10.0f) < \\text{0x80000000} (-0.0f) < \\text{0xC1200000} (-10.0f)$$
-
-Negative ten is treated as the largest number, and negative zero is treated as greater than positive ten!
-
-Now apply \`orderedBits(f)\`:
-\`\`\`cpp
-uint32_t orderedBits(float f) {
-    uint32_t u = std::bit_cast<uint32_t>(f);
-    return u ^ (uint32_t(int32_t(u) >> 31) | 0x80000000u);
-}
-\`\`\`
-
-1. For $+10.0f$, \`int32_t(u) >> 31\` yields \`0x0\`. Mask is \`0x80000000\`. Flipping bit 31 gives \`0xC1200000\`.
-2. For $+0.0f$, mask is \`0x80000000\`. Flipping bit 31 gives \`0x80000000\`.
-3. For $-0.0f$, \`int32_t(u) >> 31\` yields \`0xFFFFFFFF\`. Mask is \`0xFFFFFFFF\`. Flipping all 32 bits gives \`0x7FFFFFFF\`.
-4. For $-10.0f$, mask is \`0xFFFFFFFF\`. Inverting \`0xC1200000\` bitwise gives \`0x3EDFFFFF\`.
-
-Now look at the transformed unsigned integers:
-$$\\text{0x3EDFFFFF} (-10.0f) < \\text{0x7FFFFFFF} (-0.0f) < \\text{0x80000000} (+0.0f) < \\text{0xC1200000} (+10.0f)$$
-
-The unsigned values match the mathematical ordering $-10.0 < -0.0 \\le +0.0 < +10.0$ with zero branching, allowing Radix Sort to process continuous scene depths in linear time.
-
----
-
-### 7. Discrete Parity Calculus & De Bruijn Spirals (\`Ouroboros.hpp\`)
-
-In \`src/other/Ouroboros.hpp\`, Mellangan demonstrates compile-time bit twiddling by verifying integer parity ($n \\pmod 2 == 0$) without using the modulo operator \`%\`.
-
-#### The Parity Cancellation Identity (\`Gray\`)
-
-Let $P(x)$ denote the global XOR parity (whether the total number of set bits is odd or even) of an integer $x$:
-
-$$P(n) = \\bigoplus_{i=0}^{31} b_i = b_0 \\oplus \\bigoplus_{i=1}^{31} b_i$$
-
-Consider the shifted value $n \\gg 1$, where bit $i$ occupies position $i-1$:
-
-$$P(n \\gg 1) = 0 \\oplus \\bigoplus_{i=1}^{31} b_i = \\bigoplus_{i=1}^{31} b_i$$
-
-Computing the XOR sum of their parities:
-
-$$P(n) \\oplus P(n \\gg 1) = \\left( b_0 \\oplus \\bigoplus_{i=1}^{31} b_i \\right) \\oplus \\left( \\bigoplus_{i=1}^{31} b_i \\right)$$
-
-By the associativity and commutativity of XOR ($x \\oplus x = 0$ and $x \\oplus 0 = x$):
-
-$$P(n) \\oplus P(n \\gg 1) = b_0 \\oplus 0 = b_0$$
-
-Every bit from 1 through 31 cancels out with itself, leaving strictly bit 0! Negating with \`!\` returns \`!b_0\`, which is \`true\` for even numbers and \`false\` for odd numbers.
-
-#### The De Bruijn $B(2, 5)$ Multiplier (\`Bruijn\`)
-
-A binary De Bruijn sequence of order $k=5$ contains every possible 5-bit pattern exactly once as a contiguous circular substring of length $2^5 = 32$.
-
-Mellangan uses the canonical generator **\`0x077CB531u\`**:
-\`\`\`text
-0x077CB531 = 0000 0111 0111 1100 1011 0101 0011 0001 (binary)
-\`\`\`
-
-1. Two's complement LSB isolation:
-   $$\\text{LSB}(v) = v \\mathbin{\\&} (-v) = 2^k$$
-
-2. Multiplying $2^k$ by \`0x077CB531u\` left-shifts the sequence by $k$ positions:
-   $$\\text{hash}(2^k) = (2^k \\times \\text{0x077CB531u}) \\gg 27$$
-
-3. Because the sequence is De Bruijn, the top 5 bits (\`>> 27\`) uniquely identify the trailing zero count $k \\in [0..31]$ with zero hash collisions!
-
-#### Parity Inversion in $\\mathbb{Z}_2$ (\`Rebecca\`)
-
-Inside \`Rebecca\`, each byte is transformed by:
-
-$$f(b) = 1 \\oplus \\Big( \\big( (b \\times 0x5D) \\oplus 0x2E \\big) \\mathbin{\\&} 1 \\Big)$$
-
-- $0x5D = 93$ is odd, so multiplying by 93 preserves parity in $\\mathbb{Z}_2$:
-  $$(b \\times 93) \\pmod 2 \\equiv b \\times 1 \\equiv b \\pmod 2$$
-- $0x2E = 46$ is even, so XORing with 46 does not change the lowest bit: $(X \\oplus 46) \\mathbin{\\&} 1 = X \\mathbin{\\&} 1$.
-- Thus: $\\big( (b \\times 93) \\oplus 46 \\big) \\mathbin{\\&} 1 = b_0$.
-- Inverting with $1 \\oplus$ yields $!b_0$, which evaluates to 1 for even numbers and 0 for odd numbers.
-
-#### Excourse: The 32-Tooth Bicycle Gear (Visualizing De Bruijn Sequences)
-
-Visualizing De Bruijn sequences becomes effortless when pictured as a circular bicycle gear with 32 teeth, where each tooth is stamped with a 0 or 1 from generator constant \`0x077CB531u\`:
-
-\`\`\`text
-0x077CB531 = 0000 0111 0111 1100 1011 0101 0011 0001 (binary)
-\`\`\`
-
-The mathematical magic of this specific 32-bit word is that every single 5-bit combination (from \`00000\` up to \`11111\`, representing integers 0 through 31) appears along the circular sequence exactly once without a single repeat or omission.
-
-When an entity isolates its lowest set bit $2^k$, multiplying by $2^k$ is equivalent to rotating the entire gear by $k$ teeth:
-$$\\text{hash}(2^k) = (2^k \\times \\text{0x077CB531u}) \\gg 27$$
-
-Shifting right by 27 bits isolates the 5 teeth currently positioned directly under the gear inspection window. Because all 32 combinations are distinct, those 5 bits form a unique, collision-free index between 0 and 31. A tiny 32-byte compile-time array \`SPIRAL\` immediately returns the exact bit position $k$ in a single CPU cycle, completely eliminating slow loops and branch instructions.
-
----
-
-### 8. Diurnal Celestial Mechanics & Weather Decay
-
-Mellangan's dynamic day and night cycle (\`src/level/Night.cpp\`) drives celestial bodies and footprint persistence via continuous parametric functions:
-
-#### Diurnal Solar and Lunar Orbit
-
-$$\\theta(t) = \\frac{t - 6.0}{24.0} \\times 2\\pi$$
-
-$$\\mathbf{p}_{\\text{sun}}(t) = \\big( x_{\\text{center}} + R_{\\text{sky}} \\cos(\\theta(t)), \\; y_{\\text{center}} + R_{\\text{sky}} \\sin(\\theta(t)) \\big)$$
-
-$$\\mathbf{p}_{\\text{moon}}(t) = -\\mathbf{p}_{\\text{sun}}(t)$$
-
-At $t = 6.0$ h (dawn), $\\theta = 0$, so the Sun rises at the horizon ($y = y_c$). At $t = 12.0$ h (noon), $\\theta = \\pi / 2$, so the Sun peaks at zenith ($y = y_c + R$). The Moon is maintained at exact opposite phase $\\theta + \\pi$.
-
-#### Footprint Differential Alpha Erosion
-
-Dynamic footsteps left on snow and grass decay according to:
-
-$$\\frac{d\\alpha}{dt} = -k_{\\text{base}} \\cdot \\mu_{\\text{weather}}$$
-
-$$\\alpha(t) = \\max\\big(0, \\alpha_0 - k_{\\text{base}} \\cdot \\mu_{\\text{weather}} \\cdot t\\big)$$
-
-Where $\\mu_{\\text{weather}} = 1.0$ in clear weather, $1.6$ in rain, and $2.8$ in blizzards, ensuring footprints vanish rapidly under harsh atmospheric fronts!
-
-#### Excourse: The Blizzard Tracker (Dynamic Footprint Longevity)
-
-How does dynamic alpha erosion affect player experience in the wilderness?
-
-When any entity walks over grass or snow, the engine stamps a footprint particle into the ground layer with initial opacity $\\alpha_0 = 1.0$. The footprint decays according to:
-$$\\alpha(t) = \\max(0, 1.0 - k_{\\text{base}} \\cdot \\mu_{\\text{weather}} \\cdot t)$$
-
-With base decay rate $k_{\\text{base}} = 0.05$ per second:
-
-1. **Clear Dawn Weather ($\\mu_{\\text{weather}} = 1.0$):**
-   $$\\text{Lifetime} = \\frac{1.0}{0.05 \\times 1.0} = 20.0 \\text{ seconds}$$
-   Tracks linger on the trail for twenty full seconds. Players can easily spot predator pack movements, track elk through clearing groves, and navigate back to camp by tracing their own steps.
-
-2. **Raging Highland Blizzard ($\\mu_{\\text{weather}} = 2.8$):**
-   $$\\text{Lifetime} = \\frac{1.0}{0.05 \\times 2.8} \\approx 7.1 \\text{ seconds}$$
-   In a heavy snowstorm, tracks vanish almost three times faster. If a sanctuary seeker lags behind or the player loses visual contact for even a few seconds, the whiteout completely swallows the trail. Survival tension rises naturally through mathematical equations without requiring scripted cutscenes.
-
----
-
-### 9. Swarm Collision Detection: 3-Pass CSR Prefix-Sum Grid & Soft Elastic Relaxation (\`LevelSpace.cpp\`, \`Enemy.cpp\`)
-
-Checking collisions between all active mobs directly requires $O(N^2)$ distance evaluations. For a swarm of $N = 1{,}000$ active monsters, an all-pairs search demands:
-
-$$\\frac{N(N - 1)}{2} = \\frac{1{,}000 \\times 999}{2} = 499{,}500\\text{ pair checks per frame}$$
-
-At 60 Hz, this forces nearly 30 million square root and distance checks every second, completely exhausting the CPU frame budget.
-
-#### The O(N + C) Compressed Sparse Row (CSR) Spatial Grid
-
-Quadtrees and dynamic spatial hash tables with linked lists introduce heap allocations, pointer chasing, and cache misses. Mellangan replaces them with a **3-pass counting-sort prefix-sum grid** (\`LevelSpace.cpp\`) that partitions 2D space into $32 \\times 32$ uniform cells ($48\\text{ px}$ cell width) dynamically centered on the player:
-
-$$x_{\\text{grid}} = x_{\\text{player}} - \\frac{\\text{GRID} \\cdot \\text{CELL}}{2}, \\quad y_{\\text{grid}} = y_{\\text{player}} - \\frac{\\text{GRID} \\cdot \\text{CELL}}{2}$$
-
-Every world coordinate $(x, y)$ maps to a 1D cell index $c \\in [0, \\text{GRID}^2 - 1]$ in $O(1)$ time:
-
-$$\\text{cell}_x(x) = \\left\\lfloor \\frac{x - x_{\\text{grid}}}{\\text{CELL}} \\right\\rfloor, \\quad \\text{cell}_y(y) = \\left\\lfloor \\frac{y - y_{\\text{grid}}}{\\text{CELL}} \\right\\rfloor$$
-
-$$c(x, y) = \\text{cell}_y(y) \\cdot \\text{GRID} + \\text{cell}_x(x)$$
-
-The spatial index is reconstructed every tick across three linear passes with zero heap allocations:
-
-1. **Pass 1 (Histogram):** For each mob, compute cell index $c = c(e.x, e.y)$ and increment bucket frequency \`cellStart[c + 1]++\`.
-2. **Pass 2 (Prefix-Sum Scan):** Accumulate bucket offsets into a single contiguous array:
-   $$\\text{cellStart}[i] = \\sum_{j=0}^{i-1} \\text{count}[j]$$
-3. **Pass 3 (Scatter):** Place mob pointers directly into their pre-indexed memory slots in \`cells[cellFill[c]++] = &e\`.
-
-To query all mobs within interaction radius $r$ around $(x, y)$ via \`Level::gather\`, the engine bounds the cell indices $[x_0, x_1] \\times [y_0, y_1]$ and reads contiguous memory slices:
-
-$$\\text{slice}(c) = \\big[ \\text{cellStart}[c],\\; \\text{cellStart}[c + 1] \\big)$$
-
-Because candidate mobs reside contiguously in memory, hardware prefetchers stream entity pointers with near-zero cache thrashing.
-
-#### Mass-Proportional Soft Elastic Mob Separation
-
-Standard hard rigid-body impulse solvers cause swarms of hundreds of enemies to vibrate, tunnel, or explosively bounce off each other. Mellangan solves swarm crowding using **mass-proportional soft elastic relaxation**:
-
-1. **Distance Squared Rejection:**
-   $$d^2 = \\Delta x^2 + \\Delta y^2, \\quad \\Delta x = x_A - x_B, \\; \\Delta y = y_A - y_B$$
-   $$r_{\\text{min}} = (r_A + r_B) \\times 0.85$$
-   If $d^2 \\ge r_{\\text{min}}^2$, the entities do not touch, avoiding \`std::sqrt\` entirely. The $0.85$ factor permits an organic 15% overlap, creating natural flock density without repulsive buzzing.
-
-2. **Inertia Weighting:**
-   Immobile targets (bosses, monuments, frozen enemies with $v_{\\text{speed}} \\le 0$) do not budge. For standard mobs, displacement is shared inversely proportional to radius:
-   $$\\text{share}_A = \\begin{cases} 1.0 & \\text{if } v_{\\text{speed}, B} \\le 0 \\\\ \\dfrac{r_B}{r_A + r_B} & \\text{otherwise} \\end{cases}$$
-
-3. **Penetration Push Displacement:**
-   $$\\mathbf{p}_{\\text{push}} = \\Delta \\mathbf{x} \\left( \\frac{r_{\\text{min}} - d}{d} \\right) \\cdot \\text{share}_A$$
-
-4. **Frame Interlacing Optimization:**
-   For entities outside immediate combat range ($d_{\\text{player}} > 260\\text{ px}$), the push phase executes only on alternate frames:
-   $$\\text{if } \\big( (\\text{id} + \\text{ticks}) \\mathbin{\\&} 1 \\big) \\implies \\text{skip push phase}$$
-   This cuts narrowphase CPU cycles by 50% across outer mobs without perceptible visual loss.
-
-#### Continuous Radial Tile Obstacle Resolution (\`Level::collide\`)
-
-Solid environmental obstacles (ancient trees, cliff corners, boulder clusters) are stored as continuous obstruction radii in a 2D tile array \`solids[]\`. Instead of axis-aligned box collisions that snag entities on corners, \`Level::collide\` projects overlapping mobs along the radial normal:
-
-$$\\mathbf{p}_c = \\begin{pmatrix} 16 t_x + 8.0 \\\\ 16 t_y + 13.0 \\end{pmatrix}, \\quad r_{\\text{limit}} = r_{\\text{solid}} + r_{\\text{entity}}$$
-
-$$\\mathbf{p} \\leftarrow \\mathbf{p}_c + \\frac{\\mathbf{p} - \\mathbf{p}_c}{\\|\\mathbf{p} - \\mathbf{p}_c\\|} \\cdot r_{\\text{limit}}$$
-
-Because correction vectors always radiate from obstacle centers, monsters and players glide along stone walls and natural riverbanks without sharp velocity stops.
-
-#### Excourse: Surviving the 1,000-Mob Swarm Surge (Mass-Proportional Separation in Action)
-
-How does mass-proportional soft relaxation feel in real gameplay when over a thousand enemies converge on the screen?
-
-During high-intensity nocturnal waves (such as a Blood Moon event in \`Level.cpp\`), up to 1,200 monsters may charge the player at once:
-
-1. **The Rigid Impulse Failure:**
-   If the engine used standard physics engine impulses (velocity reflection), a pack of 20 heavy Dire Wolves colliding with 100 fast Bloodfiends would transmit rigid momentum shockwaves through the cluster. Outer monsters would accelerate to absurd supersonic speeds, launch across screen boundaries, and clip through solid walls.
-2. **The Soft Elastic Swarm Flow:**
-   With mass-proportional displacement $\\mathbf{p}_{\\text{push}}$, heavy Dire Wolves ($r = 18$) yield very little to small Leeches ($r = 6$):
-   $$\\text{share}_{\\text{wolf}} = \\frac{6}{18 + 6} = 0.25, \\quad \\text{share}_{\\text{leech}} = \\frac{18}{18 + 6} = 0.75$$
-   The small Leeches absorb 75% of the pushback, naturally parting around the flanks of the wolves like water flowing around boulders. The entire horde compresses into an intimidating, fluid front that advances steadily at 60 Hz with zero physics explosions.
-
----
-
-### 10. Swarm Pathfinding & Steering: Dijkstra Flow Fields & Orthogonal Vector Decomposition (\`Bastion.cpp\`, \`Approach.cpp\`, \`Circle.cpp\`, \`Follow.cpp\`)
-
-Standard pathfinding algorithms like $A^*$ find the shortest path for a single entity by expanding graph nodes on a priority queue. For 1,000 active monsters, running 1,000 separate $A^*$ searches each second costs dozens of milliseconds and generates massive memory churn. Mellangan eliminates this through a two-level navigation system: global **Dijkstra Flow Fields** for complex fortifications, and **Orthogonal Steering Decomposition** for open-field combat.
-
-#### Dijkstra Flow Fields: O(1) Swarm Navigation Through Fortifications (\`Bastion.cpp\`)
-
-When fortified compounds, palisades, or bastions are raised, \`bastion::raise\` computes a global directional vector field across an $N \\times N$ discrete grid:
-
-1. **Perimeter and Goal Tagging:**
-   The bastion perimeter walls are tagged as \`WALL\`, and the exit corridor is tagged as \`GOAL\`.
-2. **Breadth-First Reverse Flood Fill:**
-   A BFS queue \`uint16_t queue[N * N]\` expands outward from the \`GOAL\`. For each adjacent tile in all 8 cardinal and diagonal directions, the back-pointer compass direction toward the goal is written:
-   $$d = (k + 4) \\pmod 8$$
-   Diagonal corner-cutting is explicitly prevented by verifying that adjacent cardinal tiles are open:
-   $$\\text{if } (k \\mathbin{\\&} 1) \\text{ and } (\\text{wall}_X \\text{ or } \\text{wall}_Y) \\implies \\text{skip diagonal}$$
-3. **Instantaneous O(1) Navigation Query:**
-   Any monster or companion at world coordinate $(x, y)$ inside the bastion zone queries its navigation vector with a single memory read:
-   $$d = \\text{field.at}(x, y) \\in [0, 7]$$
-   $$\\mathbf{v}_{\\text{want}} = \\begin{pmatrix} UX[d] \\\\ UY[d] \\end{pmatrix} \\cdot v_{\\text{speed}}$$
-   Where $UX$ and $UY$ are precomputed 8-way trigonometric unit vectors:
-   $$UX = \\big\\{1,\\; \\tfrac{\\sqrt{2}}{2},\\; 0,\\; -\\tfrac{\\sqrt{2}}{2},\\; -1,\\; -\\tfrac{\\sqrt{2}}{2},\\; 0,\\; \\tfrac{\\sqrt{2}}{2}\\big\\}$$
-   $$UY = \\big\\{0,\\; \\tfrac{\\sqrt{2}}{2},\\; 1,\\; \\tfrac{\\sqrt{2}}{2},\\; 0,\\; -\\tfrac{\\sqrt{2}}{2},\\; -1,\\; -\\tfrac{\\sqrt{2}}{2}\\big\\}$$
-
-Whether 1 monster or 10,000 monsters navigate through the fortress, the routing cost is exactly one array lookup per entity.
-
-#### Predictive Interception: First-Order Kinematic Lead Geometry (\`Enemy.cpp\`)
-
-Enemies pursuing a moving player predict the player's future trajectory using first-order Taylor expansion:
-
-$$\\tau = \\min\\left(0.7, \\frac{\\|\\mathbf{r}\\|}{v_{\\text{mob}}}\\right) \\times 0.6$$
-
-$$\\mathbf{r}_{\\text{predict}} = \\mathbf{r} + \\mathbf{v}_{\\text{player}} \\cdot \\tau$$
-
-$$\\hat{\\mathbf{s}} = \\frac{\\mathbf{r}_{\\text{predict}}}{\\|\\mathbf{r}_{\\text{predict}}\\|}$$
-
-Where $\\mathbf{r} = \\mathbf{p}_{\\text{player}} - \\mathbf{p}_{\\text{mob}}$ is the relative position vector. This prevents monsters from trailing helplessly behind a sprinting hero, guiding them along efficient intercept trajectories.
-
-#### Orthogonal Steering Decomposition: Weaving, Circling & Formations
-
-In open terrain, enemies decompose desired velocity into radial components $\\hat{\\mathbf{s}}$ and orthogonal tangential components $\\hat{\\mathbf{s}}_\\perp = (-s_y, s_x)$:
-
-1. **Gait Weaving and Phase Spread (\`Approach.cpp\`):**
-   To prevent mobs from marching in artificial straight lines, each enemy derives a unique spread angle $\\theta_{\\text{spread}}$ from its deterministic seed:
-   $$\\theta_{\\text{spread}} = \\big((\\text{seed} \\gg 3 \\mathbin{\\&} 7) - 3.5\\big) \\times 0.14 \\times \\text{clamp}\\left(\\frac{d - 50}{160},\\; 0,\\; 1\\right)$$
-   A lateral weave velocity $w = \\sin(\\text{animT} \\cdot \\omega_{\\text{weave}}) \\cdot W$ is added orthogonally:
-   $$\\mathbf{v}_{\\text{steer}} = \\mathbf{R}(\\theta_{\\text{spread}}) \\hat{\\mathbf{s}} \\cdot v_{\\text{gait}} + \\hat{\\mathbf{s}}_\\perp \\cdot w$$
-
-2. **Logarithmic Spiral Orbiting (\`Circle.cpp\`):**
-   Stalking predators maintain a preferred distance $R$ by modulating radial speed as a restorative spring while driving constant tangential velocity:
-   $$v_{\\text{radial}} = \\text{clamp}\\big(2.0 \\cdot (d - R),\\; -v,\\; v\\big)$$
-   $$v_{\\text{tangent}} = v \\cdot \\text{side} \\quad (\\text{side} \\in \\{-1, +1\\})$$
-   $$\\mathbf{v}_{\\text{orbit}} = v_{\\text{radial}} \\hat{\\mathbf{s}} + v_{\\text{tangent}} \\hat{\\mathbf{s}}_\\perp$$
-
-3. **Wolf-Pack Wedge Formations (\`Follow.cpp\`):**
-   Minions calculate their target position relative to the pack leader using lateral and rear offsets:
-   $$\\mathbf{p}_{\\text{target}} = \\mathbf{p}_{\\text{leader}} - 12 \\hat{\\mathbf{s}} + 10 \\cdot \\text{side} \\cdot \\hat{\\mathbf{s}}_\\perp$$
-   This automatically organizes wolf packs into dynamic V-shaped hunting wedges without any centralized formation coordinator.
-
-#### Excourse: Storming the Bastion Gate (Dijkstra Flow Fields vs 1,000 Pathfinders)
-
-Why is the combination of Dijkstra flow fields and orthogonal steering so powerful for real-time tactical encounters?
-
-Consider a campaign scenario in \`src/campaign/Bastion.cpp\`: the player has built a fortified stronghold with thick palisades and a single narrow gateway ($2\\text{ tiles}$ wide). A nocturnal horde of 800 Renegades and Wolves attacks from all directions outside the walls:
-
-1. **The Classic A* Catastrophe:**
-   If each of the 800 enemies independently ran $A^*$ toward the player:
-   - 800 graph searches would execute every time the player moves across a room, creating massive frame-rate drops.
-   - All 800 enemies would compute the exact same single-tile path through the gate center, stacking on top of each other in an unnatural single-file string.
-2. **The Mellangan Flow-Field Execution:**
-   - The engine computes the bastion's BFS flow field once when the structure is raised.
-   - All 800 enemies sample their current tile in $O(1)$ time, immediately flowing along precalculated 8-way compass vectors toward the opening.
-   - As they funnel toward the gate, the soft elastic push solver ($\\mathbf{p}_{\\text{push}}$) spreads them across the full width of the corridor without letting them clip through palisades.
-   - Upon breaching the inner courtyard, wolves automatically switch from flow-field navigation to logarithmic spiral orbiting (\`Circle.cpp\`), peeling off to flank the hero from both sides.
-The result is tactical siege behavior running in less than $0.1\\text{ ms}$ of CPU time.
-
+The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
 `,
     mermaidCharts: [
       {
-        title: "The Mathematical Architecture of Mellangan",
-        chart: `
-flowchart TD
-    classDef math fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
-    classDef sort fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-    classDef combat fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
-    classDef bit fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-
-    Kinematics["Fixed-Step Kinematics<br/>DT = 1/60 (Semi-Implicit Euler)<br/>v = min(50, v_player * 1.05)"]:::math
-    Sight["Vision Geometry<br/>u · v >= cos(56.5°)<br/>Zero-Trigonometry Hot Loops"]:::math
-
-    Sort["Floating-Point Bijective Transform<br/>orderedBits(f) = u ^ (u>>31 | 0x80000000)<br/>3-Pass 12-Bit LSD Radix Sort O(N)"]:::sort
-    Atten["Singularity-Free Attenuation<br/>A(d) = 1.0 / (1.0 + (d/R)²)<br/>LightField & 32-Voice Audio"]:::combat
-
-    Combat["Quadratic Mitigation Theorem<br/>DPS * Duration = Base * (1-r)²<br/>75% Resist Cap = 93.75% Mitigation"]:::combat
-    MF["Hyperbolic Diminishing Returns<br/>Eff MF = (MF * 250) / (MF + 250)<br/>Asymptotic Ceiling 250%"]:::combat
-
-    Bit["Discrete Bit Twiddling<br/>Gray Parity Cancellation b0<br/>De Bruijn B(2, 5) 0x077CB531u Multiplier<br/>Affine Galois Field Z₂"]:::bit
-
-    Kinematics & Sight --> Sort
-    Atten & Combat --> MF
-    Sort & Combat --> Bit
-`,
-      },
-      {
-        title: "Comparative Mitigation Curve: Linear vs Quadratic (1-r)²",
+        title: "From counts to spatial queries",
         chart: `
 flowchart LR
-    classDef lin fill:#181524,stroke:#ef4444,stroke-width:2px,color:#f8fafc;
-    classDef quad fill:#181524,stroke:#10b981,stroke-width:2px,color:#f8fafc;
-
-    L0["r = 0%<br/>100% Taken"]:::lin
-    L25["r = 25%<br/>75% Taken"]:::lin
-    L50["r = 50%<br/>50% Taken"]:::lin
-    L75["r = 75%<br/>25% Taken"]:::lin
-
-    Q0["r = 0%<br/>100% Taken"]:::quad
-    Q25["r = 25%<br/>56.25% Taken (-43.75%)"]:::quad
-    Q50["r = 50%<br/>25.00% Taken (-75.00%)"]:::quad
-    Q75["r = 75% (Cap)<br/>6.25% Taken (-93.75%!)"]:::quad
-
-    L0 --> L25 --> L50 --> L75
-    Q0 --> Q25 --> Q50 --> Q75
+    A[Count enemies per cell] --> B[Prefix sums]
+    B --> C[Scatter into contiguous ranges]
+    C --> D[Gather nearby cell candidates]
+    D --> E[Caller applies exact checks]
 `,
       },
-          {
-        title: "Swarm Spatial Grid & Flow-Field Navigation Architecture",
-        chart: `
-flowchart TD
-    classDef grid fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-    classDef flow fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
-    classDef phys fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-
-    Coords["Active Mobs (x, y)"]:::grid
-    CSR["3-Pass CSR Spatial Grid<br/>Hist -> Prefix-Sum -> Scatter O(N+C)"]:::grid
-    Gather["Level::gather(r=140)<br/>Contiguous Memory Slices"]:::grid
-
-    Dijkstra["Bastion Dijkstra Flow Field<br/>BFS Reverse Flood Fill O(1)"]:::flow
-    Steer["Orthogonal Steering Decomposition<br/>Radial Lead + Tangential Weave"]:::flow
-
-    Push["Soft Elastic Push Relaxation<br/>Overlapping Delta with Radius Mass Share"]:::phys
-    Collide["Radial Tile Obstacle Solver<br/>Level::collide Continuous Projection"]:::phys
-
-    Coords --> CSR --> Gather
-    Gather --> Push
-    Dijkstra & Steer --> Coords
-    Push --> Collide
-`,
-      },
-],
-    interactiveComponent: "engine-math",
+    ],
   },
 ];
