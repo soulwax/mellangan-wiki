@@ -37,7 +37,9 @@ export interface WikiSection {
     | "refugee"
     | "audiomixer"
     | "weather"
-    | "engine-math";
+    | "engine-math"
+    | "input-response"
+    | "status-resistance";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -4702,6 +4704,7 @@ Because every edge is assigned one queue step, breadth-first search minimizes th
 
 The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
 `,
+    interactiveComponent: "status-resistance",
     mermaidCharts: [
       {
         title: "From counts to spatial queries",
@@ -4834,5 +4837,19 @@ For example, a horizontal input of 0.50 becomes approximately 0.33. The same res
 
 \`src/test/InputTest.cpp\` exercises gamepad mapping, dead zone and threshold behavior, rebinding, cancellation, persistence and representative prompt text. When adding a binding, update the relevant binding table and count, check fixed controls and prompt words, and extend the tests for the new behavior.
 `,
+    interactiveComponent: "input-response",
+    mermaidCharts: [
+      {
+        title: "From SDL events to game actions",
+        chart: `
+flowchart LR
+    Event[SDL input event] --> Handle[Input handle]
+    Handle --> Binding[Fixed or configured binding]
+    Binding --> Key[Key down and press count]
+    Key --> Tick[Input tick]
+    Tick --> Action[Game and menu actions]
+`,
+      },
+    ],
   },
 ];
