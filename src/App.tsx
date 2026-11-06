@@ -212,6 +212,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         shortTitle: "Menu Text & Language Overrides",
       },
       {
+        id: "input-controls",
+        shortTitle: "Input, Controls & Rebinding",
+      },
+      {
         id: "audio-qa",
         shortTitle: "32-Voice LRU Audio Mixer & QA Views",
       },

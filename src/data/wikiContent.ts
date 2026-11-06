@@ -2814,8 +2814,9 @@ The five schemes define colors for warnings, damage, healing, comparison indicat
 
 \`PaletteTest.cpp\` models each alternative under a corresponding simulated vision matrix and compares selected color distances against the standard scheme. It tests item rarity separation, hurt versus heal, and warning versus a sample grass color. These checks help catch regressions in those comparisons; they do not establish readability for every scene, display or player.
 
-#### 17-Action Key Rebinding System (\`keys.txt\`)
-The controls interface permits remapping of 17 core gameplay actions (directional movement, class skill, inventory, pause, map, gather, build, loot labels, and codex). When assigning a key already allocated elsewhere, the engine automatically swaps the two bindings, while reserving core navigation keys (arrows, Enter, Esc, 1-4) so menus remain perpetually functional.
+#### Controls and rebinding
+The controls menu saves 17 keyboard bindings and eight gamepad bindings in \`keys.txt\`. See **Input, Controls & Rebinding** for the fixed controls, conflict handling, analog stick behavior and prompt substitutions.
+
 `,
 
     mermaidCharts: [
@@ -4788,6 +4789,50 @@ The menu fades the picture and clip gain over the final 0.5 seconds. Input after
 ### Ownership and cleanup
 
 The menu owns the decoder, CPU buffer, image and texture. Its destructor ends the clip, waits for the renderer, then frees the texture, image and decoder. Ending the clip also allows the ordinary music stream to refill. Video and audio come from separate files; the menu advances video from its own clock and does not implement an explicit audio-clock synchronization mechanism.
+`,
+  },
+  {
+    id: "input-controls",
+    title: "35. Input, Controls & Rebinding",
+    category: "core",
+    summary: "Key transitions, keyboard and gamepad bindings, stick dead zones, saved mappings and contextual prompts.",
+    sourceFiles: [
+      "src/input/Key.hpp",
+      "src/input/Input.hpp",
+      "src/input/Input.cpp",
+      "src/menu/ControlsMenu.cpp",
+      "src/test/InputTest.cpp",
+    ],
+    content: `
+### From an event to an action
+
+\`Input::handle()\` receives SDL events and updates shared \`Key\` objects. A \`Key\` records whether it is held (\`down\`) and counts transitions from released to pressed. At the next \`Input::tick()\`, \`clicked\` is set if at least one press was recorded and the count is cleared. A press and release between ticks can therefore produce \`clicked\` even though \`down\` is already false. Losing window focus releases the keys and clears stored stick and trigger state.
+
+Keyboard and gamepad bindings can point to the same action. Some gamepad bindings deliberately control two actions: by default, X maps to Gather and Retry, Y to Inventory and Codex, and Back to Map and Quit. Which action matters depends on the current game or menu context.
+
+### Rebinding and persistence
+
+The controls menu exposes 17 keyboard rows and eight gamepad rows. It switches the displayed set according to the current input mode. Selecting a row listens for a new key or supported pad button; Escape cancels keyboard listening and B cancels gamepad listening. Reset restores both sets of defaults.
+
+\`Input::rebind()\` rejects unknown and fixed scancodes. \`rebindPad()\` accepts only buttons listed by \`padName()\`. If the requested input is already assigned, the other binding receives the selected row's old input. Both methods release the tracked keys after a successful change, avoiding an unintended held action during the swap.
+
+Arrow keys, Enter, Escape, number keys 1–4 and other keys handled by \`fixed()\` remain fixed. On gamepad, A, B, Start and the D-pad are fixed; supported bindable inputs include X, Y, shoulders, stick buttons, triggers and listed auxiliary buttons. Consult \`Input.cpp\` for the complete current lists.
+
+\`saveKeys()\` writes names and numeric SDL scancodes or pad identifiers to \`keys.txt\`. \`parseKeys()\` applies valid entries through the same rebind methods, so conflicts are resolved in file order. The controls menu requests a save after listening ends and when defaults are restored; \`Game::saveKeys()\` writes only when \`writes()\` permits it.
+
+### Stick dead zone and button hysteresis
+
+The left stick uses a radial dead zone. If its raw magnitude is $m \\le 0.25$, output is zero. Outside the dead zone, the magnitude is rescaled from the remaining range to $[0,1]$, while preserving direction:
+
+$$\\mathbf{s}=\\frac{\\mathbf{v}}{m}\\min\\left(1,\\frac{m-0.25}{0.75}\\right)$$
+
+For example, a horizontal input of 0.50 becomes approximately 0.33. The same rescaled axes also drive digital menu directions: a direction presses when its component exceeds 0.6 and remains held until it drops to 0.3 or below. This gap reduces repeated press/release changes near a threshold. Triggers use a separate gap: they press above 0.5 and remain held above 0.25.
+
+### Prompts and tests
+
+\`Input::prompt()\` substitutes recognized space-delimited words. In pad mode it applies fixed replacements such as \`Enter\` to \`A\`, then checks the configured pad binding words. In keyboard mode it substitutes certain default prompt words when their keyboard binding has changed. This is a targeted text substitution, not a general parser for arbitrary sentences or punctuation.
+
+\`src/test/InputTest.cpp\` exercises gamepad mapping, dead zone and threshold behavior, rebinding, cancellation, persistence and representative prompt text. When adding a binding, update the relevant binding table and count, check fixed controls and prompt words, and extend the tests for the new behavior.
 `,
   },
 ];
