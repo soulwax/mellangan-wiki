@@ -157,6 +157,10 @@ const GODOT_NAV_TREE: NavTreeGroup[] = [
         id: "radix-rendering",
         shortTitle: "64-Bit Radix Y-Sort & LightField",
       },
+      {
+        id: "intro-playback",
+        shortTitle: "Intro Video & Audio Playback",
+      },
     ],
   },
   {
@@ -333,9 +337,8 @@ const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
       {
         id: "audio-qa",
         title: "32-Voice Audio Mixer",
-        subtitle: "LRU stealing & QA frequency view",
+        subtitle: "Effect voices, music & ambience",
         icon: Terminal,
-        badge: "LAB",
       },
     ],
   },

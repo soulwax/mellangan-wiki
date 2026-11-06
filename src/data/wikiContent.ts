@@ -1352,10 +1352,10 @@ flowchart TD
   },
   {
     id: "audio-qa",
-    title: "11. 32-Voice LRU Audio Mixer & Automated Visual QA",
+    title: "11. Audio Streams, Voice Selection & Visual QA",
     category: "core",
     summary:
-      "SDL3 AudioStream voice stealing, hardware frequency-ratio pitch jitter, exponential weather beds, and headless QA views.",
+      "SDL3 effect streams, oldest-start voice selection, music and weather playback, and visual QA views.",
     sourceFiles: [
       "src/audio/Sound.cpp",
       "src/Bench.cpp",
@@ -1363,39 +1363,30 @@ flowchart TD
       "src/test/view/Screenshots.cpp",
     ],
     content: `
-### 32-Voice LRU Audio Stream Architecture (\`src/audio/Sound.cpp\`)
+### Sound effects, music and ambience (\`src/audio/Sound.cpp\`)
 
-Instead of relying on external audio middleware, \`Sound.cpp\` builds a zero-allocation mixer directly on top of **SDL3 \`SDL_AudioStream\`**:
+The audio device uses SDL streams. \`Sound::init()\` requests mono, 44.1 kHz signed 16-bit audio for the effect streams; the actual device format is queried and logged. Each effect WAV must match that requested format, or \`Sound::load()\` rejects it and logs a warning.
 
-1. **Pre-Bound 32-Voice Pool & Oldest-Voice Stealing:**
-   At startup, \`Sound::init\` creates 32 \`SDL_AudioStream *\` instances bound to the playback device (\`44.1 kHz, Mono S16\`). When \`Sound::play\` is called:
-   - First, it checks the per-effect anti-comb-filtering gate: \`if (now - last < Uint64(gap * 1000)) return;\`.
-   - Next, it scans \`voices[0..31]\` for any stream with \`SDL_GetAudioStreamQueued(voices[i]) == 0\`.
-   - If all 32 voices are actively playing, it steals the **oldest voice** via \`if (voiceStarted[i] < voiceStarted[pick]) pick = i;\`!
+#### Effect voices
 
-2. **Hardware Resampling Pitch Jitter:**
-   Each sound call applies randomized frequency-ratio scaling directly on the stream:
-   \`SDL_SetAudioStreamFrequencyRatio(v, pitch * (1 + rng.range(-pitchJitter, pitchJitter)));\`
+There are 32 pre-created effect streams. An effect has a shared minimum gap between plays, measured in milliseconds using \`SDL_GetTicks()\`. After the gap check, \`Sound::play()\` chooses the first stream whose queued input is empty. If none is empty, it chooses the stream with the oldest recorded start time. The chosen stream is cleared, assigned gain \`volume * effectsGain\`, given a frequency ratio of \`pitch * (1 + random jitter)\`, and filled with the effect's PCM data.
 
-3. **Quadratic Distance Attenuation:**
-   To maintain sub-microsecond mixing performance without evaluating square roots, spatial sounds apply rational quadratic distance falloff relative to the player position:
-   $$A(d) = \\frac{1.0}{1.0 + \\left(\\frac{d}{R}\\right)^2}$$
-   where $d$ is Euclidean separation in world units and $R$ is the reference hearing radius (typically 140 pixels).
+The selection uses start time, not sound category or priority. Music and ambient beds have separate streams and do not occupy the 32 effect slots. An empty input queue is SDL's reported queue state, not a guarantee about every sample already buffered downstream.
 
-4. **Exponentially Smoothed Weather Beds (\`beds[]\`):**
-   Continuous ambient loops (\`rain.wav\`, \`wind.wav\`) smoothly interpolate their gain every tick via \`b.gain += (b.want - b.gain) * 0.02f;\` and automatically flush their queued PCM buffer when \`b.gain < 0.002f && b.want == 0\`.
+#### Music, weather and gain
 
-5. **Priority Preemption Hierarchy:**
-   Audio streams are classified into 5 strict priority tiers:
-   - **Priority 4 (BGM):** Nocturnal ambient streams (\`night.ogg\`); never preempted under any circumstances.
-   - **Priority 3 (Boss Omens):** Roars, screen-shake stingers, and omen announcements.
-   - **Priority 2 (Player Combat):** Weapon swings, spell detonations, critical strikes, and status afflictions.
-   - **Priority 1 (Environmental SFX):** Campfire crackle, watchtower arrows, door clicks.
-   - **Priority 0 (Footsteps & Minor Sparks):** Ephemeral movement ticks; first candidates for LRU voice stealing.
+- \`night.ogg\` is decoded into memory at initialization. \`Sound::tick()\` refills the music stream when its queued input falls below one decoded track's length, unless music is hushed for a clip.
+- Rain and wind WAVs use separate looping streams. \`Sound::ambience()\` sets their target gains from clamped weather inputs, with peaks of 0.20 and 0.14. Each tick moves the current gain 2% toward its target. Once a silent target fades below 0.002, the stream queue is cleared.
+- \`Sound::mix()\` sets the device master gain and the music stream gain. Effects use the effect gain when played; the next ambience target uses the ambience gain. Mute sets the device gain to zero and restores the stored master gain when toggled back.
+- Some callers gate sound by visibility, such as \`Enemy::voice()\`. \`Sound::play()\` itself has no listener position or distance attenuation parameter.
+
+#### One-shot clip playback
+
+\`Sound::clip()\` decodes a separate Ogg file, queues it on its own stream and hushes music by clearing its queue and stopping refills. \`clipGain()\` clamps the clip gain to 0–1. \`endClip()\` releases the stream and decoded data and allows music refilling on a later tick. See the intro playback chapter for the video that uses this path.
 
 ### Automated Test Suites, Benchmarks & Visual QA (\`src/test/\`)
 
-Mellangan includes a built-in verification and visual regression harness across **13 test files** in \`src/test/\`:
+Mellangan includes a built-in verification and visual QA harness in \`src/test/\`:
 - **Deterministic Unit & Simulation Suites (\`src/test/Test.cpp\`):**
   1. \`CoreTest.cpp\`: Slab allocator (\`testPoolAllocAndFree\`, \`testPoolConcurrency\`), level lifecycle, and multi-threaded AI passes.
   2. \`CombatTest.cpp\` & \`PayloadTest.cpp\`: 7 statuses (\`testStatuses\`, \`testStatusDamage\`, \`testNewStatuses\`), 16 weapon payloads (\`testNewPayloads\`), and shape forms (\`testShapeForms\`).
@@ -1407,7 +1398,7 @@ Mellangan includes a built-in verification and visual regression harness across 
 `,
     mermaidCharts: [
       {
-        title: "SDL3 32-Voice LRU Selection & Weather Bed Mixer",
+        title: "SDL3 Effect Voice Selection & Weather Beds",
         chart: `
 flowchart TD
     classDef sfx fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -1415,7 +1406,7 @@ flowchart TD
     classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
     Play["Sound::play(volume, pitchJitter, pitch)"]:::sfx
-    Gate["Comb-Filter Gate<br/>now - last < gap * 1000 -> Ignore"]:::sfx
+    Gate["Per-effect gap<br/>now - last < gap * 1000 -> Ignore"]:::sfx
     Scan["Scan voices[0..31]<br/>Find Queued == 0 OR Min(voiceStarted[i])"]:::mix
     Ratio["SDL_SetAudioStreamFrequencyRatio<br/>pitch * (1 + rng(-jitter, +jitter))"]:::mix
     Beds["Weather Beds (rain, wind)<br/>b.gain += (b.want - b.gain) * 0.02f"]:::mix
@@ -1446,7 +1437,6 @@ flowchart LR
 `,
       },
     ],
-    interactiveComponent: "audiomixer",
   },
   {
     id: "contribute-basics",
@@ -4728,6 +4718,35 @@ The return value counts accepted lines, not distinct keys; if a key appears more
 The parser counts \`{\` characters; it does not fully validate \`fmt\` syntax, argument types, or the order of placeholders. A translation can pass that check and still fail when \`say()\` formats it. Keep the placeholders compatible with the call site and test actual formatted output. For example, \`endlessRun\` has two arguments, while \`world\` has one.
 
 To add a menu string, define its English default in \`Lang\`, add its member to \`LANG_KEYS\`, use it at the render site, and extend \`src/test/LangTest.cpp\` for formatting or parsing behavior. The existing test checks nonempty defaults, unique keys and members, formats defaults containing braces, and checks accepted and rejected overrides. It does not validate every possible translation or exercise a startup file loader.
+`,
+  },
+  {
+    id: "intro-playback",
+    title: "34. Intro Video and Audio Playback",
+    category: "graphics",
+    summary: "Startup conditions, MPEG frame decoding, Vulkan2D texture updates and the separate audio clip lifecycle.",
+    sourceFiles: [
+      "src/Game.cpp",
+      "src/menu/IntroMenu.hpp",
+      "src/menu/IntroMenu.cpp",
+      "src/audio/Sound.cpp",
+    ],
+    content: `
+### When the intro appears
+
+After initializing audio and applying settings, \`Game\` chooses the optional intro only when the intro setting is enabled, both required files exist, and the session is not a campaign launch, developer mode, benchmark, or read-only run. The files are \`res/videos/moth_studios.mpg\` and \`res/videos/moth_studios.ogg\`; otherwise startup continues to the title menu.
+
+### Decoding and presentation
+
+\`IntroMenu\` opens the MPEG video with \`pl_mpeg\`, disables its embedded audio, allocates an RGBA buffer, and creates a Vulkan2D image and texture. When the frame resource and duration are valid, it starts the separate Ogg clip through \`Sound::clip()\`.
+
+On each menu tick, \`decode()\` consumes video frames until the next frame time is ahead of the menu clock. Each decoded frame is converted to RGBA; after the loop, only the latest is uploaded to the existing texture. Rendering clears the screen to black and fits the video within the viewport while preserving its aspect ratio.
+
+The menu fades the picture and clip gain over the final 0.5 seconds. Input after the first 0.1 seconds starts an early fade. When the fade ends, the title menu replaces the intro. If video setup fails, duration is set to zero and the menu proceeds to the title on its next tick.
+
+### Ownership and cleanup
+
+The menu owns the decoder, CPU buffer, image and texture. Its destructor ends the clip, waits for the renderer, then frees the texture, image and decoder. Ending the clip also allows the ordinary music stream to refill. Video and audio come from separate files; the menu advances video from its own clock and does not implement an explicit audio-clock synchronization mechanism.
 `,
   },
 ];
