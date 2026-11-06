@@ -748,7 +748,7 @@ At the beginning of \`Enemy::think()\`, each enemy first selects its target via 
 \`\`\`cpp
 const Mob &Enemy::quarry() const {
   const Mob *best = level->player;
-  double px = best->x - x, py = best->y - y, bd = px * px + py * py;
+  double px = best->x - x, py = best->y - y, bd = best->dead() ? 1e18 : px * px + py * py;
   for (const Ally *a : level->allies) {
     double xd = a->x - x, yd = a->y - y, d = xd * xd + yd * yd;
     float reach = a->def.lure ? 220.0f : 110.0f;
@@ -764,6 +764,10 @@ const Mob &Enemy::quarry() const {
 
 Sense Enemy::sense() const {
   const Mob &p = quarry();
+  if (p.dead()) {
+    double a = (seed & 1023) / 1023.0 * TAU + animT * ((seed >> 10 & 1) ? 0.15 : -0.15);
+    return {std::cos(a) * 400, std::sin(a) * 400, 400, std::cos(a), std::sin(a), false};
+  }
   double rx = p.x - x, ry = p.y - y, raw = std::sqrt(rx * rx + ry * ry);
   double lead = std::min(0.7, raw / std::max(20.0, double(type.speed))) * 0.6;
   Sense s{rx + p.xa * lead, ry + p.ya * lead, 0, 0, 0, false};
@@ -778,6 +782,7 @@ Sense Enemy::sense() const {
 1. **Dynamic Ally & Decoy Aggro Redirection (\`Enemy::quarry\`):**
    - Combat allies (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Drone\`, \`Crew\`) pull enemy aggro when they are within \`110 px\` of the monster and closer than the player (\`d < bd\`).
    - A **\`Decoy\` (\`Mirror Image\`, \`def.lure == true\`)** has double the aggro capture radius (\`reach = 220.0f\`) and multiplies its squared distance by **\`0.2\`** (\`d *= 0.2\`), making it appear $\\sqrt{5} \\approx 2.236\\times$ closer than it physically is so nearby monsters aggressively peel off the player to attack the decoy!
+   - If the player is dead, living allies in range can still be selected. Otherwise, sensing returns an unseen point 400 px away whose direction changes with time, so enemies do not continue tracking the fallen player.
 2. **Predictive Intercept Vector (\`lead\`):**
    Instead of steering naively toward the target's current position \`(p.x, p.y)\`, the enemy estimates time-to-intercept \`raw / max(20.0, type.speed)\` (clamped to \`0.7s\` and scaled by \`0.6\`, yielding up to \`0.42s\` of velocity lookahead) and offsets \`(s.xd, s.yd)\` by \`(p.xa * lead, p.ya * lead)\`.
 3. **The 113° Forward Sight Cone (\`s.seen\`):**
@@ -2595,31 +2600,31 @@ At the start of a run, \`Level\` rolls \`rng.chance(0.85f)\` (unless overridden 
 ### Shrine Dawn-Pull & Quadratic Sunrise Mechanics (\`Night.cpp\`)
 
 #### 1. Shrine Kindling Pulls Dawn Closer by 60 Seconds (\`Night::dawnAt()\`)
-Standing within \`28 px\` of an unlit \`StructureKind::Shrine\` charges \`kindling\` over \`KINDLE = 6.0f\` seconds (\`kindling += DT * level.kindleRate / KINDLE\`, decaying at \`DT * 0.5f\` when stepping away). When \`kindling >= 1.0f\`, \`Night::kindle(Level &level, Shrine &s)\` executes:
-1. Marks \`s.lit = true\`, increments \`lit\`, sets \`offering = true\` (opening \`ShrineMenu\` for a blessing/curse choice), and records the biome bit in \`level.litBiomes |= 1u << int(world::biomeUnder(s.x, s.y))\`.
-2. Heals the player by \`+35% maxHp\` and spawns a **guard retaliation ring** of \`8 + 3 * lit\` enemies of tier \`strongestUnlocked(level.time)\` at radius \`170 px\`.
-3. **Pulls Dawn Closer:** Every kindled shrine subtracts \`r.dawnPull = 60.0f\` seconds from the night length!
+Standing inside an unlit shrine's structure footprint charges \`kindling\` at \`level.kindleRate / KINDLE\` per second, with \`KINDLE = 6\`. Progress decays by half a unit per second outside the footprint. On completion, \`Night::kindle()\`:
+
+1. Records the shrine (up to \`MAX_LIT\`), increments the codex shrine count, marks its biome, and sets \`offering\` so the game opens the shrine menu.
+2. Magnets gems strictly within \`PULL = 240\` px of the shrine center, resets their speed, and creates a nova and visual effects. It also spawns \`8 + 3 * lit\` guards at radius 170, using the strongest enemy kind unlocked at the current time.
+3. In a run that ends at dawn, each recorded shrine advances dawn by \`r.dawnPull\` seconds (60 by default). In cycling modes, shrine count does not shorten the night.
+
 \`\`\`cpp
-float Night::dawnAt(const Level &level) const {
+float Night::dawnAt() const {
   const RunRules &r = level.rules;
   return nightStart + r.nightLength - (r.endsAtDawn ? lit * r.dawnPull : 0);
 }
 \`\`\`
 
 #### 2. The Final 150 Seconds (\`Night::daylight()\`)
-During the final **150 seconds** before \`dawnAt()\`, \`Night::daylight(level)\` smoothly warms the ambient lightmap along a quadratic curve \`d * d\`:
+During the final 150 seconds before dawn, \`Night::daylight()\` returns a quadratic ramp. In cycling modes, the dawn period instead returns \`clampf((dayEnds - level.time) / 20, 0, 1)\`.
+
 \`\`\`cpp
-float Night::daylight(const Level &level) const {
-  if (!level.rules.endsAtDawn && !nightTime)
-    return 1;
-  if (dawn)
-    return 1;
-  float left = dawnAt(level) - level.time;
-  float d = std::clamp(1.0f - left / 150.0f, 0.0f, 1.0f);
+float Night::daylight() const {
+  if (dawn && !level.rules.endsAtDawn)
+    return clampf((dayEnds - level.time) / 20, 0, 1);
+  float d = clampf(1 - left() / 150, 0, 1);
   return d * d;
 }
 \`\`\`
-When \`level.time >= dawnAt(level)\`, \`Night::tick\` sets \`dawn = true\` and triggers \`level.game.onDawn()\` (or cycles seamlessly between night and day via \`Night::cycle\` in non-ending campaign modes where \`!r.endsAtDawn\`).
+For runs that end at dawn, \`Night::tick()\` calls \`game.onDawn()\`. Cycling modes use \`Night::cycle()\` to transition between night and day.
 
 ---
 
@@ -4485,6 +4490,12 @@ public:
 
 ---
 
+### Sentries and walls (\`src/campaign/Sentry.cpp\`)
+
+Sentries select the nearest living, unburied enemy within 120 px of their post. They chase within 70% of that guard radius and cleave nearby enemies when in reach. Their movement passes through the active \`RunRules::wall\` callback. When a sentry pushes an overlapping enemy, the same wall callback constrains the displacement, except for Shades. This keeps ordinary enemies from being pushed through a bastion wall.
+
+---
+
 ### 3. Settlement Economy, Vendor Discounts & The Loyal Hound Companion
 
 Leading a sanctuary seeker safely across the perimeter into the town safe radius (\`settle()\`) permanently expands the settlement and yields three compounding rewards:
@@ -4517,13 +4528,11 @@ struct Delve {
 \`\`\`
 
 #### Delve Dynamics:
-1. **Surface Sealing (\`seal()\`):** Entering a delve seals the surface entrance with solid stone blocks. The surface daylight fades, ambient \`gloom\` increases, and subterranean dust particles fill the air.
-2. **Three-Floor Progression (\`FLOORS = 3\`):** Players descend through 3 sequential floor chambers of increasing depth and monster density.
-3. **Subterranean Guardian Bosses (\`guardian(act)\`):** Each floor culminate in guardian encounters tailored to the regional act:
-   - Act 1: Armored Burrowers
-   - Act 2: Crypt Specters
-   - Act 3: Ironplate Minotaurs
-4. **Earthquakes & Unsealing (\`quake()\`, \`unseal()\`):** Defeating the delve's final chamber triggers screen tremors and unseals the exit vault, showering the party in ancient relic caches and high-tier affix loot!
+1. **Entry and sealing:** An uncompleted mine within 48 px can start a delve. The game places a ring of rubble around its center, pauses ordinary spawning, and removes nearby non-boss enemies.
+2. **Three waves:** Each wave begins after the previous area's enemies have been cleared and the wait has elapsed. The first has cave bats and kobold miners; the second has rock crawlers, ore golems and a cave bat. The third adds a guardian, kobold miners and rock crawlers.
+3. **Guardian by act:** Acts 1–5 use Cyclops, Mycelial Brute, Iceback, Glass Mantis and Cyclops respectively. The guardian appears in the third wave only.
+4. **Completion:** Clearing the final wave restores the spawn rate, removes rubble, records the cleared mine, and creates a chest, boss-source item drops, four ore and two rune material drops. Aborting also restores spawning and removes rubble.
+
 `,
     mermaidCharts: [
       {
