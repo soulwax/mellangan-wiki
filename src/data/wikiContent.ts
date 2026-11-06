@@ -2730,29 +2730,54 @@ flowchart TD
     title: "22. Persistence, 6-World History LRU, Codex Unlocks & Balance INI",
     category: "core",
     summary:
-      "Atomic .bak durability, 50 achievements with hints, runs.csv telemetry, Okabe-Ito colourblind palette, and key rebinds.",
+      "Save files, backup fallback, campaign autosaves, run records, settings and Codex progress.",
     sourceFiles: [
       "src/meta/Saves.cpp",
       "src/meta/Saves.hpp",
+      "src/GameCampaign.cpp",
+      "src/level/Chart.cpp",
+      "src/test/SaveTest.cpp",
       "src/meta/Codex.hpp",
       "src/meta/Feats.cpp",
       "src/meta/Settings.cpp",
+      "src/menu/SettingsMenu.cpp",
+      "src/gfx/Palette.hpp",
+      "src/test/PaletteTest.cpp",
       "src/input/Input.cpp",
     ],
     content: `
-### Cross-Platform Persistence & Durability (\`src/meta/Saves.cpp\`)
+### Save files and recovery (\`src/meta/Saves.cpp\`)
 
-All persistent player progression in **Mellangan** is coordinated by \`Saves\` (\`src/meta/Saves.hpp\`) across platform-standard user application data directories:
-* **Windows:** \`%APPDATA%/soulwax/Mellangan/\`
-* **Linux:** \`~/.local/share/soulwax/Mellangan/\`
-* **macOS:** \`~/Library/Application Support/soulwax/Mellangan/\`
+\`Saves::open()\` asks SDL for the preference directory using \`SDL_GetPrefPath("soulwax", "Mellangan")\`. Its exact location depends on the platform and environment. If no preference path is available, \`Saves::read()\` returns an empty string and \`Saves::write()\` does nothing.
 
-#### Atomic Save Durability with \`.bak\` Redundancy
-To ensure player saves survive system crashes, sudden power outages, or write interruptions, every save file (\`codex\`, \`campaign\`, world history charts, \`settings.txt\`, and \`keys.txt\`) utilizes atomic swap semantics:
-1. Content is written to a temporary sibling file (\`<name>.tmp\`).
-2. Upon verified completion, the existing file is copied to \`<name>.bak\`.
-3. The temporary file is renamed atomically into place.
-If a primary save file is detected as corrupted, truncated, or unreadable at startup, the engine automatically restores state from the \`.bak\` backup file, outputting an informative warning in \`mellangan.log\`.
+#### Writing a file
+
+\`Saves::store()\` follows this sequence:
+
+1. Write the new bytes to \`<name>.tmp\` using \`SDL_SaveFile()\`. A failure is logged and returns \`false\`.
+2. If the current primary exists and is nonempty, attempt to rename it to \`<name>.bak\`. The code does not check this rename's return value.
+3. Rename the temporary file to the primary name. Failure is logged and returns \`false\`; success returns \`true\`.
+
+The ordinary \`Saves::write()\` wrapper discards that return value. These steps provide a backup and a temporary file, but the code does not verify the saved contents or establish a guarantee against every crash or filesystem failure. In particular, do not treat the backup as a verified copy: it is the previous nonempty primary, which may itself be invalid.
+
+#### Reading and fallback
+
+\`Saves::recall()\` reads the primary first. A nonempty primary is accepted if no validator was supplied, or if its validator passes. Otherwise it tries \`<name>.bak\` with the same rules. If the backup is accepted, the function logs a warning and **returns its contents**; it does not rewrite the primary. If neither is acceptable, it returns the original primary contents, which can be empty or invalid. Callers must still handle invalid input.
+
+| Data | Validation before fallback | Notes |
+|:---|:---|:---|
+| Campaign | \`Campaign::valid\` | An invalid primary can trigger backup fallback. |
+| Codex | Newline and parse check | \`Codex::load()\` also parses the returned data before applying it. |
+| Chart | Header and expected byte length | \`Chart::load()\` checks the returned data again. |
+| Settings, keys, world history and run log | No validator supplied by these read sites | A nonempty primary is accepted without a corruption check by \`recall()\`. |
+
+\`Saves::erase()\` removes the primary, backup and temporary siblings. \`src/test/SaveTest.cpp\` exercises fallback from missing, empty and invalid files for several of these paths; it is not a test of every possible filesystem interruption.
+
+#### Campaign autosave and run history
+
+\`Game::saveCampaign()\` captures and saves only when a campaign and level exist and the player is alive. It writes only when \`writes()\` permits it. The campaign tick resets a 60-second autosave timer, and other actions such as completing a delve or rescuing a sanctuary seeker also request a save.
+
+\`Saves::record()\` keeps up to six recent world records, moving the recorded world to the front, accumulating its run count, best time and dawn flag. Evicting the oldest record also calls \`erase()\` on its chart and sibling backup and temporary files.
 
 #### 50 In-Game Achievements & Codex Unlocks (\`src/meta/Feats.cpp\`)
 The Codex tracks 50 distinct achievements spanning lifetime milestones, single-run feats, challenge completions, and class masteries:
@@ -2762,17 +2787,32 @@ The Codex tracks 50 distinct achievements spanning lifetime milestones, single-r
 The final Codex tab displays all 50 achievements, providing contextual hint text for locked entries and maintaining stable IDs for future digital storefront synchronization.
 
 #### Run Balancing Telemetry (\`runs.csv\` & \`tools/run_report.py\`)
-Every completed or fallen run appends a dense telemetry row to \`runs.csv\` inside the save folder:
+When run recording is permitted, the game reads \`runs.csv\`, replaces its header, adds a telemetry row and writes the resulting file through \`Saves::write()\`:
 * Timestamp, game version, world seed, difficulty, selected class, active omen, final time, dawn status, and cause of death.
 * Player level, kill tally, shrines ignited, distance traversed, and total damage dealt.
 * Per-weapon levels and aggregate damage output, upgrade selection order, level checkpoints at each minute, and dwell duration per biome.
 The bundled \`tools/run_report.py\` utility parses this telemetry to calculate median weapon damage per second, class win rates by Heat tier, and highlight statistical balance outliers.
 
-#### Settings Configuration Menu (\`settings.txt\`)
-Opened via the O key (or RB on gamepad), the settings interface enables immediate adjustment of:
-* **Audio Volumes:** Master, music, sound effects, and ambient environmental audio in 10% increments.
-* **Visual Feedback:** Screen shake intensity and damage flash opacity in 25% increments; full or reduced particle density; damage numbers toggle; fullscreen mode; vsync and triple-buffering fallbacks.
-* **Okabe-Ito Colourblind Palette:** Adjusts combat warning indicators to deuteranopia- and protanopia-safe hues: enemy attack rings shift to bright magenta over green grass, player damage turns vermillion, healing glows sky blue, and item rarities adhere to Okabe-Ito colorblind metrics.
+#### Settings: from file to screen (\`Settings.cpp\`, \`SettingsMenu.cpp\`)
+
+\`Settings\` starts with defaults. Outside benchmark mode, startup reads \`settings.txt\` from the preference directory and parses recognized \`key integer\` lines. Values are clamped to each field's allowed range; unknown or malformed lines leave the corresponding defaults unchanged. If the settings file is empty, startup checks the older \`visual.txt\` for the reduced-particles setting. \`Settings::save()\` writes every registered field as a separate line.
+
+| Menu control | Stored key | Values and behavior |
+|:---|:---|:---|
+| Master, music, effects, ambience | \`master\`, \`music\`, \`effects\`, \`ambience\` | 0–100, adjusted in steps of 10 in the menu. |
+| Screen shake, flashes | \`shake\`, \`flash\` | 0–100, adjusted in steps of 25. |
+| Particles, damage numbers | \`reduced_particles\`, \`damage_numbers\` | 0 or 1; particle density and number visibility are separate settings. |
+| Colours | \`colourblind\` | 0–4: Standard, Deuteranopia, Protanopia, Tritanopia and Monochrome. |
+| Fullscreen, scaling, VSync | \`fullscreen\`, \`pixel_perfect\`, \`vsync\` | 0 or 1; scaling selects Fill or Pixel Perfect. |
+| Intro | \`intro\` | 0 or 1; controls whether the optional intro is eligible at startup. |
+
+Numeric rows clamp at their ends; labeled choices cycle. Each change calls \`Game::applySettings()\` and requests a save, subject to \`writes()\`. Applying settings updates the audio mix, camera shake, selected palette and scaling mode. When a window exists, it also updates fullscreen and selects VSync or triple-buffer screen mode. Other consumers read settings directly, including particle rendering and flash effects.
+
+#### Colour schemes and verification (\`Palette.hpp\`)
+
+The five schemes define colors for warnings, damage, healing, comparison indicators, item rarities and night-touched items. Game code selects these colors at their use sites; this is not a full-screen color transformation. The Monochrome scheme is a named UI palette and does not turn the entire game image grayscale.
+
+\`PaletteTest.cpp\` models each alternative under a corresponding simulated vision matrix and compares selected color distances against the standard scheme. It tests item rarity separation, hurt versus heal, and warning versus a sample grass color. These checks help catch regressions in those comparisons; they do not establish readability for every scene, display or player.
 
 #### 17-Action Key Rebinding System (\`keys.txt\`)
 The controls interface permits remapping of 17 core gameplay actions (directional movement, class skill, inventory, pause, map, gather, build, loot labels, and codex). When assigning a key already allocated elsewhere, the engine automatically swaps the two bindings, while reserving core navigation keys (arrows, Enter, Esc, 1-4) so menus remain perpetually functional.
@@ -2791,7 +2831,7 @@ flowchart TD
     Pref["Saves::open()<br/>SDL_GetPrefPath('soulwax', 'Mellangan')"]:::io
     Files["Persistent Files<br/>• world.txt (WorldMode + Seed)<br/>• worlds.txt (LRU History <= 6)<br/>• codex.txt (Meta Unlock Ledger)<br/>• chart-<code>.bin (Fog-of-War)"]:::file
     Record["Saves::record(code, time, dawn)<br/>Move/Insert World at history.begin()"]:::io
-    Evict["history.size() > 6 (Saves::HISTORY)?<br/>SDL_RemovePath('chart-' + back.code + '.bin')<br/>history.pop_back()"]:::gc
+    Evict["history.size() > 6 (Saves::HISTORY)?<br/>Saves::erase(chart path)<br/>history.pop_back()"]:::gc
 
     Pref --> Files --> Record --> Evict
 `,
