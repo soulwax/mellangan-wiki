@@ -341,7 +341,7 @@ const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
     topics: [
       {
         id: "diablo-loot-runrules",
-        title: "0.5.14+ Diablo Loot",
+        title: "Diablo Loot & Item Affixes",
         subtitle: "30 Affixes, RunRules & Rarities",
         icon: Sparkles,
         badge: "LAB",
@@ -944,7 +944,7 @@ export const App: React.FC = () => {
                     Mellangan Docs
                   </span>
                   <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.5.15+
+                    v0.6.5+
                   </span>
                 </div>
               </div>

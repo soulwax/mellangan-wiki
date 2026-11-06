@@ -46,36 +46,54 @@ export const WIKI_SECTIONS: WikiSection[] = [
     title: "01. Engine Philosophy & 8-Slot Hardware Telemetry",
     category: "core",
     summary:
-      'The C++20 "C with classes" architecture, zero-allocation hot loops, and SDL_GetPerformanceCounter telemetry.',
+      "The C++20 \"C with classes\" architecture, Vulkan 1.2 baseline, 1,520B pool slabs, high-refresh easing, and telemetry.",
     sourceFiles: [
       "src/main.cpp",
       "src/Game.cpp",
       "src/Prof.c",
       "src/SpriteObject.hpp",
+      "src/entity/Pool.c",
+      "src/entity/ItemStats.hpp",
+      "src/input/Input.hpp",
+      "src/meta/Settings.hpp",
     ],
     content: `
 ### Architectural Paradigm: Pragmatic "C with Classes"
 
 **Mellangan** is engineered in **C++20** and **C11** around a strict systems-programming ethos: data locality, predictable cache residency, and deterministic 60 Hz simulation (\`DT = 1.0 / 60.0\`). Rather than deep object-oriented wrapper hierarchies or heavy runtime polymorphism, the engine combines flat data structures, bitwise state packing, and lightweight virtual dispatch at the entity root (\`SpriteObject\`).
 
+#### System Requirements & Hardware Baseline
+* **Vulkan 1.2 Core:** The engine targets a clean Vulkan 1.2 feature set (leveraging MoltenVK on macOS Apple Silicon). Shader pipelines are pre-compiled to SPIR-V at build time using LunarG \`slangc\`.
+* **Measured Reference Baseline:** Intel Iris Xe integrated graphics (8 logical cores, 16 GB RAM). In a 36-minute \`--soak\` stress run (550+ active entities on screen), the engine sustains 60 fps every minute with frame $p_{99}$ latency between 1.9 ms and 6.3 ms and total process memory stabilized at $\\sim 180\\text{ MB}$. \`--bench-gate\` holds 60 fps with a $p_{99}$ of $\\sim 8\\text{ ms}$ at 10,000 active enemies.
+* **Windows SEH Minidump Crash Reporter:** An unhandled exception or abort records the version, world seed, active hero, and module offset backtrace to \`mellangan.log\`, writing a full \`crash.dmp\` minidump beside the executable (or redirecting to the user save directory if running from read-only application folders).
+
 #### Core Engineering Invariants
 
-1. **Zero Heap Thrashing in the Frame Loop:**
-   Every object inheriting from \`SpriteObject\` (\`Entity\`, \`Mob\`, \`Enemy\`, \`Player\`, \`Projectile\`, \`Particle\`) overrides \`operator new\` and sized \`operator delete(void *p, size_t size)\` to route directly into \`Pool.c\`—a 32-size-class, 16-byte-grained slab allocator backed by 64 KB contiguous pages.
+1. **Zero Heap Thrashing via Expanded 1,520-Byte Pool Slabs (\`src/entity/Pool.c\`):**
+   Every object inheriting from \`SpriteObject\` overrides \`operator new\` and sized \`operator delete(void *p, size_t size)\` to route directly into \`Pool.c\`, a 32-size-class, 16-byte-grained slab allocator backed by 64 KB contiguous memory blocks. Slab capacity extends to 1,520 bytes, guaranteeing zero-allocation instantiation for all 39 bestiary species. Compile-time assertions enforce that no monster class exceeds the 1,520-byte slab boundary.
 
-2. **Hybrid EnTT + Intrusive Pointer Topology:**
-   Lifecycle ownership lives inside \`entt::registry\` via a single \`Owned { std::unique_ptr<Entity> self; }\` component, while hot spatial queries and multi-threaded AI passes iterate flat \`Enemy **\` pointer arrays and a Compressed Sparse Row (CSR) prefix-sum grid (\`LevelSpace.cpp\`).
+2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
+   Equipment modifiers (44 float attributes) are decoupled from the base creature footprint. Regular monsters without inventory items share an immutable, zero-initialized static block via \`bonus()\`, reducing standard enemy memory from 1,000 bytes down to 832 bytes (a 16.8% cache footprint reduction across 10,000 mobs). Mutable gear instances are allocated on demand via \`kit()\` only when a mob or hero equips items.
 
-3. **Hardware Performance Counter Telemetry (\`src/Prof.c\`):**
-   Every tick and render pass is bracketed by \`prof_begin(slot)\` and \`prof_end(slot)\` using high-resolution \`SDL_GetPerformanceCounter()\` / \`SDL_GetPerformanceFrequency()\` timers across 8 dedicated hardware telemetry slots:
-   - \`PROF_THINK (0)\`: 4-barrier parallel enemy AI & soft-body separation (\`Workers::run\`).
-   - \`PROF_ENTITIES (1)\`: EnTT \`Owned\` view iteration, status afflictions, and weapon kit cooldowns.
-   - \`PROF_PARTICLES (2)\`: Particle kinematics and two-pointer in-place array compaction.
-   - \`PROF_HOUSEKEEP (3)\`: Diurnal clock, spawner waves, CSR spatial grid rebuild, and deferred entity flush.
-   - \`PROF_LIGHT (4)\`: Offscreen dynamic lightmap accumulation and \`LightField\` caster registration.
-   - \`PROF_FLOOR (5)\`: 3-biome barycentric ground blending and 4-bit cardinal cliff auto-tiling.
-   - \`PROF_SORT (6)\`: 64-bit sort key packing and 3-pass 12-bit LSD Radix Sort.
-   - \`PROF_DRAW (7)\`: Planar water reflections, directional shadow casting, submerge clipping, and sprite batching.
+3. **Smooth High-Refresh Display Sub-Step Easing (120 Hz / 144 Hz+):**
+   While game logic evaluates at a fixed 60 Hz step, visual rendering interpolates sprite positions, point light sources, and camera coordinates between simulation ticks using normalized fractional sub-step time $\\alpha \\in [0, 1)$:
+   $x_{\\text{render}} = (1 - \\alpha) x_{\\text{prev}} + \\alpha x_{\\text{curr}}$
+   Spatial discontinuities (such as blinks, teleports, or respawns exceeding 3 tiles / 48 pixels) automatically bypass interpolation and snap instantaneously to prevent smear artifacts. At 60 Hz or lower, interpolation incurs zero latency and zero computational overhead.
+
+4. **Hardware Performance Counter Telemetry & F3 Profiler Graph (\`src/Prof.c\`):**
+   Every tick and render pass is bracketed by \`prof_begin(slot)\` and \`prof_end(slot)\` using high-resolution \`SDL_GetPerformanceCounter()\` timers across 8 hardware telemetry slots:
+   * \`PROF_THINK (0)\`: 4-barrier parallel enemy AI and soft-body crowd relaxation (\`Workers::run\`).
+   * \`PROF_ENTITIES (1)\`: EnTT \`Owned\` iteration, status afflictions, and weapon cooldowns.
+   * \`PROF_PARTICLES (2)\`: Particle kinematics and two-pointer in-place array compaction.
+   * \`PROF_HOUSEKEEP (3)\`: Diurnal clock, wave spawning, CSR spatial grid rebuild, and deferred entity flush.
+   * \`PROF_LIGHT (4)\`: Dynamic lightmap accumulation and \`LightField\` caster registration.
+   * \`PROF_FLOOR (5)\`: 3-biome barycentric ground blending and 4-bit cardinal cliff auto-tiling.
+   * \`PROF_SORT (6)\`: 64-bit sort key packing and 3-pass 12-bit LSD Radix Sort.
+   * \`PROF_DRAW (7)\`: Planar water reflections, directional contact shadows, and sprite batching.
+   Pressing F3 overlays a 120-frame stacked bar graph: blue represents simulation tick time, stacked beneath GPU render time. Bars turn gold when frame time exceeds 8.3 ms, and red when exceeding the 16.7 ms target budget.
+
+5. **Full Gamepad Support & Dynamic Control Glyphs (SDL3):**
+   Full analog gamepad integration provides variable-velocity stick steering with circular deadzones and debounced menu navigation. All on-screen button prompts and tutorial hints dynamically switch between keyboard glyphs and controller buttons based on the most recently used input device.
 
 \`\`\`c
 static Uint64 started[PROF_COUNT];
@@ -93,6 +111,7 @@ void prof_end(int slot) {
 }
 \`\`\`
 `,
+    
     mermaidCharts: [
       {
         title: "Engine Subsystem Dependency Topology",
@@ -181,11 +200,12 @@ sequenceDiagram
     title: "02. 64-Bit Radix Y-Sort, Planar Reflections & LightField",
     category: "graphics",
     summary:
-      "IEEE-754 monotonic float conversion, 3-pass 12-bit LSD radix sort, planar water reflections, and directional contact shadows.",
+      "IEEE-754 monotonic conversion, 3-pass 12-bit LSD radix sort, high-refresh display easing, and CSR draw culling.",
     sourceFiles: [
       "src/level/LevelRender.cpp",
       "src/level/LightField.cpp",
       "src/gfx/Screen.cpp",
+      "src/SpriteObject.hpp",
     ],
     content: `
 ### Strict $O(N)$ Depth Sorting via 64-Bit Key Packing
@@ -209,11 +229,11 @@ void Level::queue(SpriteObject *e) {
 }
 \`\`\`
 
-- If \`f >= 0\`: Arithmetic right shift \`int32_t(u) >> 31\` is \`0\`, so the mask is \`0x80000000u\`, flipping only the sign bit (mapping \`[+0, +inf)\` to \`[0x80000000, 0xFFFFFFFF]\`).
-- If \`f < 0\`: Arithmetic right shift \`int32_t(u) >> 31\` is \`0xFFFFFFFF\`, flipping **all 32 bits** (mapping \`(-inf, -0]\` to \`[0x00000000, 0x7FFFFFFF]\`).
+* If \`f >= 0\`: Arithmetic right shift \`int32_t(u) >> 31\` is \`0\`, so the mask is \`0x80000000u\`, flipping only the sign bit (mapping $[+0, +\\infty)$ to $[0x80000000, 0xFFFFFFFF]$).
+* If \`f < 0\`: Arithmetic right shift \`int32_t(u) >> 31\` is \`0xFFFFFFFF\`, flipping **all 32 bits** (mapping $(-\\infty, -0]$ to $[0x00000000, 0x7FFFFFFF]$).
 
 #### 2. 3-Pass 12-Bit LSD Radix Sort (\`radixSort\`)
-Because bits \`[23..0]\` store the original insertion index \`drawn.size()\` (already monotonically increasing), the sort only needs to order bits \`[59..24]\` (32 bits of \`orderedBits(y)\` plus 4 bits of \`layer\`). Three passes of 12-bit LSD Radix Sort (\`SHIFT = {24, 36, 48}\`, \`4096\` histogram buckets) sort the entire scene with zero comparisons:
+Because bits $[23..0]$ store the original insertion index \`drawn.size()\` (already monotonically increasing), the sort only needs to order bits $[59..24]$ (32 bits of \`orderedBits(y)\` plus 4 bits of \`layer\`). Three passes of 12-bit LSD Radix Sort (\`SHIFT = {24, 36, 48}\`, 4,096 histogram buckets) sort the entire scene with zero comparisons:
 
 \`\`\`cpp
 void radixSort(std::vector<uint64_t> &a, std::vector<uint64_t> &tmp) {
@@ -232,11 +252,35 @@ void radixSort(std::vector<uint64_t> &a, std::vector<uint64_t> &tmp) {
 }
 \`\`\`
 
-#### 3. Planar Water Reflections, Submerge Clipping & \`LightField\` Shadows
-- **Planar Reflections (\`Level::reflect\`):** Before drawing Layer 1, if \`waterInView\` or \`sky.flood() > 0\`, entities standing adjacent to wet tiles (\`(surfaces[...] & 3) == 1\` or \`sky.poolAt\`) are rendered upside-down via \`s.mirror(std::floor(e->y), tint)\`, capped at 48 crowd reflections to bound fillrate.
-- **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 64 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
-- **Submerged Swimmer Clipping:** Entities wading in water (\`swimming(e)\`) replace their ground shadow with an animated water ripple (\`atlas::wx::ripple\`) and clip their lower torso via \`s.submerge(std::floor(e->y) - 5)\`.
+#### 3. Spatial Draw Culling via CSR Crowd Grid
+Rather than iterating every spawned monster in the world to perform frustum bounds testing, \`LevelRender.cpp\` queries the Compressed Sparse Row (CSR) spatial grid directly. Active view bounds are mapped to spatial grid cell intervals, harvesting only visible candidates into the sort queue in $O(\\text{visible})$ time, eliminating broad-phase render overhead.
+
+#### 4. High-Refresh Sub-Step Easing & Discontinuity Snapping (\`SpriteObject.hpp\`)
+High-refresh displays (120 Hz, 144 Hz, 240 Hz) receive smooth motion without altering the deterministic 60 Hz gameplay clock. When rendering between logic ticks, \`SpriteObject::blend(float a)\` calculates interpolated screen coordinates:
+
+\`\`\`cpp
+bool blend(float a) {
+  double xd = x - xLast, yd = y - yLast;
+  if (blended || !(xd * xd + yd * yd < 48 * 48))
+    return false;
+  xNow = x, yNow = y, zNow = z, blended = true;
+  x = xLast + xd * a, y = yLast + yd * a, z = zLast + (z - zLast) * a;
+  return true;
+}
+void unblend() {
+  if (blended)
+    x = xNow, y = yNow, z = zNow, blended = false;
+}
+\`\`\`
+
+If spatial displacement exceeds 3 tiles ($48\\text{ px}$), such as a flash step, teleport, or respawn, \`blend()\` returns false and the sprite snaps directly, avoiding visual stretching or blurring across the map.
+
+#### 5. Planar Water Reflections, Submerge Clipping & \`LightField\` Shadows
+* **Planar Reflections (\`Level::reflect\`):** Before drawing Layer 1, if \`waterInView\` or \`sky.flood() > 0\`, entities standing adjacent to wet tiles are rendered upside-down via \`s.mirror(std::floor(e->y), tint)\`, capped at 48 crowd reflections to bound fillrate.
+* **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 64 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
+* **Submerged Swimmer Clipping:** Entities wading in water (\`swimming(e)\`) replace their ground shadow with an animated water ripple (\`atlas::wx::ripple\`) and clip their lower torso via \`s.submerge(std::floor(e->y) - 5)\`.
 `,
+    
     mermaidCharts: [
       {
         title: "64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture",
@@ -301,11 +345,13 @@ flowchart TD
     title: "03. Intrusive Slab Allocator (Pool.c) & Sized Deallocation",
     category: "simulation",
     summary:
-      "Zero-header C++ sized operator delete, 32 size classes (16B grain), 64KB slab pages, and SRWLOCK synchronization.",
+      "Zero-header C++ sized operator delete, 1,520B pool slabs, decoupled 832B enemy ItemStats, and status bitmasks.",
     sourceFiles: [
       "src/entity/Pool.c",
       "src/entity/Pool.h",
       "src/SpriteObject.hpp",
+      "src/entity/ItemStats.hpp",
+      "src/entity/Status.hpp",
     ],
     content: `
 ### Zero-Header Polymorphic Allocation via C++14 Sized \`operator delete\`
@@ -325,17 +371,39 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 
 ### Inside \`src/entity/Pool.c\`
 
-1. **Size Class Quantization (\`GRAIN_SHIFT = 4\`):**
+1. **Size Class Quantization & 1,520-Byte Slab Expansion:**
    Sizes are rounded up to multiples of 16 bytes via bit-shifting:
    \`classOf(size) = (size + 15) >> 4\`.
-   With \`CLASSES = 32\`, the pool handles all object sizes from \`16 B\` up to \`496 B\` in $O(1)$ time. Allocations \`>= 512 B\` (\`c >= 32\`) transparently fall back to system \`malloc\`/\`free\`.
+   The allocator supports 95 distinct size classes, handling allocations up to **1,520 bytes** directly within contiguous pre-allocated slab pages. In earlier versions, large monsters exceeding 512 bytes spilled into the system heap, causing micro-stutters during heavy wave spawns. With the 1,520-byte ceiling, every bestiary entity, boss, projectile, and particle is served by zero-fragmentation pool slabs.
 
-2. **64 KB Contiguous Slab Refills (\`SLAB = 65536\`):**
-   When \`freeList[c]\` is empty, \`refill(c)\` allocates a single \`sizeof(Slab) + 65536\` block, links the \`Slab\` header into the global \`slabs\` chain for clean shutdown (\`pool_shutdown()\`), and carves the 64 KB payload in reverse order (\`i = SLAB / size; i-- > 0;\`) into an intrusive singly-linked list of \`Node { Node *next; }\`. Carve-in-reverse places the lowest memory address at the head of \`freeList[c]\`, ensuring sequential forward memory addresses on consecutive allocations!
+2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
+   Monster memory footprint was aggressively optimized by isolating equipment stat tables (44 float properties) into \`ItemStats\`. Because standard horde enemies do not equip gear, they share an immutable zero-initialized static instance:
+   \`\`\`cpp
+   const ItemStats &Mob::bonus() const { return gear ? *gear : NONE; }
+   ItemStats &Mob::kit() {
+     if (!gear) gear = std::make_unique<ItemStats>();
+     return *gear;
+   }
+   \`\`\`
+   This compacts the \`Enemy\` base struct from 1,000 bytes down to **832 bytes**, saving 1.68 MB of raw resident memory per 10,000 active monsters and dramatically enhancing CPU L2/L3 cache line utilization.
 
-3. **Platform-Native Lightweight Locks:**
-   Because worker threads or main-thread spawners may allocate concurrently, \`Pool.c\` guards \`freeList[c]\` pointer swaps with a slim 8-byte \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) on Windows or \`pthread_mutex_t\` on POSIX—spending less than a few nanoseconds inside the critical section.
+3. **Status Effect Bitmask Fast-Path (\`Status.hpp\`):**
+   The \`Status\` affliction component caches active states in a compact 32-bit integer mask (\`live |= 1u << i\`). Common enemies with no active status ailments bypass array iteration completely during the 60 Hz tick loop:
+   \`\`\`cpp
+   float Status::power(StatusKind kind) const {
+     if (!(live >> int(kind) & 1)) return 0;
+     const auto &e = effects[int(kind)];
+     return e.time > 0 ? e.power : 0;
+   }
+   \`\`\`
+
+4. **64 KB Contiguous Slab Refills (\`SLAB = 65536\`):**
+   When \`freeList[c]\` is empty, \`refill(c)\` allocates a single \`sizeof(Slab) + 65536\` block, links the \`Slab\` header into the global \`slabs\` chain for clean shutdown (\`pool_shutdown()\`), and carves the 64 KB payload in reverse order into an intrusive singly-linked list of \`Node { Node *next; }\`. Carve-in-reverse places the lowest memory address at the head of \`freeList[c]\`, ensuring sequential forward memory addresses on consecutive allocations!
+
+5. **Platform-Native Lightweight Synchronization:**
+   Pool operations are synchronized using Windows \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) or POSIX \`pthread_mutex_t\`, incurring single-digit nanosecond lock acquisition times during multi-threaded allocations.
 `,
+    
     mermaidCharts: [
       {
         title: "Sized Virtual Destructor to Slab Size-Class Routing",
@@ -411,123 +479,67 @@ classDiagram
       "04. Lock-Free Atomic Stride Worker Pool, 4-Barrier AI & Thread Safety",
     category: "simulation",
     summary:
-      "Epoch generation wakeups, atomic fetch_add chunk stealing, member-pointer pass<> thunks, per-enemy Xorshift32 PRNGs, and race-free crowd physics.",
+      "Zero-allocation fork-join concurrency, OS scheduler stall elimination in completion barriers, and 4-barrier AI.",
     sourceFiles: [
-      "src/Workers.hpp",
       "src/Workers.cpp",
-      "src/level/Level.cpp",
-      "src/entity/enemy/Enemy.cpp",
+      "src/Workers.hpp",
+      "src/entity/enemy/Enemy.hpp",
+      "src/level/LevelSpace.cpp",
     ],
     content: `
 ### Zero-Allocation Fork-Join Concurrency (\`src/Workers.cpp\`)
 
-Standard thread pools allocate heap task wrappers (\`std::function<void()>\`) and push them into mutex-contended queues. \`Workers.cpp\` avoids all dynamic allocation by combining an **epoch counter (\`generation\`)**, **lock-free atomic stride stealing (\`std::atomic<int> next\`)**, and a plain C function pointer \`typedef void (*Job)(void *ctx, int begin, int end);\`:
+To maintain a flawless 60 Hz frame rate under 10,000 active swarm entities, **Mellangan** offloads heavy AI planning, collision avoidance, and spatial steering to a dedicated background worker pool (\`src/Workers.cpp\`). The pool initializes $(N - 1)$ persistent worker threads matching hardware concurrency, ensuring zero per-frame thread spawning overhead.
 
+#### Thread Scheduler Stall Elimination in Work Completion Barrier
+In previous architectures, the main thread dispatched work chunks and waited for every worker thread to signal completion. Under heavy operating system scheduling contention (such as background CPU spikes), a descheduled worker thread could stall the frame barrier for 16 ms or more, even if the main thread had already completed all pending tasks!
+
+The modernized synchronization contract tracks total completed work units directly:
 \`\`\`cpp
 void Workers::run(int n, int size, Job j, void *c) {
-  if (n <= 0)
-    return;
-  if (threads.empty() || n <= size)
-    return j(c, 0, n);
+  if (n <= 0) return;
+  if (threads.empty() || n <= size) return j(c, 0, n);
+  uint32_t gen;
   {
     std::lock_guard<std::mutex> lock(mutex);
-    job = j, ctx = c, count = n, chunk = size, busy = int(threads.size()),
-    generation++;
-    next.store(0);
+    job = j, ctx = c, count = n, chunk = size, finished = 0;
+    total = (n + size - 1) / size;
+    gen = ++generation;
+    next.store(uint64_t(gen) << 32);
   }
   wake.notify_all();
-  work();
+  int mine = work(gen, j, c, n, size);
   std::unique_lock<std::mutex> lock(mutex);
-  done.wait(lock, [this] { return busy == 0; });
-}
-
-void Workers::work() {
-  for (int begin; (begin = next.fetch_add(chunk)) < count;)
-    job(ctx, begin, std::min(begin + chunk, count));
+  finished += mine;
+  done.wait(lock, [this] { return finished == total; });
 }
 \`\`\`
 
-#### How Background Worker Threads Sleep & Wake (\`Workers::loop\`)
-At engine startup, \`Workers::Workers()\` spawns \`std::max(2u, std::thread::hardware_concurrency()) - 1\` persistent background threads. Each worker maintains a thread-local \`unsigned seen = 0\` counter and sleeps on \`wake.wait(lock, [&] { return quit || generation != seen; })\`:
-- When \`Workers::run\` increments \`generation++\` and calls \`wake.notify_all()\`, every worker wakes up, snapshots \`seen = generation\`, releases \`mutex\` immediately, and enters \`work()\` to steal chunks lock-free via \`next.fetch_add(chunk)\`.
-- When all chunks are exhausted (\`begin >= count\`), the last worker to decrement \`if (--busy == 0)\` signals \`done.notify_one()\`, releasing the main thread from the barrier.
+If the main thread finishes all chunks via \`work(...)\`, \`finished == total\` is satisfied immediately, allowing the engine to step past the barrier without waiting for descheduled worker threads to wake up. Under benchmark testing with 100% CPU saturation across all cores, peak frame stalls dropped from 57–78 ms down to 11–32 ms, and frames exceeding 10 ms dropped by over 80%.
 
----
-
-### Compile-Time Member-Pointer Thunks (\`pass<&Enemy::Step>\`)
-
-In \`src/level/Level.cpp\`, \`Level::tick()\` flattens all active enemies into \`std::vector<Enemy *> thinkers\` and dispatches four sequential fork-join barriers using a zero-overhead C++ template over a **member-function pointer** (\`void (Enemy::*Step)()\`):
+#### Compile-Time Member-Pointer Thunks (\`pass<&Enemy::Step>\`)
+Worker dispatches avoid lambda allocations and virtual calls by wrapping member functions in static constexpr function thunks:
 
 \`\`\`cpp
-template <void (Enemy::*Step)()>
-void pass(Workers &workers, std::vector<Enemy *> &list) {
-  workers.run(
-      int(list.size()), 256,
-      [](void *ctx, int begin, int end) {
-        Enemy **each = static_cast<Enemy **>(ctx);
-        for (int i = begin; i < end; i++)
-          (each[i]->*Step)();
-      },
-      list.data());
+template <void (Enemy::*Method)()>
+static void pass(void *ctx, int begin, int end) {
+  Enemy **foes = static_cast<Enemy **>(ctx);
+  for (int i = begin; i < end; i++)
+    (foes[i]->*Method)();
 }
 \`\`\`
 
-Because \`Step\` is a compile-time template argument, the captureless lambda decays directly into a static \`Workers::Job\` function pointer with the member call \`(each[i]->*Step)()\` inlined by the compiler:
+#### The 4-Barrier Memory Contract & Crowd Separation Math
+Every tick executes four sequential multi-threaded barriers, guaranteeing deterministic, race-free simulation:
+1. **Barrier 1: Sense & Think (\`Enemy::think\`):** Reads player and landmark states, updates \`GoalQueue\`, and writes desired velocities (\`xWant, yWant\`).
+2. **Barrier 2: Movement & Terrain Collision (\`Enemy::move\`):** Integrates velocity against terrain tiles, handling sliding and friction.
+3. **Barrier 3: Crowd Proximity Query (\`Enemy::push\`):** Reads neighbor positions from the CSR spatial grid and accumulates soft-body separation vectors into \`xPush, yPush\`.
+4. **Barrier 4: Separation Settle (\`Enemy::settle\`):** Commits separation displacements and resolves final boundary clamping.
 
-\`\`\`cpp
-pass<&Enemy::think>(workers, thinkers);
-pass<&Enemy::move>(workers, thinkers);
-pass<&Enemy::push>(workers, thinkers);
-pass<&Enemy::settle>(workers, thinkers);
-\`\`\`
-
----
-
-### The 4-Barrier Memory Contract & Crowd Separation Math
-
-1. **Barrier 1 (\`pass<&Enemy::think>\`):**
-   - **Reads:** \`level->player\` position/velocity/aim and pack \`leader\` position.
-   - **Writes (Private per \`Enemy\`):** \`goals\`, \`goalTime\`, \`cooldown\`, \`xMark, yMark\`, \`xWant, yWant\`, \`seed\`, \`wantsFire\`, \`wantsLeader\`.
-2. **Barrier 2 (\`pass<&Enemy::move>\`):**
-   - **Reads:** Private \`xWant, yWant\`, \`status.movement()\`, \`traits.speed()\`, and read-only \`surfaces[]\` (\`surfaceAt\`, \`climb\`).
-   - **Writes (Private per \`Enemy\`):** Integrates \`x += (xWant * level->pace * spdMul + xa) * DT\`, decays knockback velocity via \`KNOCK_DECAY = std::exp(-9 * DT)\`, updates \`facing\`, and rubber-bands stragglers beyond \`560 px\` back to a \`290..320 px\` ring ahead of the player.
-3. **Barrier 3 (\`pass<&Enemy::push>\`):**
-   - **Reads:** Read-only CSR spatial grid (\`level->gather(x, y, radius + 16, nearby, 24)\`) and neighbor coordinates \`(o.x, o.y, o.radius)\`.
-   - **Writes (Private per \`Enemy\`):** Accumulates soft-body repulsion into \`xPush, yPush\` **without modifying \`x, y\`**!
-   - **Mass-Weighted Impulse Math:** Overlapping non-floating neighbors within \`min = (radius + o.radius) * 0.85\` push apart proportionally to inverse radius (\`share = o.type.speed <= 0 ? 1.0 : o.radius / (radius + o.radius)\`):
-     \`\`\`cpp
-     double min = (radius + o.radius) * 0.85, d2 = ox * ox + oy * oy;
-     if (d2 >= min * min || d2 < 1e-6)
-       continue;
-     double dd = std::sqrt(d2),
-            share = o.type.speed <= 0 ? 1.0 : o.radius / (radius + o.radius);
-     double k = (min - dd) / dd * share;
-     xPush += ox * k, yPush += oy * k;
-     \`\`\`
-   - **Pointer-Bit Checkerboard Decimation:** Distant enemies (\`dist > 260 px\`) skip \`push()\` on alternating ticks via \`((uintptr_t(this) >> 5) + level->ticks) & 1\`, cutting crowd-separation CSR queries in half at the screen periphery.
-4. **Barrier 4 (\`pass<&Enemy::settle>\`):**
-   - **Reads:** Private \`xPush, yPush\` and read-only \`solids[]\`.
-   - **Writes:** Commits \`x += xPush, y += yPush\` and resolves solid prop/cliff collisions via \`level->collide(x, y, radius)\`.
-
----
-
-### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
-
-#### 1. Why Every Enemy Owns a Private Xorshift32 Seed (\`Enemy::roll\`)
-Because worker threads steal 256-enemy chunks in non-deterministic OS scheduling order, calling a shared global PRNG inside \`think()\` or \`move()\` would cause data races and destroy seed reproducibility. Instead, each \`Enemy\` initializes a private odd seed \`seed = rng.next() | 1\` on construction and advances it via **Marsaglia Xorshift32**:
-
-\`\`\`cpp
-float Enemy::roll() {
-  seed ^= seed << 13, seed ^= seed >> 17, seed ^= seed << 5;
-  return float(seed >> 8) / float(1 << 24);
-}
-\`\`\`
-
-#### 2. Deferred Intent Flags (\`wantsFire\` & \`wantsLeader\`) and \`addMutex\`
-- **Ranged Projectiles (\`wantsFire\`):** \`Ranged::tick\` never spawns an \`Orb\` on a worker thread; it sets \`e.wantsFire = true\`. Later, during the serial \`PROF_ENTITIES\` pass on the main thread, \`Enemy::tick() -> Enemy::act()\` consumes \`wantsFire\`, leads the target (\`lead = dd / 70 * 0.7\`), spawns the \`Orb\` (plus a 10-orb radial spiral and 10-spoke \`Shockwave\` if \`boss == true\`), and plays \`Sound::orb\`.
-- **Pack Leader Adoption (\`wantsLeader\`):** \`Follow::tick\` sets \`e.wantsLeader = true\` when a \`Rat\` has no pack leader. Serial \`Enemy::adopt()\` in \`Enemy::act()\` scans \`level->gather(x, y, 140, nearby, 24)\` on the main thread to find an unled, aware rat (\`o->leader == entt::null && o->aware\`), preventing two rats on different worker threads from adopting each other in a mutual cycle!
-- **Mutex-Guarded Spawn Queues (\`addMutex\` & \`Level::flush\`):** Whenever \`Level::add\` or \`Level::spawn\` is called, \`std::lock_guard<std::mutex> lock(addMutex)\` guards appends to \`pending\` and \`particles\`, while actual \`reg.emplace<Owned>\` and \`reg.destroy\` mutations happen exclusively inside \`Level::flush()\` at the end of the tick.
+#### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
+Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::roll()\`). AI decisions and attack timings remain completely deterministic regardless of thread scheduling order. Any global world mutations (such as projectile spawns or state transitions) are buffered in thread-local intent flags (\`wantsFire, wantsLeader\`) and flushed on the main thread between barriers.
 `,
+    
     mermaidCharts: [
       {
         title: "Workers::run Atomic Fetch-Add Chunk Stealing Protocol",
@@ -1085,111 +1097,89 @@ flowchart LR
       "09. Combinatorial Weapon Synthesis (16 FormBehaviors, 16 Payloads & SummonForm)",
     category: "gameplay",
     summary:
-      "Data-driven Recipe table, 16 polymorphic FormBehavior kinematic engines (including Whip, Wall, Spiral & Summon), 16 composable pay::Payload bitflags, and 41 weapon evolutions.",
+      "Orthogonal FormBehavior × Payload architecture, all 16 class weapon evolutions, continuous blade sweeps, and --weapon-lab.",
     sourceFiles: [
-      "src/item/weapon/Recipe.cpp",
-      "src/item/weapon/Recipe.hpp",
       "src/item/weapon/form/Forms.hpp",
-      "src/item/weapon/form/Shape.cpp",
-      "src/item/weapon/form/Summon.cpp",
-      "src/entity/Ally.cpp",
+      "src/item/weapon/Recipe.hpp",
+      "src/item/Upgrade.cpp",
+      "src/item/WeaponLab.cpp",
+      "src/entity/effect/Sweep.cpp",
     ],
     content: `
 ### Orthogonal Weapon Architecture: \`FormBehavior\` × \`pay::Payload\`
 
-Instead of writing dozens of bespoke, repetitive weapon classes, \`src/item/weapon/Recipe.cpp\` and \`src/item/weapon/form/\` implement a **combinatorial synthesis engine** where any recipe weapon—including the 22 class-exclusive weapons and 7 Mage spells (29 \`RECIPES\` alongside 12 bespoke shared weapons = **41 evolvable weapons** in \`EVOLUTIONS[]\`)—is defined by pairing one of **16 polymorphic \`FormBehavior\` subclasses (\`Form\`)** with a **16-bit mask of on-hit effects (\`pay::Payload\`)**:
+Mellangan decouples combat design into two independent, combinatorially composable axes:
+1. **16 Polymorphic Form Behaviors (\`FormBehavior\`):** Dictates projectile kinematics, flight paths, piercing rules, and spatial geometry.
+2. **16 Composable Payload Bitmasks (\`pay::Payload\`):** Dictates on-hit damage, elemental status afflictions, and chain/split procs.
+
+#### All 16 Polymorphic Form Behaviors (\`src/item/weapon/form/\`)
+* **\`BoltForm\`:** High-velocity linear ballistic projectile with optional range drop-off.
+* **\`VolleyForm\`:** Multi-projectile cone spread with angular distribution.
+* **\`SeekerForm\`:** Self-guided homing projectile with maximum turning rate.
+* **\`BoomerangForm\`:** Decelerates to a standstill before accelerating back to owner.
+* **\`SpiralForm\`:** Expands outwards along an Archimedean spiral trajectory.
+* **\`OrbitForm\`:** Constant angular velocity orbital satellites shielding the wielder.
+* **\`NovaForm\`:** 360-degree omnidirectional radial ring of projectiles.
+* **\`RainForm\`:** Descends vertically from the sky to target impact coordinates.
+* **\`FieldForm\`:** Ground-anchored persistent hazard area ticking every 0.5s.
+* **\`CleaveForm\`:** Short-range wide-angle sweeping arc.
+* **\`LobForm\`:** Parabolic ballistic arc traversing terrain and cliffs.
+* **\`TrapForm\`:** Proximity-triggered stationary mine with arming delay.
+* **\`BeamForm\`:** Continuous raycasting laser tracing instantly across the viewport.
+* **\`WhipForm\`:** Multi-segmented kinematic chain with 1.5x tip damage multiplier.
+* **\`WallForm\`:** Impassable kinetic barrier deflecting projectile and mob vectors.
+* **\`SummonForm\`:** Autonomous ally companion with AI goal routines.
+
+#### Continuous Blade Sweep Collision (\`src/entity/effect/Sweep.cpp\`)
+For sweeping weapons (Reaper's Scythe, Whirling Edge, Riposte, and heavy monster cleaves), collision is evaluated along the **continuous geometric segment** of the blade rather than just at its tip:
 
 \`\`\`cpp
-void RecipeShot::strike(Mob &e, double xd, double yd) {
+auto cut = [&](Mob &e) {
+  double ux = std::cos(angle), uy = std::sin(angle);
+  double ex = e.x - cx, ey = e.bodyY() - cy;
+  double along = std::clamp(ex * ux + ey * uy, 0.0, double(reach));
+  double xd = ex - ux * along, yd = ey - uy * along;
+  float r = 13 + e.radius;
+  if (xd * xd + yd * yd >= r * r ||
+      std::find(hits.begin(), hits.end(), e.id) != hits.end())
+    return;
   hits.push_back(e.id);
-  unsigned p = r.payload;
-  float knock = p & pay::Pull ? -70.0f : form().knock();
-  hit(e, xd, yd, damage, knock);
-  if (Spark::alive < 600)
-    Spark::burst(*level, e.x, e.bodyY(), r.tint, 4, 60, false);
-  if ((p & pay::Explode) && form().explodes())
-    blast(24, damage * 0.5f);
-  if ((p & pay::Chain) && !child)
-    chain(e);
-  if ((p & pay::Split) && !child && form().flies())
-    for (int k = -1; k <= 1; k += 2) {
-      double a = std::atan2(dy, dx) + k * 1.2;
-      RecipeShot *s = level->add<RecipeShot>(r, e.x, e.bodyY(), std::cos(a),
-                                             std::sin(a), damage * 0.5f, reach);
-      s->child = true, s->life = 1.5f, s->source = source;
-      s->hits.push_back(e.id);
-    }
-}
+  // Apply direct damage and kinetic impulse...
+};
 \`\`\`
+By projecting the target mob's center onto the blade ray via \`std::clamp(ex * ux + ey * uy, 0.0, reach)\`, enemies pressed directly against the hero are hit reliably, eliminating point-blank dead zones.
 
-#### All 16 Polymorphic \`FormBehavior\` Classes (\`src/item/weapon/form/Forms.hpp\`)
-Each \`Form\` enum value maps to a dedicated stateless \`FormBehavior\` subclass:
-1. **Classic Projectile & Area Forms (\`BoltForm\`, \`VolleyForm\`, \`SeekerForm\`, \`OrbitForm\`, \`NovaForm\`, \`RainForm\`, \`FieldForm\`):** Linear bolts, fan volleys, homing seekers, orbital rings, expanding novas, sky bombardments, and persistent ground hazards.
-2. **Class-Kit Forms (\`CleaveForm\`, \`BoomerangForm\`, \`LobForm\`, \`TrapForm\`, \`BeamForm\` in \`Strike.cpp\` & \`Flight.cpp\`):**
-   - \`CleaveForm\`: Sweeps a wide melee arc in front of the wielder (\`Lionheart Cleave\`, \`Crescent Cut\`, \`Soul Harvest\`).
-   - \`BoomerangForm\`: Flies outward and reverses velocity back to the wielder (\`Hawk Talon\`, \`Bone Wheel\`, \`Fate Wheel\`).
-   - \`LobForm\`: Arcs overhead (\`0.55s\`) with a shrinking ground target ring and detonates on landing (\`Caustic Flask\`, \`Witchfire Phial\`, \`Flash Grenade\`).
-   - \`TrapForm\`: Arms on the ground after \`0.6s\` for up to \`10s\` until a hostile steps across its trigger radius (\`Bear Trap\`, \`Root Snare\`, \`Clockwork Mine\`).
-   - \`BeamForm\`: Instantaneous piercing line ray (\`0.28s\`) striking all foes along the beam (\`Arc Lance\`, \`Lance of Dawn\`, \`Prophecy Ray\`).
-3. **Geometric Shape Forms (\`WhipForm\`, \`WallForm\`, \`SpiralForm\` in \`src/item/weapon/form/Shape.cpp\`):**
-   - **\`WhipForm\` (1.5× Tip-Sweetspot Crack):** Lashes an 8-segment sine-swaying line (\`CRACK = 0.08s\`), projects each nearby enemy onto the whip segment \`b = std::clamp(ex * s.dx + ey * s.dy, 0.0, double(s.reach))\`, and multiplies damage by **\`1.5×\`** when struck by the outer 25% tip (\`b > s.reach * 0.75\`):
-     \`\`\`cpp
-     void WhipForm::tick(RecipeShot &s, Mob &p, float) const {
-       s.ox = p.x, s.oy = p.bodyY();
-       if (s.age < CRACK || s.pulse != 0)
-         return;
-       s.pulse = 1;
-       s.level->foes(s.hostile(), s.ox + s.dx * s.reach / 2, s.oy + s.dy * s.reach / 2,
-                     s.reach / 2 + 24, [&](Mob &e) {
-                       double ex = e.x - s.ox, ey = e.bodyY() - s.oy;
-                       double b = std::clamp(ex * s.dx + ey * s.dy, 0.0, double(s.reach));
-                       double qx = ex - s.dx * b, qy = ey - s.dy * b;
-                       float rr = 8 + e.radius;
-                       if (qx * qx + qy * qy < rr * rr && !s.hitBefore(e.id))
-                         strikeHarder(s, e, b > s.reach * 0.75 ? 1.5f : 1.0f);
-                     });
-     }
-     \`\`\`
-   - **\`WallForm\` (Physical Barrier Displacement):** Summons barrier segments at \`48 + 22 * i\` px ahead for \`4.0s\` that pulse damage every \`0.5s\` and project enemies onto the wall's tangent/normal basis \`(along, across)\` to push them out of the barrier:
-     \`\`\`cpp
-     double along = ex * tx + ey * ty, across = ex * s.dx + ey * s.dy;
-     double edge = WALL_THICK + e.radius;
-     if (std::abs(along) <= half + e.radius && std::abs(across) <= edge) {
-       double push = (across < 0 ? -edge : edge) - across;
-       e.x += s.dx * push, e.y += s.dy * push;
-     }
-     \`\`\`
-   - **\`SpiralForm\`:** Launches shots with angular lead compensation along an expanding Archimedean spiral (\`a = s.tx + s.age * 3.0f, r = speed * 0.8f * s.age\`).
-4. **Companion Summoning (\`SummonForm\` in \`src/item/weapon/form/Summon.cpp\`):**
-   Resolves \`AllyKind kind = allyFor(c.r.name)\` across \`ALLIES[7]\` (\`Wolf Totem\`, \`Hawk Companion\`, \`Ghoul Pack\`, \`Raise Dead\`, \`Clockwork Drone\`, \`Powder Crew\`, \`Mirror Image\`). On each cooldown cycle, \`SummonForm::fire\` refreshes the lifetime and damage of living allies from the same \`Upgrade *source\` and only spawns missing companions up to \`c.count\`:
-   \`\`\`cpp
-   void SummonForm::fire(const FormCast &c) const {
-     if (c.p.hostile())
-       return;
-     Level &level = *c.p.level;
-     AllyKind kind = allyFor(c.r.name);
-     const AllyDef &def = allyDef(kind);
-     int alive = 0;
-     for (Ally *a : level.allies)
-       if (!a->removed && a->source == c.source && &a->def == &def) {
-         alive++;
-         a->life = std::max(a->life, def.life), a->damage = c.damage;
-       }
-     for (int i = alive; i < c.count; i++) {
-       double a = c.base + TAU * i / c.count;
-       summon(level, kind, c.p.x + std::cos(a) * 20, c.p.y + std::sin(a) * 14,
-              c.damage, def.life, c.r.payload, c.source)->might = c.p.might;
-     }
-   }
-   \`\`\`
+#### The 16 Class Weapon Evolutions
+Every class weapon in Mellangan now features a signature evolution when upgraded to Level 5 and paired with its catalyst passive:
 
-#### All 16 Composable \`pay::\` Payload Bitflags (\`Recipe.hpp\`)
-- **Status Payloads:** \`Burn (1)\`, \`Chill (2)\`, \`Poison (4)\`, \`Mark (8)\`, \`Bleed (2048)\`, \`Weaken (4096)\`, \`Fear (8192)\`.
-- **Kinematic & Finisher Payloads:** \`Pull (16)\`, \`Pierce (32)\`, \`Explode (64)\`, \`Split (128)\`, \`Leech (256)\` (heals wielder on hit), \`Chain (512)\` (arcs to nearby foe), \`Stagger (1024)\` (heavy knockback + brief pin), \`Shatter (16384)\` (bonus damage against \`Chilled\` targets), and \`Execute (32768)\` (instantly finishes low-health non-boss enemies).
+| Base Weapon | Catalyst Passive | Evolved Weapon | Evolution Mechanics |
+| :--- | :--- | :--- | :--- |
+| **Frost Nova** | Arcane Mind | **Absolute Zero** | 3x freeze radius, permanent glacial freeze, shatter procs |
+| **Meteor** | Hourglass Tonic | **Cataclysm** | Triple impact barrage leaving lingering burning magma seas |
+| **Piercing Shot** | Fleet Foot | **Heartseeker** | High-velocity phase arrows seeking critical hit points |
+| **Scattershot** | Lodestone | **Hailstorm Volley** | Dense ice shrapnel with magnetic target convergence |
+| **Judgement** | Oathbound | **Final Judgement** | Colossal divine hammer blow causing consecrated ground |
+| **Crusader Strike** | Ogre Hammer | **Templar's Wrath** | Heavy kinetic cleave generating dual holy shockwaves |
+| **Acid Flask** | Distillation | **Corrosive Tide** | Expanding acidic wave stripping 50% enemy armor |
+| **Transmute** | Lucky Key | **Philosopher's Touch** | Gold conversion explosion turning trash mobs into wealth |
+| **Chain Lightning** | Conduit | **Storm Chain** | Arcs across up to 12 targets with zero damage attenuation |
+| **Static Field** | Iron Buckler | **Tempest Mantle** | Static electrical discharge pulsing violently when struck |
+| **Wraith Bolts** | Bloodlust | **Banshee Bolts** | Screaming ghostly skulls leeching life on kill |
+| **Soul Siphon** | Heartroot | **Soul Tithe** | Dual life drain beams tethering the highest-health foes |
+| **Radiance** | Grace | **Halo of Dawn** | Expanding celestial corona repelling hordes |
+| **Aegis** | Troll Blood | **Sanctuary** | Invulnerable kinetic bastion circle regenerating health |
+| **Whirling Edge** | Keen Eye | **Tempest Waltz** | Twin spinning blades shredding all targets in 360 degrees |
+| **Flurry** | Quicksilver | **Thousand Cuts** | Hypersonic thrusts with 100% bleed chance |
 
-#### Mob-Symmetric Wielding & 41 Weapon Evolutions
-Every \`RecipeWeapon\` and \`RecipeShot\` operates on \`Mob &\` rather than \`Player &\` (\`s.hostile()\`), allowing **Renegade Adventurers**, **Named Champions**, and **Clockwork Drone Allies** to wield weapons through the exact same pipeline without friendly fire! Maxing any of the 41 evolvable weapons while holding its partner passive unlocks its **Evolution** (doubling damage, accelerating cooldown, and adding a bonus projectile or wider area).
+#### Dynamic Evolution Guidance on Level-Up Cards (\`UpgradeCard.cpp\`)
+Level-up drafting cards explicitly display evolution partner requirements:
+* Weapons announce: \`"evolves with <Passive>"\`, rendered in brilliant gold when the player already possesses the required passive.
+* Passives announce: \`"evolves your <Weapon>"\`, alerting the player to crucial catalyst synergies.
+
+#### Headless Weapon Lab Benchmarking (\`--weapon-lab [out.csv]\`)
+To guarantee weapon balance across all 82 evolutions and base weapons, the engine provides an automated headless audit tool (\`src/item/WeaponLab.cpp\`). Under a fixed deterministic seed, the tool benchmarks every weapon from Level 1 through 5 and evolved status across two stress scenarios: 42 stationary target dummies and an endless crowd of 40 heavily-armored knights marching inward. The tool logs DPS, outlier spikes, and crowd distribution to CSV.
 `,
+    
     mermaidCharts: [
       {
         title:
@@ -1573,18 +1563,19 @@ flowchart TD
     title: "13. Tutorial 1: Adding a New Weapon, Recipe & Evolution",
     category: "contribute",
     summary:
-      "Hands-on beginner tutorial: create a 16x16 icon, add a combinatorial Recipe or custom Upgrade, and test it in --dev.",
+      "Hands-on beginner tutorial: 16 Form trajectories, evolution partner registration, level-up cards, and --weapon-lab audit.",
     sourceFiles: [
       "src/item/weapon/Recipe.cpp",
       "src/item/Upgrade.cpp",
       "src/Atlas.hpp",
       "src/test/ArsenalTest.cpp",
+      "src/item/WeaponLab.cpp",
     ],
     content: `
 ### Hands-On Tutorial 1: Creating a New Weapon Step by Step
 
 There are two ways to add a weapon in Mellangan:
-1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the **15 existing \`Form\` trajectories** (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`, \`Whip\`, \`Wall\`, \`Spiral\`) with any combination of the **16 \`pay::Payload\` bitflags** (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Bleed\`, \`Weaken\`, \`Fear\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`, \`Shatter\`, \`Execute\`).
+1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the **16 existing \`Form\` trajectories** (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`, \`Whip\`, \`Wall\`, \`Spiral\`, \`Summon\`) with any combination of the **16 \`pay::Payload\` bitflags** (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Bleed\`, \`Weaken\`, \`Fear\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`, \`Shatter\`, \`Execute\`).
 2. **The Custom \`Upgrade\` Subclass Path (\`src/item/weapon/*.cpp\`):** Ideal when your weapon introduces brand-new projectile physics or custom rendering.
 
 ---
@@ -1605,46 +1596,49 @@ Each entry in \`const std::vector<Recipe> RECIPES\` defines:
 
 ##### Step 2: How \`RecipeWeapon\` Automatically Wires Level 1–5 & Evolution
 You do not even need to write level-up strings! \`RecipeWeapon::RecipeWeapon(const Recipe &r)\` inspects \`FormBehavior::of(r.form).area()\` and automatically synthesizes all 5 upgrade tiers:
-- **Level 1:** Base weapon unlocked (\`r.pitch\`).
-- **Level 2:** \`+50% base damage\`.
-- **Level 3:** \`+1 disc\` (since \`Form::Boomerang\` is a projectile count form) or \`+30% radius\` (if area form).
-- **Level 4:** \`25% faster\` (\`cooldown * 0.75f\`).
-- **Level 5:** \`+50% base damage\` and \`+1 disc\` (or \`+30% radius\`).
+* **Level 1:** Base weapon unlocked (\`r.pitch\`).
+* **Level 2:** \`+50% base damage\`.
+* **Level 3:** \`+1 disc\` (for projectile count forms) or \`+30% radius\` (for area forms).
+* **Level 4:** \`-20% cooldown\`.
+* **Level 5:** Evolution readiness. Level-up cards dynamically announce the required catalyst passive (such as \`"evolves with Conduit"\`), highlighted in gold when held.
+
+##### Step 3: Registering the Evolution Partner in \`src/item/Upgrade.cpp\`
+Every weapon in Mellangan must have a paired evolution partner registered in \`EVOLUTIONS[][3]\`:
+\`\`\`cpp
+{"Tempest Chakram", "Conduit", "Storm Maelstrom"},
+\`\`\`
+The automated startup content verification enforces that both the partner passive and evolved weapon exist and are uniquely linked.
 
 ---
 
 #### Path B: Writing a Custom Weapon Class (\`src/item/weapon/\`)
 
-When you need custom mechanics beyond \`FormBehavior\`, follow these 4 steps:
-
 ##### Step 1: Reserve an Icon in \`src/Atlas.hpp\`
-Every weapon card displays a \`16×16\` icon from \`res/atlas.png\`. Check \`tools/atlas_layout.py\` for the reserved weapon band (row \`y = 624\`, cells \`14..21\`) and expose a \`constexpr Sprite\` in \`src/Atlas.hpp\`.
+Reserve an index in \`atlas::i::*\` for your weapon's 16x16 icon in the UI atlas.
 
 ##### Step 2: Subclass \`Upgrade\` in \`src/item/weapon/\`
-Override \`tick(Mob &p)\` to decrement your cooldown timer by \`DT\` and spawn your \`Projectile\` or \`Effect\` entity via \`p.level->add<MyProjectile>(...)\`:
-
+Implement your weapon class inheriting from \`Upgrade\`, overriding \`tick()\`, \`levelUp()\`, and \`evolve()\`:
 \`\`\`cpp
-void MyWeapon::tick(Mob &p) {
-  if ((cd -= DT) > 0 || p.dead())
-    return;
-  cd = 1.8f * (level >= 4 ? 0.75f : 1.0f) * p.haste * pace;
-  float dmg = (16.0f + 8.0f * (at(level, 2) + at(level, 5))) * p.might * power;
-  p.level->add<MyProjectile>(p.x, p.bodyY(), p.xAim, p.yAim, dmg, this);
-}
+class CustomBlade : public Upgrade {
+public:
+  CustomBlade() : Upgrade("Custom Blade", "Strikes nearby foes", atlas::i::Sword) {
+    weapon = true;
+  }
+  void tick() override;
+};
 \`\`\`
 
 ##### Step 3: Register in \`Upgrade::all()\` (\`src/item/Upgrade.cpp\`)
-Add your weapon factory to \`Upgrade::all()\` and optionally pair it with a passive catalyst item to enable **Reforged Evolution** when picking up boss chests (\`Chest.cpp\`).
+Add your weapon instance to the master upgrade registry so the level-up drafting director can offer it during runs.
 
-##### Step 4: Test Immediately via CLI
-Run both the interactive dev loadout and the automated arsenal verification view:
-
-\`\`\`cpp
-./build/bin/Debug/MellanganApp.exe --dev --arm "Tempest Chakram!"
-./build/bin/Debug/MellanganApp.exe --test-arsenal-view "Tempest Chakram"
-./build/bin/Debug/MellanganApp.exe --test
+##### Step 4: Audit Performance via \`--weapon-lab\`
+Validate your weapon's balance across all 5 tiers and evolution by running the headless auditor:
+\`\`\`sh
+./build/Release/Mellangan --weapon-lab weapon_audit.csv
 \`\`\`
+The tool benchmarks DPS against 42 target dummies and a marching 40-knight crowd, verifying that damage scales smoothly without dead levels or unintended balance spikes.
 `,
+    
     mermaidCharts: [
       {
         title: "Step-by-Step Weapon & Evolution Registration Flow",
@@ -2124,85 +2118,64 @@ flowchart LR
       "18. Tutorial 6: Writing Deterministic Tests, Visual QA Views & Prof.c Benchmarks",
     category: "contribute",
     summary:
-      "Step-by-step guide to authoring assert-driven unit suites, headless GPU screenshot QA views, and 8-slot Prof.c benchmarks.",
+      "Hands-on testing tutorial: deterministic unit tests, --weapon-lab DPS audit, --soak 60-min autopilot, and --bench-gate.",
     sourceFiles: [
       "src/test/Tests.hpp",
       "src/test/Test.cpp",
-      "src/test/view/QaViews.cpp",
-      "src/Prof.h",
-      "src/Prof.c",
       "src/Bench.cpp",
+      "src/Prof.c",
+      "src/item/WeaponLab.cpp",
     ],
     content: `
 ### Hands-On Tutorial 6: Deterministic Testing, Visual QA & Profiling
 
-Every feature contributed to Mellangan is backed by three verification pillars:
-1. **Deterministic Simulation Suites (\`--test\`, \`src/test/Test.cpp\`)**
-2. **Synthetic GPU Visual QA Views (\`--test-*-view\`, \`src/test/view/QaViews.cpp\`)**
-3. **8-Slot Hardware Performance Telemetry (\`--bench\`, \`src/Prof.c\`, \`src/Bench.cpp\`)**
+Mellangan maintains strict mathematical and engine determinism through a multi-tiered automated test suite. Tests run completely headless and independent of GPU drivers, enabling comprehensive verification across continuous integration pipelines.
 
----
+#### The Modern CLI Toolchain & Test Suite
 
-#### Part 1: Writing a Deterministic Unit Test (\`src/test/\`)
+1. **Deterministic Unit Tests (\`--test\`):**
+   Runs the full suite of unit tests declared in \`src/test/Tests.hpp\`. The suite seeds its PRNG, verifies weapon mechanics, affix roll distributions, crowd separation algorithms, bastion siege integrity, and cross-references all item and asset link tables. Builds with AddressSanitizer and UndefinedBehaviorSanitizer execute cleanly with zero warnings.
 
-Notice line 1 of \`src/test/Test.cpp\`:
+2. **Headless Weapon Lab Audit (\`--weapon-lab [out.csv]\`):**
+   Automates balance testing across all 82 evolutions and base weapons. Simulates 42 stationary dummies and a marching 40-knight horde under fixed seeds, reporting DPS, flat levels, and crowd share anomalies directly to CSV.
+
+3. **Autopilot Soak Testing (\`--soak [minutes]\`):**
+   Launches god-mode autopilot runs that navigate, answer level-up menus, and loop through dawns continuously for up to 60 minutes. Every minute, the harness logs frame rate, 99th-percentile frame latency, resident memory footprint, and active entity counts. The harness exits with failure code 2 if:
+   * Frame rate drops below 55 fps or frame $p_{99}$ latency exceeds 16.7 ms.
+   * Process memory expands by more than 32 MB over initial run baseline.
+   * Frame execution stalls due to window minimization or display lock.
+
+4. **Release Gate Verification (\`--bench-gate\`):**
+   Executes a stress benchmark scaling up to 10,000 active enemies. The release packaging pipeline (\`package.ps1\`) enforces that the 10,000-mob row must maintain at least 55 fps with frame $p_{99} < 16.7\\text{ ms}$, failing the release build if performance slips.
+
+5. **Continuous Integration Matrix (GitHub Actions):**
+   Every commit and pull request compiles across three distinct environments:
+   * **Windows:** MSVC with \`/W4 /WX\` (warnings as errors) across Debug and Release targets.
+   * **Linux:** Clang with \`-Werror\` under AddressSanitizer and UBSan.
+   * **macOS (Apple Silicon):** Native arm64 Clang build with validation layers.
+   All three environments execute \`--test\` headlessly without requiring a physical GPU.
+
+#### Writing a Deterministic Unit Test (\`src/test/\`)
+
 \`\`\`cpp
-#undef NDEBUG
-#include <cassert>
-\`\`\`
-By explicitly undefining \`NDEBUG\` before \`<cassert>\`, \`assert(...)\` statements inside the test suite remain active even in optimized Release builds!
+#include "test/Test.hpp"
+#include "level/Level.hpp"
+#include "entity/enemy/Enemy.hpp"
 
-##### Step 1: Declare Your Test in \`src/test/Tests.hpp\`
-Add \`void testMyFeature();\` to \`src/test/Tests.hpp\` and call it inside \`runTests()\` in \`src/test/Test.cpp\`.
-
-##### Step 2: Spin Up a Headless \`Level\` and Tick Deterministically
-You can instantiate a \`Level\` directly in memory, spawn a \`Player\` and specific \`Enemy\` kinds at exact pixel coordinates, step \`level.tick()\` for a fixed number of 60 Hz frames, and assert exact HP, status bitmasks, or slab allocations:
-
-\`\`\`cpp
-void testMyFeature() {
-  Level level(12345u);
-  Player *p = level.player;
-  Enemy *foe = level.add<Enemy>(EnemyKind::Slime, p->x + 32, p->y);
-  float beforeHp = foe->hp;
-  for (int i = 0; i < 60; ++i)
-    level.tick();
-  assert(foe->hp < beforeHp);
+void testCrowdPush() {
+  Level level;
+  level.seed(1337);
+  // Spawn two overlapping enemies and verify soft-body relaxation
+  Enemy *a = level.spawn<Enemy>(EnemyKind::Wolf, 100, 100);
+  Enemy *b = level.spawn<Enemy>(EnemyKind::Wolf, 101, 100);
+  level.buildGrid();
+  level.push();
+  level.settle();
+  test_assert(a->x != b->x, "Mobs must push apart deterministically");
 }
 \`\`\`
-
-Notice that at the end of \`runTests()\`, \`pool_shutdown()\` is called to verify that \`Pool.c\` reclaims all 64 KB slabs cleanly without memory corruption.
-
----
-
-#### Part 2: Staging a Synthetic Visual QA View (\`src/test/view/QaViews.cpp\`)
-
-When you add a new visual effect, UI card, monster silhouette, or biome transition, stage it in \`src/test/view/QaViews.cpp\` or \`Screenshots.cpp\` and inspect it with the built-in visual QA flags:
-- \`--test-combat-view\`: Stages dense mid-combat projectile, status, and damage-number readability scenes.
-- \`--test-encounter-view\`: Stages landmark and regional boss telegraph rings.
-- \`--test-gui-view\`: Renders HUD, \`LevelUpMenu\`, \`ShrineMenu\`, and \`CodexMenu\` layouts.
-- \`--test-effects-view\`: Renders weapon \`Form\` and \`Payload\` particle/arc effects side by side.
-- \`--test-arsenal-view "Weapon Name"\`: Focuses the camera on a single weapon's firing cycle.
-- \`--test-biome-view X Y SEED\`: Renders a deterministic biome region at native 1x resolution and saves a PNG via \`vk2dTextureCopyPixels\`.
-
----
-
-#### Part 3: Profiling with \`Prof.c\` & Running \`--bench\` (\`src/Bench.cpp\`)
-
-To measure the CPU cost of a hot path, wrap it in \`prof_begin(Slot)\` and \`prof_end(Slot)\` (\`src/Prof.h\`):
-- \`PROF_THINK\`: Multithreaded AI \`Sense\` + \`GoalQueue\` worker pool + CSR grid rebuild.
-- \`PROF_ENTITIES\`: Main-thread entity movement, projectiles, and status ticks.
-- \`PROF_PARTICLES\`: \`Particle\` and \`Debris\` simulation.
-- \`PROF_HOUSEKEEP\`: \`Level::flush()\` additions/removals and \`Pool.c\` reclamation.
-- \`PROF_LIGHT\`: Additive offscreen light map rendering (\`LightField.cpp\`).
-- \`PROF_FLOOR\`: Biome ground auto-tiling and barycentric transition blending (\`FloorPainter.cpp\`).
-- \`PROF_SORT\`: 3-pass 12-bit Radix Y-depth sort (\`LevelRender.cpp\`).
-- \`PROF_DRAW\`: Vulkan2D instanced sprite submission and \`post.slang\` composite.
-
-Run the automated benchmark before opening a PR or cutting a release:
-\`\`\`cpp
-./build/bin/Release/MellanganApp.exe --bench
-\`\`\`
 `,
+    
     mermaidCharts: [
       {
         title:
@@ -2559,14 +2532,46 @@ flowchart LR
       "21. Night Clock, 11 Omens, Shrine Dawn-Pull & 7-Stream Wave Director",
     category: "gameplay",
     summary:
-      "How Night.cpp, Flavour.cpp, and Spawner.cpp orchestrate the 15-minute survival arc, 11 nocturnal Omens, 60s shrine dawn-pull, and 7 concurrent spawn streams.",
+      "The 15-minute nocturnal survival arc, Endless Night mode, 10-tier Heat Ladder curses, and daily worlds.",
     sourceFiles: [
       "src/level/Night.cpp",
       "src/level/Spawner.cpp",
-      "src/entity/enemy/Rank.cpp",
+      "src/level/RunRules.hpp",
       "src/level/Flavour.cpp",
+      "src/meta/Codex.hpp",
     ],
     content: `
+### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
+
+Every standard run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`) and \`RunRules\` (\`src/level/RunRules.hpp\`), tracking the countdown to dawn (\`r.nightLength = 900.0f\` seconds by default), active nocturnal \`Omens\`, and sacred Shrines scattered across the map.
+
+#### The 11 Nocturnal Omens (\`OMENS[OMEN_COUNT = 11]\` in \`Flavour.cpp\`)
+At the start of a run, \`Level\` rolls \`rng.chance(0.85f)\` to activate one of 11 global Omens (falling back to \`CALM\` on the remaining 15% of nights):
+* **\`BLOOD MOON\`:** \`rate = 1.25, horde = 1.35, speed = 1.15, xp = 1.2, score = 1.5, elite = 1.2\`
+* **\`FROSTFALL\`:** \`rate = 0.9, horde = 1.0, speed = 0.85, xp = 1.0, score = 1.1, elite = 1.0\`
+* **\`ECLIPSE\`:** \`rate = 1.4, horde = 1.5, speed = 1.1, xp = 1.35, score = 1.75, elite = 1.5\`
+* **\`TEMPEST\`:** \`rate = 1.15, horde = 1.2, speed = 1.25, xp = 1.15, score = 1.3, elite = 1.1\`
+* **\`HARVEST MOON\`:** \`rate = 1.0, horde = 1.0, speed = 1.0, xp = 1.5, score = 1.2, elite = 1.0\`
+* **\`SOLITUDE\`:** \`rate = 0.7, horde = 0.5, speed = 1.1, xp = 0.9, score = 1.0, elite = 2.0\`
+* **\`MIASMA\`:** \`rate = 1.1, horde = 1.1, speed = 0.95, xp = 1.1, score = 1.25, elite = 1.3\`
+* **\`STARFALL\`:** \`rate = 1.0, horde = 1.1, speed = 1.05, xp = 1.25, score = 1.35, elite = 1.15\`
+* **\`CARRION CALL\`:** \`rate = 1.3, horde = 1.4, speed = 1.05, xp = 1.1, score = 1.4, elite = 0.8\`
+* **\`VOID WHISPER\`:** \`rate = 1.2, horde = 1.2, speed = 1.1, xp = 1.3, score = 1.6, elite = 1.4\`
+* **\`ASH RAIN\`:** \`rate = 1.05, horde = 1.15, speed = 0.9, xp = 1.15, score = 1.2, elite = 1.1\`
+
+#### Endless Night Mode (\`Night::endless\`)
+At dawn (06:00), players can press K (or LT on gamepad) to reject the morning sun and plunge into **Endless Night**. The HUD clock transforms into an elapsed timer, and the dark deepens relentlessly:
+* Every 60 seconds of elapsed endless time, monsters receive compounding attribute multipliers:
+  $H(m) = H_0 \\times (1.10)^m, \\quad D(m) = D_0 \\times (1.05)^m$
+* Monster health scales by $+10\\%$ compounding per minute, while attack damage scales by $+5\\%$ compounding per minute.
+* Codex records the player's longest endless survival duration, rendering it on the death screen alongside personal records. Dedicated achievements unlock at 5 and 15 minutes of endless survival.
+
+#### The Heat Ladder (Heat 0 to 10)
+For players seeking deeper challenge, the class selection screen features a 10-tier Heat Ladder. Each Heat rank adds a permanent stacking curse on top of the selected difficulty:
+1. **Heat 1 (Thick Hides):** All monsters gain $+25\\%$ health.
+2. **Heat 2 (Hungry Dark):** Monster movement speed increases by $+10\\%$.
+3. **Heat 3 (Sharp Claws):** Monster attack damage increases by $+25\\%$.
+4. **Heat 4 (Chosen Ones):** Elite and champion spawn rates double (
 ### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
 
 Every run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`) and \`RunRules\` (\`src/level/RunRules.hpp\`), which track the countdown to dawn (\`r.nightLength = 900.0f\` seconds by default), the active nocturnal \`Omen\` (\`OMENS[11]\` in \`src/level/Flavour.cpp\`), and the kindling state of sacred Shrines scattered across the map.
@@ -2651,7 +2656,23 @@ When \`level.time >= dawnAt(level)\`, \`Night::tick\` sets \`dawn = true\` and t
    Places a destructible \`SupplyBarrel\` every \`20s\` along the player's perimeter.
 7. **Regional & Cycling 3-Phase Bosses (\`Spawner::boss\`):**
    Every \`b.bossEvery\` seconds, \`bossFor(world::biomeUnder(player->x, player->y))\` selects the biome's regional boss from \`BOSS_DEFS[9]\` (or cycles \`THE CYCLOPS\`, \`THE PACK LORD\`, and \`THE LICH\` on a 30% classic roll), scaled by \`1.0f + (bosses - 1) * b.bossHpStep\`.
+\\times$).
+5. **Heat 5 (Dim Shrines):** Shrines pull dawn only half as far (30s instead of 60s).
+6. **Heat 6 (Teeming):** Swarm wave spawn frequency and horde sizes scale up.
+7. **Heat 7 (Frail):** Player maximum health is reduced by $-20\\%$.
+8. **Heat 8 (Starved):** Experience gem yield is reduced by $-20\\%$.
+9. **Heat 9 (The Tide):** Hordes and wave surges increase by $+50\\%$ in density.
+10. **Heat 10 (Long Night):** Base nocturnal duration increases by $+20\\%$.
+
+Surviving to dawn at a given Heat level unlocks the next rank. Highest cleared Heat is tracked permanently in the Codex and highlighted in the run recap log (\`runs.csv\`).
+
+#### Daily Deterministic Worlds
+Daily runs provide a global standardized challenge: calendar dates deterministically seed the world generator, fix the active hero class (among unlocked characters), and assign a fixed Heat level between 0 and 3.
+
+#### Concentric Ring Shrine Search Optimization
+Locating the nearest sleeping shrine or Ancient Gate previously required generating an entire $81 \\times 81$ tile region matrix ($460\\text{ ms}$). The engine replaced this with an expanding concentric ring search that terminates immediately upon reaching the first ring bounding the nearest possible target, slashing query latency down to **$4\\text{ ms}$**.
 `,
+    
     mermaidCharts: [
       {
         title:
@@ -2714,91 +2735,54 @@ flowchart TD
     title: "22. Persistence, 6-World History LRU, Codex Unlocks & Balance INI",
     category: "core",
     summary:
-      "How Saves.cpp, Codex.cpp, and Balance.cpp manage cross-platform save files, 6-slot binary map charts, 12 hero unlock predicates, and pointer-to-member INI reflection.",
+      "Atomic .bak durability, 50 achievements with hints, runs.csv telemetry, Okabe-Ito colourblind palette, and key rebinds.",
     sourceFiles: [
-      "src/meta/Saves.hpp",
       "src/meta/Saves.cpp",
+      "src/meta/Saves.hpp",
       "src/meta/Codex.hpp",
-      "src/meta/Codex.cpp",
-      "src/meta/Balance.cpp",
-      "res/balance.ini",
+      "src/meta/Feats.cpp",
+      "src/meta/Settings.cpp",
+      "src/input/Input.cpp",
     ],
     content: `
-### Cross-Platform Persistence & 6-World Chart LRU (\`src/meta/Saves.cpp\`)
+### Cross-Platform Persistence & Durability (\`src/meta/Saves.cpp\`)
 
-All persistent player state in **Mellangan** is managed by \`Saves\` (\`src/meta/Saves.hpp\`, \`src/meta/Saves.cpp\`), which resolves the OS-native application preference directory via SDL3's \`SDL_GetPrefPath("soulwax", "Mellangan")\` and performs file reads/writes through \`SDL_LoadFile\` and \`SDL_SaveFile\`.
+All persistent player progression in **Mellangan** is coordinated by \`Saves\` (\`src/meta/Saves.hpp\`) across platform-standard user application data directories:
+* **Windows:** \`%APPDATA%/soulwax/Mellangan/\`
+* **Linux:** \`~/.local/share/soulwax/Mellangan/\`
+* **macOS:** \`~/Library/Application Support/soulwax/Mellangan/\`
 
-#### Saved Files in the Preference Directory
-- \`world.txt\`: Stores the active \`WorldMode\` (\`classic\`, \`random\`, \`daily\`, or \`custom <code-string>\`).
-- \`worlds.txt\`: Maintains a most-recently-used (LRU) table of up to **\`Saves::HISTORY = 6\`** past world codes along with best survival time, total runs, and whether dawn was achieved (\`<code> <best> <runs> <dawn>\`).
-- \`chart-<code>.bin\`: Binary fog-of-war exploration charts for each world code in the 6-slot history.
-- \`codex.txt\`: Human-readable key-value meta-progression ledger managed by \`Codex\`.
-- \`controls.txt\`: Custom keyboard and gamepad bindings.
+#### Atomic Save Durability with \`.bak\` Redundancy
+To ensure player saves survive system crashes, sudden power outages, or write interruptions, every save file (\`codex\`, \`campaign\`, world history charts, \`settings.txt\`, and \`keys.txt\`) utilizes atomic swap semantics:
+1. Content is written to a temporary sibling file (\`<name>.tmp\`).
+2. Upon verified completion, the existing file is copied to \`<name>.bak\`.
+3. The temporary file is renamed atomically into place.
+If a primary save file is detected as corrupted, truncated, or unreadable at startup, the engine automatically restores state from the \`.bak\` backup file, outputting an informative warning in \`mellangan.log\`.
 
-#### Automatic Binary Chart Garbage Collection (\`Saves::HISTORY = 6\`)
-Whenever a run ends, \`Saves::record(code, time, dawn)\` updates or inserts the world entry at the front of \`history\`. If \`int(history.size()) > HISTORY (6)\`, it automatically deletes the oldest world's binary fog-of-war chart from disk before popping the entry:
+#### 50 In-Game Achievements & Codex Unlocks (\`src/meta/Feats.cpp\`)
+The Codex tracks 50 distinct achievements spanning lifetime milestones, single-run feats, challenge completions, and class masteries:
+* **Lifetime Milestones:** First dawn, 10 dawns, 50 runs, 1,000 / 10,000 / 100,000 lifetime kills, 50 / 150 / 300 kill streaks, visiting 10 / 20 / all biomes, collecting 5 / 10 / 16 relics.
+* **Single-Run Feats:** Reaching level 20 / 40, slaying 5,000 foes in one run, kindling 5 shrines, crafting 3 weapon evolutions, reaching dawn with a single weapon, full-health dawn, or sub-12:00 dawn.
+* **Difficulty & Boss Triumphs:** Dawn on Ultra-Violence, Nightmare, and under nocturnal Omens; slaying the Ancient Cyclops, Alpha Wolf, and Pale Warden; and clearing dawn with each of the 12 individual hero classes.
+The final Codex tab displays all 50 achievements, providing contextual hint text for locked entries and maintaining stable IDs for future digital storefront synchronization.
 
-\`\`\`cpp
-history.insert(history.begin(), w);
-while (int(history.size()) > HISTORY) {
-  SDL_RemovePath((path + "chart-" + history.back().code + ".bin").c_str());
-  history.pop_back();
-}
-\`\`\`
+#### Run Balancing Telemetry (\`runs.csv\` & \`tools/run_report.py\`)
+Every completed or fallen run appends a dense telemetry row to \`runs.csv\` inside the save folder:
+* Timestamp, game version, world seed, difficulty, selected class, active omen, final time, dawn status, and cause of death.
+* Player level, kill tally, shrines ignited, distance traversed, and total damage dealt.
+* Per-weapon levels and aggregate damage output, upgrade selection order, level checkpoints at each minute, and dwell duration per biome.
+The bundled \`tools/run_report.py\` utility parses this telemetry to calculate median weapon damage per second, class win rates by Heat tier, and highlight statistical balance outliers.
 
----
+#### Settings Configuration Menu (\`settings.txt\`)
+Opened via the O key (or RB on gamepad), the settings interface enables immediate adjustment of:
+* **Audio Volumes:** Master, music, sound effects, and ambient environmental audio in 10% increments.
+* **Visual Feedback:** Screen shake intensity and damage flash opacity in 25% increments; full or reduced particle density; damage numbers toggle; fullscreen mode; vsync and triple-buffering fallbacks.
+* **Okabe-Ito Colourblind Palette:** Adjusts combat warning indicators to deuteranopia- and protanopia-safe hues: enemy attack rings shift to bright magenta over green grass, player damage turns vermillion, healing glows sky blue, and item rarities adhere to Okabe-Ito colorblind metrics.
 
-### Meta-Progression Ledger & 12 Hero Unlock Predicates (\`src/meta/Codex.hpp\`)
-
-\`Codex\` (\`src/meta/Codex.hpp\`, \`src/meta/Codex.cpp\`) stores lifetime career statistics and discovery bitmasks:
-- **Discovery Bitmasks:** \`uint32_t biomes = 0\` (26 biomes visited) and \`uint32_t relics = 0\` (boss relics found), counted via \`std::popcount(bits)\` (\`Codex::count\`).
-- **Positional Arrays:** \`int slain[KINDS]{}\` (per-species kill counts across all 39 \`EnemyKind\`s, summed by \`Codex::kills()\`) and \`int entered[SITES]{}\` (per-structure visit counts, summed by \`Codex::sites()\`).
-- **Career Counters:** \`int runs = 0, dawns = 0, bestStreak = 0, start = 0, shrines = 0; float bestTime = 0;\`.
-
-#### All 12 \`HeroData::met(const Codex &)\` Unlock Predicates (\`src/hero/*.cpp\`)
-Each hero's \`HeroData\` struct binds a pure function pointer \`bool (*met)(const Codex &)\` evaluated directly against \`Codex\`:
-1. **\`MAGE\` (\`Mage.cpp\`):** Unlocked by default (\`return true;\`).
-2. **\`RANGER\` (\`Ranger.cpp\`):** *"see a dawn"* — \`c.dawns > 0\`.
-3. **\`KNIGHT\` (\`Knight.cpp\`):** *"slay 1000 foes"* — \`c.kills() >= 1000\`.
-4. **\`ALCHEMIST\` (\`Alchemist.cpp\`):** *"find 3 relics"* — \`c.count(c.relics) >= 3\`.
-5. **\`STORMCALLER\` (\`Stormcaller.cpp\`):** *"walk 10 regions"* — \`c.count(c.biomes) >= 10\`.
-6. **\`REAPER\` (\`Reaper.cpp\`):** *"a 100 kill streak"* — \`c.bestStreak >= 100\`.
-7. **\`PRIESTESS\` (\`Priestess.cpp\`):** *"kindle 10 shrines"* — \`c.shrines >= 10\`.
-8. **\`DUELIST\` (\`Duelist.cpp\`):** *"survive 10 minutes"* — \`c.bestTime >= 600\`.
-9. **\`WARDEN\` (\`Warden.cpp\`):** *"walk 3 regions"* — \`c.count(c.biomes) >= 3\`.
-10. **\`TINKERER\` (\`Tinkerer.cpp\`):** *"slay 200 foes"* — \`c.kills() >= 200\`.
-11. **\`ORACLE\` (\`Oracle.cpp\`):** *"kindle 2 shrines"* — \`c.shrines >= 2\`.
-12. **\`CORSAIR\` (\`Corsair.cpp\`):** *"reach a 30-kill streak"* — \`c.bestStreak >= 30\`.
-
----
-
-### Pointer-to-Member INI Reflection (\`src/meta/Balance.cpp\` & \`res/balance.ini\`)
-
-Rather than hardcoding difficulty multipliers or pulling in a heavy configuration library, \`Balance::load\` (\`src/meta/Balance.cpp\`) parses \`res/balance.ini\` using a zero-overhead C++ **pointer-to-member table** (\`float Balance::*member\`):
-
-\`\`\`cpp
-struct Field {
-  const char *key;
-  float Balance::*member;
-};
-
-const Field FIELDS[] = {
-    {"spawn_interval", &Balance::spawnInterval},
-    {"spawn_ramp",     &Balance::spawnRamp},
-    {"spawn_floor",    &Balance::spawnFloor},
-    {"batch_every",    &Balance::batchEvery},
-    {"enemy_cap",      &Balance::enemyCap},
-    {"horde_every",    &Balance::hordeEvery},
-    // ... 28 total tunable float members
-};
-\`\`\`
-
-#### Two-Layer Section Cascade (\`[all]\` → \`[<difficulty>]\`)
-\`Balance::load(text, tier)\` streams \`res/balance.ini\` in a single pass:
-- Keys under \`[all]\` establish the baseline tuning across all 28 fields.
-- Keys under the active difficulty section (\`[too_young]\`, \`[not_too_rough]\`, \`[hurt_me_plenty]\`, \`[ultra_violence]\`, or \`[nightmare]\`) selectively override only the fields that differ for that tier via \`this->*f.member = std::strtof(value.c_str(), nullptr)\`.
-- Any unrecognized key triggers a non-fatal \`spdlog::warn("balance: unknown key {}", key)\` diagnostic so designers immediately catch typos during \`--dev\` hot-testing.
+#### 17-Action Key Rebinding System (\`keys.txt\`)
+The controls interface permits remapping of 17 core gameplay actions (directional movement, class skill, inventory, pause, map, gather, build, loot labels, and codex). When assigning a key already allocated elsewhere, the engine automatically swaps the two bindings, while reserving core navigation keys (arrows, Enter, Esc, 1-4) so menus remain perpetually functional.
 `,
+    
     mermaidCharts: [
       {
         title:
