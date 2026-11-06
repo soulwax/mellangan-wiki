@@ -46,7 +46,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
     title: "01. Engine Philosophy & 8-Slot Hardware Telemetry",
     category: "core",
     summary:
-      'The C++20 "C with classes" architecture, Vulkan 1.2 baseline, 1,520B pool slabs, high-refresh easing, and telemetry.',
+      "The C++20 \"C with classes\" architecture, Vulkan 1.2 baseline, 1,520B pool slabs, high-refresh easing, and telemetry.",
     sourceFiles: [
       "src/main.cpp",
       "src/Game.cpp",
@@ -111,7 +111,7 @@ void prof_end(int slot) {
 }
 \`\`\`
 `,
-
+    
     mermaidCharts: [
       {
         title: "Engine Subsystem Dependency Topology",
@@ -280,7 +280,7 @@ If spatial displacement exceeds 3 tiles ($48\\text{ px}$), such as a flash step,
 * **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 64 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
 * **Submerged Swimmer Clipping:** Entities wading in water (\`swimming(e)\`) replace their ground shadow with an animated water ripple (\`atlas::wx::ripple\`) and clip their lower torso via \`s.submerge(std::floor(e->y) - 5)\`.
 `,
-
+    
     mermaidCharts: [
       {
         title: "64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture",
@@ -403,7 +403,7 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 5. **Platform-Native Lightweight Synchronization:**
    Pool operations are synchronized using Windows \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) or POSIX \`pthread_mutex_t\`, incurring single-digit nanosecond lock acquisition times during multi-threaded allocations.
 `,
-
+    
     mermaidCharts: [
       {
         title: "Sized Virtual Destructor to Slab Size-Class Routing",
@@ -539,7 +539,7 @@ Every tick executes four sequential multi-threaded barriers, guaranteeing determ
 #### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
 Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::roll()\`). AI decisions and attack timings remain completely deterministic regardless of thread scheduling order. Any global world mutations (such as projectile spawns or state transitions) are buffered in thread-local intent flags (\`wantsFire, wantsLeader\`) and flushed on the main thread between barriers.
 `,
-
+    
     mermaidCharts: [
       {
         title: "Workers::run Atomic Fetch-Add Chunk Stealing Protocol",
@@ -1184,7 +1184,7 @@ Level-up drafting cards explicitly display evolution partner requirements:
 #### Headless Weapon Lab Benchmarking (\`--weapon-lab [out.csv]\`)
 To guarantee weapon balance across all 82 evolutions and base weapons, the engine provides an automated headless audit tool (\`src/item/WeaponLab.cpp\`). Under a fixed deterministic seed, the tool benchmarks every weapon from Level 1 through 5 and evolved status across two stress scenarios: 42 stationary target dummies and an endless crowd of 40 heavily-armored knights marching inward. The tool logs DPS, outlier spikes, and crowd distribution to CSV.
 `,
-
+    
     mermaidCharts: [
       {
         title:
@@ -1633,7 +1633,7 @@ Validate your weapon's balance across all 5 tiers and evolution by running the h
 \`\`\`
 The tool benchmarks DPS against 42 target dummies and a marching 40-knight crowd, verifying that damage scales smoothly without dead levels or unintended balance spikes.
 `,
-
+    
     mermaidCharts: [
       {
         title: "Step-by-Step Weapon & Evolution Registration Flow",
@@ -2170,7 +2170,7 @@ void testCrowdPush() {
 }
 \`\`\`
 `,
-
+    
     mermaidCharts: [
       {
         title:
@@ -2667,7 +2667,7 @@ Daily runs provide a global standardized challenge: calendar dates deterministic
 #### Concentric Ring Shrine Search Optimization
 Locating the nearest sleeping shrine or Ancient Gate previously required generating an entire $81 \\times 81$ tile region matrix ($460\\text{ ms}$). The engine replaced this with an expanding concentric ring search that terminates immediately upon reaching the first ring bounding the nearest possible target, slashing query latency down to **$4\\text{ ms}$**.
 `,
-
+    
     mermaidCharts: [
       {
         title:
@@ -2817,7 +2817,7 @@ The five schemes define colors for warnings, damage, healing, comparison indicat
 #### 17-Action Key Rebinding System (\`keys.txt\`)
 The controls interface permits remapping of 17 core gameplay actions (directional movement, class skill, inventory, pause, map, gather, build, loot labels, and codex). When assigning a key already allocated elsewhere, the engine automatically swaps the two bindings, while reserving core navigation keys (arrows, Enter, Esc, 1-4) so menus remain perpetually functional.
 `,
-
+    
     mermaidCharts: [
       {
         title:
@@ -3988,7 +3988,10 @@ flowchart LR
     category: "core",
     summary:
       "Complete mathematical and architectural breakdown of src/other/Ouroboros.hpp: compile-time consteval unanimity proofs, 4 CRTP serpents (Mirror, Gray, Bruijn, Rebecca), infix operator->*, and self-traversing XOR-linked list Augury.",
-    sourceFiles: ["src/other/Ouroboros.hpp", "src/main.cpp"],
+    sourceFiles: [
+      "src/other/Ouroboros.hpp",
+      "src/main.cpp",
+    ],
     content: `
 ### 1. The Mythos, Origin & Purpose of Ouroboros (\`src/other/Ouroboros.hpp\`, \`src/main.cpp\`)
 
@@ -4343,8 +4346,7 @@ bool even(int n) const {
 `,
     mermaidCharts: [
       {
-        title:
-          "The Council of Four Serpents: Compile-Time Parity Consensus & Operator ->*",
+        title: "The Council of Four Serpents: Compile-Time Parity Consensus & Operator ->*",
         chart: `
 flowchart TD
     classDef input fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -4366,8 +4368,7 @@ flowchart TD
 `,
       },
       {
-        title:
-          "Augury XOR-Linked List Traversal with Type-Erased Thunks (link = prev ^ next)",
+        title: "Augury XOR-Linked List Traversal with Type-Erased Thunks (link = prev ^ next)",
         chart: `
 flowchart LR
     classDef node fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -4718,8 +4719,7 @@ flowchart LR
     id: "menu-language",
     title: "33. Menu Text and Language Overrides",
     category: "contribute",
-    summary:
-      "How menu strings, format arguments and the currently unwired override parser work.",
+    summary: "How menu strings, format arguments and the currently unwired override parser work.",
     sourceFiles: [
       "src/gui/Lang.hpp",
       "src/gui/Lang.cpp",
@@ -4764,8 +4764,7 @@ To add a menu string, define its English default in \`Lang\`, add its member to 
     id: "intro-playback",
     title: "34. Intro Video and Audio Playback",
     category: "graphics",
-    summary:
-      "Startup conditions, MPEG frame decoding, Vulkan2D texture updates and the separate audio clip lifecycle.",
+    summary: "Startup conditions, MPEG frame decoding, Vulkan2D texture updates and the separate audio clip lifecycle.",
     sourceFiles: [
       "src/Game.cpp",
       "src/menu/IntroMenu.hpp",
