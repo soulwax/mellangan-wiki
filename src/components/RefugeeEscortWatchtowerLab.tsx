@@ -67,37 +67,18 @@ interface ParticleEntity {
 }
 
 const REGIONAL_LINES: string[][] = [
-  [
-    "They took the mill first. Then the well.",
-    "Keep the fire high tonight, please.",
-    "I heard wolves inside the walls last night.",
-    "My boy went for wood. He'll be back soon.",
-  ],
-  [
-    "The lanterns sing in the marsh. Don't listen.",
-    "Salt keeps the drowned out. Mostly.",
-    "The abbey bells still ring, under the water.",
-    "Spores in the bread again.",
-  ],
-  [
-    "The cold is coming from the barrows, not the sky.",
-    "Warden Kell hasn't slept in days.",
-    "Something old hunts by the standing stones.",
-    "Keep your hands near the fire.",
-  ],
-  [
-    "The caravan is our only water.",
-    "The sky splits over the steppe every night.",
-    "Glass sings in the wind out there.",
-    "Hyenas laugh just like people.",
-  ],
+  ["They took the mill. They will not take Hearthwick."],
+  ["The marsh can howl all it likes. Saltmoor stands."],
+  ["Let the barrows freeze. Frosthold doesn't break."],
+  ["Dunewatch has outlasted worse storms than this."],
+  ["This is where the dark began. It ends here too."],
 ];
 
 export const RefugeeEscortWatchtowerLab: React.FC = () => {
   const [activeTab, setActiveTab] = useState<LabTab>("simulator");
   const [isNight, setIsNight] = useState<boolean>(false);
   const [autoHero, setAutoHero] = useState<boolean>(true);
-  const [towerFortified, setTowerFortified] = useState<boolean>(true);
+  const towerFortified = true;
   const [rescuedCount, setRescuedCount] = useState<number>(1);
   const [materials, setMaterials] = useState<number>(3);
   const [announcement, setAnnouncement] = useState<string>(
@@ -132,7 +113,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
       hp: 40,
       maxHp: 40,
       mode: "Lost",
-      spoken: "Please! I can't find the way back!",
+      spoken: "Please! Is the bastion still standing?",
       speechTimer: 4.0,
       flash: 0,
       shiver: 0,
@@ -184,11 +165,11 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
       hp: 40,
       maxHp: 40,
       mode: "Lost",
-      spoken: "Please! I can't find the way back!",
+      spoken: "Please! Is the bastion still standing?",
       speechTimer: 4.5,
       flash: 0,
       shiver: 0,
-      townIndex: Math.floor(Math.random() * 4),
+      townIndex: Math.floor(Math.random() * 5),
     };
     setAnnouncement("A LOST SANCTUARY SEEKER SHOUTS FOR HELP OUTSIDE TOWN!");
   }, []);
@@ -309,7 +290,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
 
         const CALL_RANGE = 38; // Townsfolk::CALL = 28 (scaled for lab canvas)
         const LEASH_RANGE = 180; // Townsfolk::LEASH = 260
-        const TRAIL_SPEED = 48; // Townsfolk::TRAIL = 50
+        const TRAIL_SPEED = Math.min(50, p.speed * 1.05);
 
         const distToPlayer = Math.hypot(p.x - r.x, p.y - r.y);
         const distToTown = Math.hypot(s.townX - r.x, s.townY - r.y);
@@ -318,7 +299,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
           // Check if player approached close enough to rescue
           if (distToPlayer < CALL_RANGE) {
             r.mode = "Following";
-            r.spoken = "Stay close, I'm right behind you.";
+            r.spoken = "Take me to the walls. I'll help hold them.";
             r.speechTimer = 3.5;
             setAnnouncement(
               "A SANCTUARY SEEKER FOLLOWS YOU - BRING THEM SAFELY TO TOWN!"
@@ -365,7 +346,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               setRescuedCount((c) => c + 1);
               setMaterials((m) => m + 3);
               setAnnouncement(
-                "SANCTUARY SEEKER RESCUED! +3 MATERIALS & +5% VENDOR DISCOUNT!"
+                "SANCTUARY SEEKER RESCUED! +3 MATERIALS; DISCOUNT UP TO 25%!"
               );
 
               // Celebration fireworks
@@ -376,7 +357,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
                   vx: (Math.random() - 0.5) * 120,
                   vy: (Math.random() - 0.5) * 120,
                   color: ["#34d399", "#60a5fa", "#f59e0b", "#fbbf24"][
-                    Math.floor(Math.random() * 4)
+                    Math.floor(Math.random() * 5)
                   ],
                   life: 0.9,
                   maxLife: 0.9,
@@ -476,8 +457,8 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
       // 6. Watchtower Defense & Ballistic Targeting
       const tower = s.watchtower;
       tower.reload = Math.max(0, tower.reload - dt);
-      const TOWER_RANGE = towerFortified ? 190 : 130;
-      const TOWER_RELOAD_TIME = towerFortified ? 1.0 : 1.6;
+      const TOWER_RANGE = 190;
+      const TOWER_RELOAD_TIME = 1.1;
 
       if (tower.reload <= 0) {
         // Target closest hostile in range
@@ -486,7 +467,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
 
         s.enemies.forEach((e) => {
           const dx = e.x - tower.x;
-          const dy = e.y - (tower.y - 30);
+          const dy = e.y - (tower.y - 40);
           const d2 = dx * dx + dy * dy;
           if (d2 < bestDist2) {
             bestDist2 = d2;
@@ -497,13 +478,13 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
         if (bestFoe) {
           const target = bestFoe as EnemyEntity;
           const dx = target.x - tower.x;
-          const dy = target.y - (tower.y - 30);
+          const dy = target.y - (tower.y - 40);
           const d = Math.hypot(dx, dy);
           s.arrows.push({
             x: tower.x,
-            y: tower.y - 30,
-            vx: (dx / d) * 280,
-            vy: (dy / d) * 280,
+            y: tower.y - 40,
+            vx: (dx / d) * 260,
+            vy: (dy / d) * 260,
             life: 1.2,
           });
           tower.reload = TOWER_RELOAD_TIME;
@@ -686,7 +667,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = "rgba(56, 189, 248, 0.25)";
       ctx.beginPath();
-      ctx.arc(tw.x, tw.y - 30, TOWER_RANGE, 0, Math.PI * 2);
+      ctx.arc(tw.x, tw.y - 40, TOWER_RANGE, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
 
@@ -897,9 +878,8 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               </span>
             </h3>
             <p className="text-xs text-slate-400">
-              Interactive 60 Hz simulation of <code>Townsfolk.cpp</code> state
-              machines, leash breadcrumbs &amp; <code>Watchtower.cpp</code> arrow
-              ballistics.
+              A simplified illustration of sanctuary seeker states and watchtower
+              targeting. Movement, combat and timing are approximations of the game.
             </p>
           </div>
         </div>
@@ -1080,11 +1060,11 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
                 Mode::Following
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Trails player breadcrumbs at <code>TRAIL = 50</code> speed.
+                Moves toward the player at up to <code>TRAIL = 50</code> px/s.
                 Checks <code>LEASH = 260</code> distance every tick: if the
                 hero sprints too far ahead, the leash snaps back to{" "}
                 <code>Lost</code>. Transitions to <code>Home</code> upon reaching
-                town boundaries.
+                within 120 px of a town center.
               </p>
             </div>
 
@@ -1096,8 +1076,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
               <p className="text-xs text-slate-300 leading-relaxed">
                 Settles permanently into the local town council. Grants{" "}
                 <strong>+3 Crafting Materials</strong>, increments global{" "}
-                <code>rescued</code> count, increases merchant discount by 5%,
-                and gathers near the campfire during nocturnal waves.
+                <code>rescued</code> count, increases merchant discount by 5% up to a 25% cap, and wanders near home.
               </p>
             </div>
           </div>
@@ -1140,9 +1119,8 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
             <p className="text-xs text-slate-300 leading-relaxed mb-4">
               Upon delivering the third sanctuary seeker, the townspeople bestow their
               devoted hunting hound upon the hero. The hound features
-              autonomous combat steering, bites enemies targeting the hero or
-              following sanctuary seekers, and automatically teleports home if downed,
-              reviving fresh at dawn!
+              normal wolf ally targeting and returns beside the hero if it strays too
+              far. If it falls, it becomes available again at the next dawn.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
@@ -1159,7 +1137,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
                   Dawn Regeneration:
                 </span>
                 <span className="text-sky-400 font-bold">
-                  level.night.dawn == true &rarr; revive()
+                  dawn transition &rarr; hound available again
                 </span>
               </div>
             </div>

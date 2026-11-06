@@ -4374,6 +4374,8 @@ flowchart LR
       "src/campaign/Campaign.cpp",
       "src/campaign/Townsfolk.hpp",
       "src/campaign/Townsfolk.cpp",
+      "src/campaign/Sentry.hpp",
+      "src/campaign/Sentry.cpp",
       "src/campaign/Watchtower.hpp",
       "src/campaign/Watchtower.cpp",
       "src/campaign/Delve.hpp",
@@ -4414,21 +4416,21 @@ public:
 #### Mathematical Invariants of the Escort Loop:
 
 1. **The Rescue Call Proximity (\`CALL = 28.0f\`):**
-   When spawned in the wilderness, sanctuary seekers begin in \`Mode::Lost\`. They shiver in the cold, emit regional distress cries, and cannot fight back. When the player enters within Euclidean distance $d < \\text{CALL}$, the sanctuary seeker immediately transitions to \`Mode::Following\`:
+   When spawned in the wilderness, sanctuary seekers begin in \`Mode::Lost\`. They cannot fight back and use a fixed distress line. When the player enters within Euclidean distance $d < \\text{CALL}$, the sanctuary seeker immediately transitions to \`Mode::Following\`:
    \`\`\`cpp
    if (mode == Mode::Lost && d < CALL && !p.dead()) {
        mode = Mode::Following;
        talk = SAY;
        hush = SAY + 6;
-       spoken = "Stay close, I'm right behind you.";
-       level->game.announce("A SANCTUARY SEEKER FOLLOWS YOU  BRING THEM TO A TOWN");
+       spoken = line();
+       level->game.announce("A SANCTUARY SEEKER FOLLOWS YOU  BRING THEM TO A BASTION");
    }
    \`\`\`
 
-2. **Breadcrumb Trailing Velocity (\`TRAIL = 50.0f\`):**
-   Once following, the sanctuary seeker matches the player's vector with an adaptive trailing speed capped at $1.05\\times$ player velocity:
+2. **Following Speed (\`TRAIL = 50.0f\`):**
+   Once following, the sanctuary seeker moves toward the player when more than 20 px away, using a speed capped by both 50 px/s and $1.05\\times$ the player's speed:
    $$v_{\\text{trail}} = \\min(50.0, v_{\\text{player}} \\times 1.05)$$
-   This guarantees that a briskly running hero does not trivially outpace the follower, while preventing unnatural teleportation.
+   Bastion routing and wall collision constrain the path. A fast player can still outrun the follower and break the leash.
 
 3. **The Leash Break Theorem (\`LEASH = 260.0f\`):**
    If the hero abandons the sanctuary seeker or sprints past the separation threshold ($d > \\text{LEASH}$), the tether breaks! The sanctuary seeker reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
@@ -4447,13 +4449,7 @@ public:
    \`\`\`
    If HP drops to zero, the sanctuary seeker disintegrates in a burst of white spark particles (\`Spark::burst\`) and is permanently lost to the dark.
 
-5. **Regional Dialogue Matrices (\`LINES[5][4]\`):**
-   Sanctuary seekers speak authentic regional lore based on their native biome act (\`town % 5\`):
-   - **Act 1 (Meadows):** *"They took the mill first. Then the well."*
-   - **Act 2 (Barrows & Marshes):** *"The lanterns sing in the marsh. Don't listen."*
-   - **Act 3 (Highlands & Standing Stones):** *"The cold is coming from the barrows, not the sky."*
-   - **Act 4 (Steppe & Waste):** *"The caravan is our only water."*
-   - **Act 5 (Core of the Dark):** *"This is where the dark began. If the fire goes out here, it goes out everywhere."*
+5. **Dialogue:** Lost and following sanctuary seekers use fixed lines. Once home, they choose from four lines for their town, indexed by \`town % 5\`. A nearby living player can hear the nearest townsperson speak.
 
 ---
 
@@ -4480,7 +4476,7 @@ public:
    s.sprite(atlas::town(tt::TowerTop + 1), xp, yp - 48, 8, 16, 1, 1);
    \`\`\`
 2. **Target Acquisition & Ballistic Cadence:**
-   Every \`RELOAD = 1.1f\` seconds, the tower scans a circular perimeter of radius $\\text{RANGE} = 190$ px centered at the arrow slit ($y - 40$). It selects the nearest valid hostile and looses an arrow projectile at **260 px/s**:
+   Once its reload timer reaches zero, the tower scans a circular perimeter of radius $\\text{RANGE} = 190$ px centered at the arrow slit ($y - 40$). It selects the nearest living, unburied hostile and looses an arrow projectile at **260 px/s**, then resets its reload to 1.1 seconds:
    $$damage = 8.0 + 2.0 \\times \\text{Player::lvl}$$
 3. **Dynamic Lightfield Beacon:**
    The tower summit casts an additive flame glow into \`level->lights\` with a natural sinusoidal flicker:
@@ -4498,19 +4494,19 @@ Sentries select the nearest living, unburied enemy within 120 px of their post. 
 
 ### 3. Settlement Economy, Vendor Discounts & The Loyal Hound Companion
 
-Leading a sanctuary seeker safely across the perimeter into the town safe radius (\`settle()\`) permanently expands the settlement and yields three compounding rewards:
+When a following sanctuary seeker comes within 120 px of a town center, \`Campaign::stray()\` settles them there and grants these rewards:
 
 1. **Crafting Materials Payout:**
-   Every successful rescue deposits **+3 basic crafting materials** (\`Mat::Wood\`, \`Mat::Stone\`) directly into the player's satchel.
+   Each rescue adds three independently selected materials to the player: Shard, Ore, Rune, Herb, Hide or Bone. Wood and Stone are not selected by this reward.
 2. **Permanent Merchant Discount:**
    Rescuing sanctuary seekers earns the gratitude of the regional vendor (\`Vendor.cpp\`), applying a **+5% price discount** per rescued sanctuary seeker, capped at a hard maximum of **25%** (\`level.vendor.discount = 0.25f\`):
    $$\\text{discount} = \\min(0.25, 0.05 \\times \\text{rescued})$$
 3. **Milestone: The Loyal Hound Companion (\`c.hound\`):**
-   Upon reaching **3 total rescues** (\`rescued == 3\`), the town gifts the player their faithful **Hunting Hound**:
+   Upon reaching **at least 3 total rescues** (\`rescued >= 3\`), the town gifts the player their faithful **Hunting Hound**:
    - The hound follows the player into the wilderness as a dedicated \`Ally\`.
    - Deals scaled biting damage: $damage = 6.0 + 2.0 \\times \\text{Player::lvl}$.
-   - Aggressively pounces on predators targeting following sanctuary seekers.
-   - **Dawn Revival Invariant:** If the hound falls in battle during the night, it falls back to the hearth (\`c.houndDown = true\`) and **automatically revives fresh at dawn** (\`level.night.dawn == true\`)!
+   - Uses the normal wolf ally targeting rules and is moved back beside the player if it strays more than 260 px away.
+   - If the hound is removed, the campaign marks it down. At the next transition to dawn, the flag clears and a new hound can be summoned beside a living player.
 
 ---
 
@@ -4541,8 +4537,8 @@ struct Delve {
 stateDiagram-v2
     [*] --> Lost : Spawn in Wilderness
     Lost --> Following : Player Distance < CALL (28 px)
-    Following --> Lost : Player Distance > LEASH (260 px)
-    Following --> Home : Arrive at Town Hearth (settle())
+    Following --> Lost : Player dies or distance > LEASH (260 px)
+    Following --> Home : Within 120 px of town center (settle())
     Lost --> Death : HP <= 0 (Predator Bites)
     Following --> Death : HP <= 0 (Intercepted by Foes)
 
@@ -4571,7 +4567,7 @@ flowchart TD
 
     Seeker -->|"Escort into Town"| Town
     Town -->|"Milestone: 3 Rescues"| Hound
-    Town -->|"Gold + Stone + Wood"| Tower
+    Town -->|"300 gold + 12 stone + 8 wood"| Tower
     Tower -->|"Auto-Fire Arrows (260 px/s)"| Foes["Incoming Nocturnal Swarm"]
     Hound -->|"Autonomous Biting & Quarry Aggro"| Foes
 `,
