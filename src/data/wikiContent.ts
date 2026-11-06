@@ -46,7 +46,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
     title: "01. Engine Philosophy & 8-Slot Hardware Telemetry",
     category: "core",
     summary:
-      "The C++20 \"C with classes\" architecture, Vulkan 1.2 baseline, 1,520B pool slabs, high-refresh easing, and telemetry.",
+      'The C++20 "C with classes" architecture, Vulkan 1.2 baseline, 1,520B pool slabs, high-refresh easing, and telemetry.',
     sourceFiles: [
       "src/main.cpp",
       "src/Game.cpp",
@@ -70,7 +70,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
 #### Core Engineering Invariants
 
 1. **Zero Heap Thrashing via Expanded 1,520-Byte Pool Slabs (\`src/entity/Pool.c\`):**
-   Every object inheriting from \`SpriteObject\` overrides \`operator new\` and sized \`operator delete(void *p, size_t size)\` to route directly into \`Pool.c\`, a 32-size-class, 16-byte-grained slab allocator backed by 64 KB contiguous memory blocks. Slab capacity extends to 1,520 bytes, guaranteeing zero-allocation instantiation for all 39 bestiary species. Compile-time assertions enforce that no monster class exceeds the 1,520-byte slab boundary.
+   Every object inheriting from \`SpriteObject\` overrides \`operator new\` and sized \`operator delete(void *p, size_t size)\` to route directly into \`Pool.c\`, a 96-size-class, 16-byte-grained slab allocator backed by 64 KB contiguous memory blocks. Slab capacity extends to 1,520 bytes, guaranteeing zero-allocation instantiation for all 78 bestiary species. Compile-time assertions enforce that no monster class exceeds the 1,520-byte slab boundary.
 
 2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
    Equipment modifiers (44 float attributes) are decoupled from the base creature footprint. Regular monsters without inventory items share an immutable, zero-initialized static block via \`bonus()\`, reducing standard enemy memory from 1,000 bytes down to 832 bytes (a 16.8% cache footprint reduction across 10,000 mobs). Mutable gear instances are allocated on demand via \`kit()\` only when a mob or hero equips items.
@@ -111,7 +111,7 @@ void prof_end(int slot) {
 }
 \`\`\`
 `,
-    
+
     mermaidCharts: [
       {
         title: "Engine Subsystem Dependency Topology",
@@ -124,11 +124,11 @@ flowchart TD
 
     subgraph Platform_Layer ["OS & Hardware Abstraction"]
         SDL3["SDL3 Platform<br/>(Events, HiRes Timer, 32-Voice Audio)"]:::os
-        VK["Vulkan 1.3 Device<br/>(Extern/Vulkan2D Command Queues)"]:::os
+        VK["Vulkan 1.2 Device<br/>(Extern/Vulkan2D Command Queues)"]:::os
     end
 
     subgraph Memory_Concurrency ["Memory & Concurrency Core"]
-        Pool["Pool.c Slab Allocator<br/>(32 Size Classes, 64KB Pages, SRWLOCK)"]:::core
+        Pool["Pool.c Slab Allocator<br/>(96 Size Classes, 64KB Pages, SRWLOCK)"]:::core
         Workers["Workers.cpp Thread Pool<br/>(Atomic Fetch-Add Chunk Stealing)"]:::core
         Prof["Prof.c Telemetry<br/>(8 Hardware Performance Slots)"]:::core
     end
@@ -280,7 +280,7 @@ If spatial displacement exceeds 3 tiles ($48\\text{ px}$), such as a flash step,
 * **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 64 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
 * **Submerged Swimmer Clipping:** Entities wading in water (\`swimming(e)\`) replace their ground shadow with an animated water ripple (\`atlas::wx::ripple\`) and clip their lower torso via \`s.submerge(std::floor(e->y) - 5)\`.
 `,
-    
+
     mermaidCharts: [
       {
         title: "64-Bit Sort Key & 3-Pass 12-Bit Radix Sort Architecture",
@@ -374,7 +374,7 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 1. **Size Class Quantization & 1,520-Byte Slab Expansion:**
    Sizes are rounded up to multiples of 16 bytes via bit-shifting:
    \`classOf(size) = (size + 15) >> 4\`.
-   The allocator supports 95 distinct size classes, handling allocations up to **1,520 bytes** directly within contiguous pre-allocated slab pages. In earlier versions, large monsters exceeding 512 bytes spilled into the system heap, causing micro-stutters during heavy wave spawns. With the 1,520-byte ceiling, every bestiary entity, boss, projectile, and particle is served by zero-fragmentation pool slabs.
+   The allocator supports 96 distinct size classes, handling allocations up to **1,520 bytes** directly within contiguous pre-allocated slab pages. In earlier versions, large monsters exceeding 512 bytes spilled into the system heap, causing micro-stutters during heavy wave spawns. With the 1,520-byte ceiling, every bestiary entity, boss, projectile, and particle is served by zero-fragmentation pool slabs.
 
 2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
    Monster memory footprint was aggressively optimized by isolating equipment stat tables (44 float properties) into \`ItemStats\`. Because standard horde enemies do not equip gear, they share an immutable zero-initialized static instance:
@@ -403,7 +403,7 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 5. **Platform-Native Lightweight Synchronization:**
    Pool operations are synchronized using Windows \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) or POSIX \`pthread_mutex_t\`, incurring single-digit nanosecond lock acquisition times during multi-threaded allocations.
 `,
-    
+
     mermaidCharts: [
       {
         title: "Sized Virtual Destructor to Slab Size-Class Routing",
@@ -415,7 +415,7 @@ flowchart LR
 
     New["new Spark(...) / new Wolf(...)"]:::cpp
     Del["delete basePtr (virtual ~SpriteObject)"]:::cpp
-    ClassOf["classOf(size) = (size + 15) >> 4<br/>16B Grain, 32 Classes (16B..496B)"]:::pool
+    ClassOf["classOf(size) = (size + 15) >> 4<br/>16B Grain, 96 Classes (16B..1520B)"]:::pool
     Lock["POOL_LOCK()<br/>Win32 SRWLOCK / POSIX Mutex"]:::pool
     FreeArr["freeList[c] Intrusive Head<br/>O(1) Pop on Alloc / Push on Free"]:::mem
     Refill["refill(c): malloc(sizeof(Slab) + 64KB)<br/>Carve SLAB / size Nodes in Reverse"]:::mem
@@ -539,7 +539,7 @@ Every tick executes four sequential multi-threaded barriers, guaranteeing determ
 #### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
 Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::roll()\`). AI decisions and attack timings remain completely deterministic regardless of thread scheduling order. Any global world mutations (such as projectile spawns or state transitions) are buffered in thread-local intent flags (\`wantsFire, wantsLeader\`) and flushed on the main thread between barriers.
 `,
-    
+
     mermaidCharts: [
       {
         title: "Workers::run Atomic Fetch-Add Chunk Stealing Protocol",
@@ -547,23 +547,23 @@ Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::ro
 sequenceDiagram
     autonumber
     participant Main as Main Thread
-    participant Atom as std::atomic<int> next
+    participant Atom as std::atomic\u003cuint64_t\u003e next
     participant W1 as Worker Thread 1
     participant W2 as Worker Thread 2
 
     Main->>Main: Check n <= 256 (Fast-Path Inline if true)
-    Main->>Atom: next.store(0), busy = N-1, generation++
+    Main->>Atom: next.store(gen << 32), total = ceil(n/size), finished = 0
     Main->>W1: wake.notify_all()
     Main->>W2: wake.notify_all()
     par Lock-Free Stride Stealing (chunk = 256)
-        Main->>Atom: fetch_add(256) -> [0..256)
-        W1->>Atom: fetch_add(256) -> [256..512)
-        W2->>Atom: fetch_add(256) -> [512..768)
-        Main->>Atom: fetch_add(256) -> [768..n)
+        Main->>Atom: compare_exchange(v, v+256) -> [0..256)
+        W1->>Atom: compare_exchange(v, v+256) -> [256..512)
+        W2->>Atom: compare_exchange(v, v+256) -> [512..768)
+        Main->>Atom: compare_exchange(v, v+256) -> [768..n)
     end
-    W1->>Main: --busy (1 remaining)
-    W2->>Main: --busy == 0 -> done.notify_one()
-    Main->>Main: Barrier Complete
+    W1->>Main: finished += chunks (lock_guard)
+    W2->>Main: finished += chunks == total -> done.notify_one()
+    Main->>Main: Barrier Complete (done.wait finished == total)
 `,
       },
       {
@@ -1184,11 +1184,11 @@ Level-up drafting cards explicitly display evolution partner requirements:
 #### Headless Weapon Lab Benchmarking (\`--weapon-lab [out.csv]\`)
 To guarantee weapon balance across all 82 evolutions and base weapons, the engine provides an automated headless audit tool (\`src/item/WeaponLab.cpp\`). Under a fixed deterministic seed, the tool benchmarks every weapon from Level 1 through 5 and evolved status across two stress scenarios: 42 stationary target dummies and an endless crowd of 40 heavily-armored knights marching inward. The tool logs DPS, outlier spikes, and crowd distribution to CSV.
 `,
-    
+
     mermaidCharts: [
       {
         title:
-          "Combinatorial RecipeWeapon Dispatch & 15 FormBehavior Hierarchy",
+          "Combinatorial RecipeWeapon Dispatch & 16 FormBehavior Hierarchy",
         chart: `
 flowchart TD
     classDef rec fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
@@ -1196,7 +1196,7 @@ flowchart TD
     classDef pay fill:#181524,stroke:#ec4899,stroke-width:2px,color:#e2e8f0;
 
     Recipe["Recipe Struct (src/item/weapon/Recipe.hpp)<br/>(damage, cooldown, reach, speed, count, tint)"]:::rec
-    Form["15 Polymorphic FormBehaviors (src/item/weapon/form/)<br/>Bolt | Volley | Seeker | Boomerang | Spiral<br/>Orbit | Nova | Rain | Field | Cleave<br/>Lob | Trap | Beam | Whip (1.5x Tip) | Wall (Push)"]:::form
+    Form["16 Polymorphic FormBehaviors (src/item/weapon/form/)<br/>Bolt | Volley | Seeker | Boomerang | Spiral<br/>Orbit | Nova | Rain | Field | Cleave<br/>Lob | Trap | Beam | Whip (1.5x Tip) | Wall (Push) | Summon (Ally AI)"]:::form
     Shot["RecipeShot Entity (Mob-Symmetric: Player or Champion/Renegade)<br/>Tracks hits[] vector, hitsLeft & pulse"]:::form
     Payload["16 Bitmask Payloads (r.payload)<br/>Burn | Chill | Poison | Mark | Bleed | Weaken | Fear<br/>Pull | Pierce | Explode | Split | Leech | Chain | Stagger | Shatter | Execute"]:::pay
 
@@ -1227,10 +1227,10 @@ flowchart TD
   },
   {
     id: "classes-encounters",
-    title: "10. 12 Hero Kits, 39 Foe Species, 20 Traits, Champions & 9 Bosses",
+    title: "10. 12 Hero Kits, 78 Foe Species, 20 Traits, Champions & 9 Bosses",
     category: "gameplay",
     summary:
-      "Complete v0.5.15 breakdown of the 12 standalone hero classes, 8 general skills, 39 EnemyKind species (WildFoe Greenwood table, Renegades, Mimic), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.",
+      "Complete breakdown of the 12 standalone hero classes, 8 general skills, 78 EnemyKind species (16 classic, 10 M1-M5 expansion, 4 Renegades, 1 Mimic, 8 WildFoe, and 39 further expansion species), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.",
     sourceFiles: [
       "src/hero/Hero.hpp",
       "src/entity/Trait.hpp",
@@ -1260,7 +1260,7 @@ Every one of the 12 playable classes lives in its own dedicated class implementa
 
 ### 39 \`EnemyKind\` Species: Mimics, Renegades & \`WildFoe\` Greenwood Table (\`WildFoe.cpp\`)
 
-Beyond the 16 classic monsters and 10 regional expansion monsters (\`src/entity/enemy/ExpansionEnemy.cpp\`), \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) spans **39 distinct species**:
+Beyond the 16 classic monsters and 10 regional expansion monsters (\`src/entity/enemy/ExpansionEnemy.cpp\`), \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) spans **78 distinct species**:
 1. **Disguised Chest \`Mimic\` (\`EnemyKind::Mimic\`):** Waits motionless in the grass (\`Lurk\` goal with \`buried = true\` so player weapons ignore it), rattles when approached, springs at close range, and bursts into a shower of coins, items, and potions on death.
 2. **4 Renegade Adventurers (\`Outlaw\`, \`Berserker\`, \`PitFighter\`, \`Deserter\`):** Announced by *"RENEGADES ON YOUR TRAIL"* from 3 minutes onward. They wield real player weapons and telegraph special class skills with glowing warning rings.
 3. **8 Greenwood & Woodland Foes (\`WildFoe::DEFS[8]\` in \`src/entity/enemy/WildFoe.cpp\`):**
@@ -1392,7 +1392,7 @@ Mellangan includes a built-in verification and visual QA harness in \`src/test/\
   2. \`CombatTest.cpp\` & \`PayloadTest.cpp\`: 7 statuses (\`testStatuses\`, \`testStatusDamage\`, \`testNewStatuses\`), 16 weapon payloads (\`testNewPayloads\`), and shape forms (\`testShapeForms\`).
   3. \`ItemTest.cpp\`: 30 affix families, rarity rolls, treasure classes, paper-doll inventory (\`testInventory\`), and reversible gear stats (\`testEquipStats\`).
   4. \`AllyTest.cpp\`: Summon cap refreshing, quarry aggro redirection, decoy lure weighting, and friendly-fire immunity (\`testAllies\`).
-  5. \`ClassTest.cpp\`, \`ArsenalTest.cpp\`, \`BestiaryTest.cpp\`, \`ExpansionEnemyTest.cpp\`, \`ExpansionTest.cpp\`: All 12 hero kits, 41 weapon evolutions, 39 foe species, and 20 traits.
+  5. \`ClassTest.cpp\`, \`ArsenalTest.cpp\`, \`BestiaryTest.cpp\`, \`ExpansionEnemyTest.cpp\`, \`ExpansionTest.cpp\`: All 12 hero kits, 41 weapon evolutions, 78 foe species, and 20 traits.
   6. \`WorldTest.cpp\`, \`BiomeTransitionTest.cpp\`, \`BiomeEncounterTest.cpp\`, \`RunTest.cpp\`, \`RunRulesTest.cpp\`: Voronoi determinism, hill/tarn constraints, shoreline dry moats, and \`RunRules\` parameterization.
 - **Headless GPU Screenshot & QA Views (\`Screenshots.cpp\`, \`QaViews.cpp\`, \`BiomeMap.cpp\`):** Programmatically stages combat encounters, boss fights, UI menus, and biome transitions, capturing uncompressed frames directly from Vulkan textures via \`vk2dTextureCopyPixels\`.
 `,
@@ -1633,7 +1633,7 @@ Validate your weapon's balance across all 5 tiers and evolution by running the h
 \`\`\`
 The tool benchmarks DPS against 42 target dummies and a marching 40-knight crowd, verifying that damage scales smoothly without dead levels or unintended balance spikes.
 `,
-    
+
     mermaidCharts: [
       {
         title: "Step-by-Step Weapon & Evolution Registration Flow",
@@ -2170,7 +2170,7 @@ void testCrowdPush() {
 }
 \`\`\`
 `,
-    
+
     mermaidCharts: [
       {
         title:
@@ -2667,7 +2667,7 @@ Daily runs provide a global standardized challenge: calendar dates deterministic
 #### Concentric Ring Shrine Search Optimization
 Locating the nearest sleeping shrine or Ancient Gate previously required generating an entire $81 \\times 81$ tile region matrix ($460\\text{ ms}$). The engine replaced this with an expanding concentric ring search that terminates immediately upon reaching the first ring bounding the nearest possible target, slashing query latency down to **$4\\text{ ms}$**.
 `,
-    
+
     mermaidCharts: [
       {
         title:
@@ -2817,7 +2817,7 @@ The five schemes define colors for warnings, damage, healing, comparison indicat
 #### 17-Action Key Rebinding System (\`keys.txt\`)
 The controls interface permits remapping of 17 core gameplay actions (directional movement, class skill, inventory, pause, map, gather, build, loot labels, and codex). When assigning a key already allocated elsewhere, the engine automatically swaps the two bindings, while reserving core navigation keys (arrows, Enter, Esc, 1-4) so menus remain perpetually functional.
 `,
-    
+
     mermaidCharts: [
       {
         title:
@@ -3988,10 +3988,7 @@ flowchart LR
     category: "core",
     summary:
       "Complete mathematical and architectural breakdown of src/other/Ouroboros.hpp: compile-time consteval unanimity proofs, 4 CRTP serpents (Mirror, Gray, Bruijn, Rebecca), infix operator->*, and self-traversing XOR-linked list Augury.",
-    sourceFiles: [
-      "src/other/Ouroboros.hpp",
-      "src/main.cpp",
-    ],
+    sourceFiles: ["src/other/Ouroboros.hpp", "src/main.cpp"],
     content: `
 ### 1. The Mythos, Origin & Purpose of Ouroboros (\`src/other/Ouroboros.hpp\`, \`src/main.cpp\`)
 
@@ -4346,7 +4343,8 @@ bool even(int n) const {
 `,
     mermaidCharts: [
       {
-        title: "The Council of Four Serpents: Compile-Time Parity Consensus & Operator ->*",
+        title:
+          "The Council of Four Serpents: Compile-Time Parity Consensus & Operator ->*",
         chart: `
 flowchart TD
     classDef input fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -4368,7 +4366,8 @@ flowchart TD
 `,
       },
       {
-        title: "Augury XOR-Linked List Traversal with Type-Erased Thunks (link = prev ^ next)",
+        title:
+          "Augury XOR-Linked List Traversal with Type-Erased Thunks (link = prev ^ next)",
         chart: `
 flowchart LR
     classDef node fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
@@ -4719,7 +4718,8 @@ flowchart LR
     id: "menu-language",
     title: "33. Menu Text and Language Overrides",
     category: "contribute",
-    summary: "How menu strings, format arguments and the currently unwired override parser work.",
+    summary:
+      "How menu strings, format arguments and the currently unwired override parser work.",
     sourceFiles: [
       "src/gui/Lang.hpp",
       "src/gui/Lang.cpp",
@@ -4764,7 +4764,8 @@ To add a menu string, define its English default in \`Lang\`, add its member to 
     id: "intro-playback",
     title: "34. Intro Video and Audio Playback",
     category: "graphics",
-    summary: "Startup conditions, MPEG frame decoding, Vulkan2D texture updates and the separate audio clip lifecycle.",
+    summary:
+      "Startup conditions, MPEG frame decoding, Vulkan2D texture updates and the separate audio clip lifecycle.",
     sourceFiles: [
       "src/Game.cpp",
       "src/menu/IntroMenu.hpp",
