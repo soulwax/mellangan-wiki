@@ -4625,6 +4625,11 @@ flowchart TD
       "src/level/world/Under.cpp",
       "src/level/biome/Biome.cpp",
       "src/level/FloorPainter.cpp",
+      "src/level/Noise.h",
+      "src/level/Noise.c",
+      "src/level/LightField.cpp",
+      "src/level/Sky.cpp",
+      "src/level/world/Terrain.cpp",
     ],
     content: `
 ### Mathematics in the engine
@@ -4839,6 +4844,91 @@ The temporary RAII guard \`Surfaced\` temporarily switches \`active\` to \`Layer
 #### Excourse: The Three Stratigraphic Horizons (Surface, Caves, Deep)
 
 The vertical coupling between surface climate and subterranean cave generation ensures that players never experience disjointed transitions. When descending through a cave mouth at $(x, y)$, the underground biome retains the ambient soundscapes, crystal formations, and elemental monster affinities of the world above, while replacing the open sky with solid limestone roof ceilings, darkness torches, and subterranean streams.
+
+
+### 9. Procedural noise: cache-free analytical hash and rotated spectral fBm
+
+Continuous spatial variation across Mellangan (\`src/level/Noise.h\`, \`src/level/Noise.c\`) is evaluated without storing permutation tables in memory. Classical Perlin noise relies on a 256 or 512-entry lookup array $P[256]$, which produces L1 cache evictions, wraps periodically, and requires integer modulo operations. Mellangan replaces table lookups with a branch-free, register-resident integer hash, a 16-element gradient circle, and a Pythagorean rotational octave transformation.
+
+#### Cache-Free Analytical Hash (\`noise_hash\`)
+
+Given 2D integer lattice coordinates $(ix, iy) \\in \\mathbb{Z}^2$, a regional seed $S$, and a world salt $\\sigma$, \`noise_hash\` mixes all 32 bits using large prime multipliers and Murmur-style avalanche shifts:
+
+$$h_0 = (ix \\cdot K_x) \\oplus (iy \\cdot K_y) \\oplus (S \\cdot K_s) \\oplus (\\sigma \\cdot K_\\phi)$$
+
+$$h_1 = h_0 \\oplus (h_0 \\gg 13), \\qquad h_2 = h_1 \\cdot M, \\qquad h_{\\text{final}} = h_2 \\oplus (h_2 \\gg 15)$$
+
+where:
+- $K_x = \\text{0x8DA6B343} = 2376487747$
+- $K_y = \\text{0xD8163841} = 3625293889$
+- $K_s = \\text{0xCB1AB31F} = 3407467295$
+- $K_\\phi = \\text{0x9E3779B1} = 2654435761$ (derived from the golden ratio $2^{32} \\cdot (\\sqrt{5} - 1)/2$)
+- $M = \\text{0x5BD1E995} = 1540483477$ (MurmurHash2 mixing constant)
+
+Because this computation takes only 8 arithmetic and bitwise instructions, it executes entirely inside CPU registers in fewer than 4 clock cycles, completely bypassing memory buses.
+
+#### The 16-Gon Equiangular Gradient Ring
+
+Classical implementations randomly pick from 4 or 8 cardinal axes. Mellangan precomputes 16 equiangular 2D unit vectors scaled by $\\sqrt{2}$:
+
+$$\\mathbf{g}_k = \\sqrt{2} \\begin{pmatrix} \\cos\\left(k \\frac{\\pi}{8}\\right) \\\\ \\sin\\left(k \\frac{\\pi}{8}\\right) \\end{pmatrix}, \\qquad k \\in \\{0, 1, \\dots, 15\\}$$
+
+The gradient index is extracted from the most significant 4 bits of the avalanched hash:
+
+$$k = h_{\\text{final}} \\gg 28$$
+
+The top bits of a multiplicative hash exhibit optimal entropy and uniformity. The $\\sqrt{2}$ scale factor guarantees that for the maximum corner displacement vector $(\\pm 0.5, \\pm 0.5)$, the dot product spans the full normalized interval $[-1.0, 1.0]$:
+
+$$\\max_{\\mathbf{d} \\in \\{\\pm 0.5\\}^2} |\\mathbf{g}_k \\cdot \\mathbf{d}| = \\sqrt{2} \\cdot \\left(\\frac{1}{2} + 0\\right) = \\frac{\\sqrt{2}}{2} \\approx 0.707 \\implies \\sqrt{2} \\cdot 0.707 \\approx 1.0$$
+
+#### Branch-Free Flooring and Quintic $C^2$ Fade
+
+To prevent coordinate truncation bugs for negative coordinates (where standard C casting \`(int32_t)-0.5f\` rounds towards zero to \`0\` instead of \`-1\`), Mellangan evaluates floor coordinates without branch instructions:
+
+$$\\text{ifloor}(v) = \\lfloor v \\rfloor = \\text{int}(v) - [v < \\text{float}(\\text{int}(v))]$$
+
+Within each lattice cell, sub-tile fractional coordinates $(dx, dy) = (x - \\lfloor x \\rfloor, y - \\lfloor y \\rfloor)$ are smoothed using Ken Perlin's quintic polynomial:
+
+$$u = \\text{fade}(dx) = 6 dx^5 - 15 dx^4 + 10 dx^3 = dx^3 (dx (6 dx - 15) + 10)$$
+
+$$v = \\text{fade}(dy) = 6 dy^5 - 15 dy^4 + 10 dy^3 = dy^3 (dy (6 dy - 15) + 10)$$
+
+The first and second derivatives of the quintic fade curve satisfy:
+
+$$f'(0) = f'(1) = 0, \\qquad f''(0) = f''(1) = 0$$
+
+Both the first derivative (surface tangent) and second derivative (surface curvature) vanish at integer cell boundaries. This guarantees $C^2$ continuity everywhere across the endless plane, preventing optical creasing in dynamic lighting and normal calculations.
+
+#### Rotated Spectral Fractal Brownian Motion (\`noise_fbm\`)
+
+Summing octaves of raw Perlin noise along cardinal axes creates noticeable alignment artifacts (cross-hatching) because each octave's grid lines align with the axes. To eliminate harmonic alignment, Mellangan multiplies the coordinate vector by a Pythagorean rotation matrix at each octave:
+
+$$\\begin{pmatrix} x_{i+1} \\\\ y_{i+1} \\end{pmatrix} = \\begin{pmatrix} 1.6 & -1.2 \\\\ 1.2 & 1.6 \\end{pmatrix} \\begin{pmatrix} x_i \\\\ y_i \\end{pmatrix}$$
+
+This transformation decomposes into exact frequency scaling and planar rotation:
+
+$$\\begin{pmatrix} 1.6 & -1.2 \\\\ 1.2 & 1.6 \\end{pmatrix} = 2.0 \\begin{pmatrix} \\cos\\theta & -\\sin\\theta \\\\ \\sin\\theta & \\cos\\theta \\end{pmatrix}, \\qquad \\theta = \\arctan\\left(\\frac{1.2}{1.6}\\right) = \\arctan(0.75) \\approx 36.87^\\circ$$
+
+Key mathematical properties:
+1. **Exact Lacunarity (Frequency Doubling):** Because $1.6^2 + 1.2^2 = 2.56 + 1.44 = 4.0 = 2.0^2$, the spectral frequency doubles ($\\lambda = 2.0$) at every octave.
+2. **De-correlated Lattice Alignment:** Rotating the grid by $36.87^\\circ$ between successive octaves decorrelates high-frequency features from low-frequency features.
+3. **Integer Arithmetic Efficiency:** The matrix entries are exact decimal fractions ($8/5$ and $6/5$), requiring only 4 multiplications and 2 additions with zero calls to transcendental sine or cosine functions.
+4. **Golden Ratio Seed Progression:** To ensure statistical independence between octaves, the seed increments by the golden ratio integer constant:
+   $$S_i = S + i \\cdot \\text{0x9E3779B9u}$$
+5. **Exact Strict Normalization:** The octave sum is normalized by the sum of amplitudes:
+   $$N_{\\text{fBm}}(\\mathbf{x}) = \\frac{\\sum_{i=0}^{m-1} 0.5^i \\cdot \\text{Perlin}(\\mathbf{x}_i, S_i)}{\\sum_{i=0}^{m-1} 0.5^i}$$
+   This guarantees that the composite output strictly stays within the range $[-1.0, 1.0]$ regardless of octave count $m$.
+
+#### Excourse: Multi-System Applications
+
+1. **Continuous Climate Warping (\`src/level/biome/Biome.cpp\`):**
+   Regional climate tuples $\\mathbf{C} = (T, M, \\eta, W)$ sample warped coordinates:
+   $$w_x = s_x + 5.0 \\cdot \\text{fBm}_2(0.045 s_x + 11.3, 0.045 s_y - 4.1) + 0.9 \\cdot \\text{Perlin}(0.23 s_x + 3.1, 0.23 s_y - 8.7)$$
+2. **Dynamic Torch Flicker (\`src/level/LightField.cpp\`):**
+   Light radii oscillate via incommensurate frequencies ($3.1$ and $11.7$ rad/s), generating a warm non-repeating organic flicker:
+   $$\\Delta L(t) = 1.0 + 0.10 \\cdot \\text{Perlin}(3.1 t, \\text{seed} \\cdot 0.37, 909) + 0.05 \\cdot \\text{Perlin}(11.7 t, \\text{seed} \\cdot 0.53, 910)$$
+3. **Parallax Cloud Strata (\`src/level/Sky.cpp\`):**
+   Cloud cover combines slow parallax wind displacement $(o_x, o_y)$ with high-frequency horizon turbulence to simulate atmospheric depth.
 `,
     interactiveComponent: "status-resistance",
     mermaidCharts: [
