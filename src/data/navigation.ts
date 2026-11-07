@@ -132,6 +132,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         shortTitle: "Voronoi Biomes & Barycentric Blend",
       },
       {
+        id: "caves-sundark",
+        shortTitle: "Caves, Sundark & Dread",
+      },
+      {
         id: "weather-sky",
         shortTitle: "Diurnal Cycle, Weather & Footprints",
       },
@@ -216,6 +220,10 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "campaign-settlements-delves",
         shortTitle: "Settlements, Sanctuary Seekers & Delves",
+      },
+      {
+        id: "mutations-afflictions",
+        shortTitle: "Changelings, Mutations & Afflictions",
       },
     ],
   },

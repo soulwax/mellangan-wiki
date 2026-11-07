@@ -5078,4 +5078,82 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "caves-sundark",
+    title: "36. Caves, the Sundark, Guardians & Dread",
+    category: "world",
+    summary: "Three world layers, cave passages, regional hazards, deep guardians, and campaign dread.",
+    sourceFiles: [
+      "src/level/world/Under.cpp",
+      "src/level/biome/CaveBiome.hpp",
+      "src/level/biome/CaveBiome.cpp",
+      "src/level/CaveRules.cpp",
+      "src/level/World.hpp",
+      "src/campaign/CampaignSave.cpp",
+    ],
+    content: `
+### Three layers at the same coordinates
+
+\`world::Layer\` distinguishes the surface, caves, and the deep Sundark. Underground terrain is generated in \`64 × 64\` tile cells. A cave cell records its topology, mouths, biome, possible vault, and chamber center; a deep cell records its biome, landing, exit, and possible guardian lair. \`world::enter()\` switches the active layer, so terrain and prop queries at the same tile coordinates resolve against that layer. The cave biome under a surface location follows the land above; deep regions use their own climate and biome selection.
+
+\`world::passageNear()\` searches the tiles around the hero for a passage. Cave mouths connect surface and caves. Stairs connect caves and deep cells. Deep exits may instead be roots, chimneys, or sinkholes; a sinkhole leads to the surface. A chasm is different from an interaction passage: it occupies a small open area in a descent cave. Non-floating, non-boss foes that enter it are removed from the current layer. Check the passage's \`to\` layer before assuming every underground exit returns to the cave above.
+
+\`Level::shift()\` changes layers without changing the run clock. It removes current foes, draws gems toward the hero, transfers the current chart into its layer slot, updates sky and cave lighting, places the hero and allies at the destination, and moves loose non-gem pickups along. The first visit to a chamber center creates a chest, tracked by a key containing the cell coordinates and layer. The separate chart for each layer prevents explored surface tiles from revealing cave walls.
+
+### Regional rules and rewards
+
+\`CaveBiome\` contains eight shallow regions followed by eight deep regions. Each \`CaveDef\` supplies floor and wall art, tint, props, foes, pool type, light grade, and optional guardian. \`Level::caveRules()\` selects a timed rule from the hero's current cave biome. Root hollows can put brambles ahead of travel; warrens drop rock; spore halls release poison; vents and magma halls erupt; catacombs and ossuaries raise skeletons; the mere stirs water creatures; the hive hatches spiders. Geodes and the cathedral can heal near crystals, rune stones in the halls frighten nearby non-boss foes, and the abyss pushes the hero with gusts. Some rules require a nearby matching prop or pool, so a timer firing does not guarantee an event.
+
+Deep lairs wake when the hero approaches their center. \`Level::guard()\` records active guardians by cell, avoids waking one twice, and marks it felled when its entity disappears. Felled deep guardians remain recorded in campaign saves. A guardian's death also calls \`surgeFrom()\`, which may offer a Changeling a region-specific mutation. The Lost Halls have no guardian and instead host the deep sanctuary.
+
+### Dread in a campaign
+
+\`Level::haunt()\` runs underground only when the run does not end at dawn. Dread rises with time below and contributes to \`threatAt()\` alongside the layer's base threat. A warded location reduces dread gain to one quarter. In the Lost Halls sanctuary, dread drains rapidly and the hero slowly heals. The game announces each new third of the dread range. Returning to the surface or resting in the sanctuary relieves the pressure; the campaign save records remaining dread, the current layer, slain guardians, and separate cave and deep edits.
+
+For a new underground region, add its \`CaveBiome\` and \`CaveDef\`, decide how generation selects it, supply a \`CaveRules.cpp\` rule at the matching enum index, then verify its passage, terrain, chart, foe selection, and save behavior. Keep the shallow/deep boundary at \`CAVE_SHALLOW\` aligned with the enum order.
+`,
+    mermaidCharts: [{
+      title: "Travel and state across world layers",
+      chart: `
+flowchart LR
+    Surface[Surface] <-->|Cave mouth| Caves[Caves]
+    Caves <-->|Stairs or deep exit| Deep[Sundark]
+    Deep -->|Sinkhole| Surface
+    Caves -->|Descent chasm| Deep
+    Deep -->|Time below| Dread[Campaign dread]
+    Deep -->|Lost Halls sanctuary| Relief[Heal and drain dread]
+`,
+    }],
+  },
+  {
+    id: "mutations-afflictions",
+    title: "37. Changelings, Mutation Offers & Afflictions",
+    category: "gameplay",
+    summary: "How biome whispers, guardian surges, deep upheaval, exposure, and cures alter a campaign hero.",
+    sourceFiles: [
+      "src/hero/Mutation.hpp",
+      "src/hero/Mutation.cpp",
+      "src/hero/Affliction.hpp",
+      "src/hero/Affliction.cpp",
+      "src/level/Whispers.cpp",
+      "src/campaign/CampaignSave.cpp",
+    ],
+    content: `
+### Mutation offers
+
+The mutation system runs only when the level's \`rules.mutate\` is enabled. A Changeling standing on the surface in a mapped biome builds a linger timer. After eight seconds, \`Level::whispers()\` offers that biome's gift for twelve seconds. Leaving a 160-pixel radius or letting the offer expire rejects it and starts a 120-second cooldown. An owned gift cannot be offered again. For example, fungal ground whispers Spore Sacs, ashlands Ember Glands, and storm steppe Stormcall. The current mapping is the \`WHISPERS\` table in \`Mutation.cpp\`.
+
+Killing a deep guardian can instead call \`surgeFrom()\`. Its \`SURGES\` table supplies up to two region-themed choices that the hero does not already own. This stronger offer lasts fifteen seconds and resolves to one of the choices if its timer runs out; accepting it increases Synod scrutiny. A fall into the deep may trigger \`upheaval()\`: it has a one-in-four roll, grants a random unowned positive mutation to a Changeling, may also grant a defect, and adds scrutiny. For a non-Changeling, that same event may grant an affliction instead.
+
+Mutations are bits on the player, with a per-mutation timer for repeated effects. \`grant()\` applies immediate changes such as Chitin armor and slower movement, Hollow Bones speed and lower maximum health, or poison immunity from Spore Sacs. \`tick()\` runs periodic effects such as an Ember Glands burning trail, Rime Glands chill, and the mind gifts Kindle, Stillness, Stormcall, Quicken, and Beguile. Nearby Censers suppress mind effects; when a mind effect fires near Synod foes, the Synod gains scrutiny. Quicken animates a nearby wood or stone prop as an ally, while Beguile turns a nearby ordinary foe into an ally. The \`MutationDef\` table is the authority for which gifts are mind gifts, defects, and periodic effects.
+
+### Environmental afflictions
+
+\`Level::exposure()\` tracks a separate timer for each affliction. The relevant surface biome, or its underground counterpart, chooses the current source. Moon Touched requires night on the surface. At 40 seconds the hero gets a warning; at 75 seconds exposure grants the affliction and raises scrutiny. Leaving the source or already owning the affliction fades its exposure at half a second per second. This is independent of Changeling status.
+
+The five afflictions each trade a benefit for a cost: Spore Crown grants poison immunity but slows daytime pace; Glass Skin adds armor but doubles charged-ground damage; Frost Blood grants chill immunity but doubles burning-ground damage; Ash Lung adds burn resistance but lowers pace; Moon Touched raises vigor at night and lowers it by day. A town cure removes one owned affliction for 150 gold. \`affliction::cure()\` also reverses its immediate armor or resistance change and recomputes shared immunities, so curing Spore Crown does not remove poison immunity supplied by Spore Sacs.
+
+Campaign saves record the mutation and affliction bitsets. When extending either enum, keep the bit width and save format in mind, add its source or offer mapping, apply and reverse its effects as appropriate, and verify interactions with Synod scrutiny and existing immunities.
+`,
+  },
 ];
