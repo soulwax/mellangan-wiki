@@ -4609,11 +4609,9 @@ flowchart TD
   },
   {
     id: "engine-mathematics",
-    title:
-      "32. The Mathematics of Mellangan: Geometry, Probability, Sorting & Navigation",
+    title: "32. The Mathematics of Mellangan: Geometry, Probability, Sorting, Navigation & Biomes",
     category: "core",
-    summary:
-      "Worked derivations of target geometry, resistance, conditional loot odds, spatial indexing, stable radix sorting and bastion navigation, with their implementation limits.",
+    summary: "Worked derivations of target geometry, resistance, conditional loot odds, spatial indexing, radix sorting, bastion routing, 4D climate manifolds, and barycentric ground layering.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4622,6 +4620,11 @@ flowchart TD
       "src/level/LevelSpace.cpp",
       "src/level/LevelRender.cpp",
       "src/campaign/Bastion.cpp",
+      "src/level/world/Biomes.cpp",
+      "src/level/world/Ground.cpp",
+      "src/level/world/Under.cpp",
+      "src/level/biome/Biome.cpp",
+      "src/level/FloorPainter.cpp",
     ],
     content: `
 ### Mathematics in the engine
@@ -4632,13 +4635,13 @@ The useful question is not just what a formula calculates, but what it assumes. 
 
 \`Enemy::sense()\` starts with the displacement $\\mathbf{r}$ from enemy to quarry, the quarry velocity $\\mathbf{v}$, and the enemy's type speed $s$. It predicts a short distance ahead:
 
-$$\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$$
+$\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$
 
 The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. This is a heuristic: it is not the exact solution of the moving-target interception equation, and it uses type speed rather than the enemy's current velocity.
 
 For a living quarry, the code normalizes $\\mathbf{q}$ to $\\hat{\\mathbf{q}}$ when its length exceeds 0.001. The \`seen\` flag tests:
 
-$$\\|\\mathbf{q}\\|<300\\quad\\text{and}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$$
+$\\|\\mathbf{q}\\|<300\\quad\\text{and}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$
 
 Here $\\mathbf{a}$ is the **quarry's aim**, not the enemy's facing. Thus the test asks whether the enemy is roughly in front of the quarry, using the predicted displacement. For unit aim, the strict dot threshold corresponds to a half-angle of $\\arccos(0.55)\\approx56.6^\\circ$, or an approximately $113.3^\\circ$ cone. At the boundary the strict comparison fails. If the selected quarry is dead, the code instead returns an unseen point 400 px away; nearby living allies can still be selected first.
 
@@ -4646,7 +4649,7 @@ Here $\\mathbf{a}$ is the **quarry's aim**, not the enemy's facing. Thus the tes
 
 \`Status::apply()\` clamps resistance to $0\\le r\\le0.75$, then scales both the incoming power and duration by $1-r$. For an isolated damage-over-time effect with constant power $P$, duration $T$, no power or duration cap, and no reapplication:
 
-$$P_r=P(1-r),\\qquad T_r=T(1-r),\\qquad D_r=PT(1-r)^2$$
+$P_r=P(1-r),\\qquad T_r=T(1-r),\\qquad D_r=PT(1-r)^2$
 
 At 50% resistance, an effect of 40 damage per second for 4 seconds becomes 20 damage per second for 2 seconds: 40 damage instead of 160. At the 75% cap, the idealized result is $160(0.25)^2=10$.
 
@@ -4658,16 +4661,16 @@ The square is not a universal combat multiplier. Power has a per-status cap, dur
 
 \`rarityOdds()\` uses $S=1+L/40$, where $L$ is item level, and the saturation function
 
-$$f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$$
+$f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$
 
 For nonnegative magic find $m$, each extra point adds less effective magic find than the previous one. Unique and rare checks use different constants: $k=250$ and $k=600$ respectively. The magic check uses raw magic find. Each check is capped at 1:
 
-$$u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$$
-$$r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$$
+$u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$
+$r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$
 
 These are **conditional checks**, not three final probabilities that can simply be added. \`rollRarity()\` tests unique first, then rare only if unique failed, then magic only if both failed. Therefore:
 
-$$P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$$
+$P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$
 
 At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, while the rare check is 2.222%. The actual probability of reaching and passing the rare check is about $0.997143\\times0.022222=2.216\\%$. Item generation can subsequently impose a rarity floor or handle a unique result specially, so these equations describe the initial rarity roll, not every final drop outcome.
 
@@ -4675,7 +4678,7 @@ At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, w
 
 \`Level::buildGrid()\` counts non-buried enemies by grid cell, builds prefix sums, and scatters pointers into a contiguous array. Suppose four cells have counts $[2,0,3,1]$. The exclusive offsets are
 
-$$[0,\\;2,\\;2,\\;5,\\;6]$$
+$[0,\\;2,\\;2,\\;5,\\;6]$
 
 Cell $i$ occupies the half-open interval $[\\text{start}_i,\\text{start}_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3 and 4. The last offset is also the total number of binned enemies. Building the index takes $O(N+C)$ work for $N$ binned enemies and $C$ cells, plus the storage for those arrays.
 
@@ -4703,6 +4706,139 @@ The packed key contains layer in bits 56–63, ordered depth in bits 24–55, an
 Because every edge is assigned one queue step, breadth-first search minimizes the **number of grid moves**, not exact Euclidean travel distance. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. For example, moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally.
 
 The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
+
+
+### 7. Biome calculation: continuous climate manifolds and Voronoi site quantization
+
+Mellangan synthesizes its 26 distinct biomes across an infinite, seed-deterministic plane through a four-stage mathematical pipeline: coordinate rescaling, domain-warped climate noise sampling, Voronoi site quantization, and piecewise hyperplane classification (\`src/level/biome/Biome.cpp\`).
+
+#### The Continuous Climate Manifold
+
+Tile coordinates $(x, y)$ are scaled by $\\text{CLIMATE\\_SCALE} = 2.5$:
+
+$s_x = \\frac{x}{2.5}, \\qquad s_y = \\frac{y}{2.5}$
+
+To prevent grid artifacts, the scaled coordinates undergo multi-octave domain warping:
+
+$w_x = s_x + 5 \\cdot \\text{fBm}_2(0.045 s_x + 11.3, \\; 0.045 s_y - 4.1, \\; 701) + 0.9 \\cdot \\text{Perlin}(0.23 s_x + 3.1, \\; 0.23 s_y - 8.7, \\; 703)$
+$w_y = s_y + 5 \\cdot \\text{fBm}_2(0.045 s_x - 7.7, \\; 0.045 s_y + 9.2, \\; 702) + 0.9 \\cdot \\text{Perlin}(0.23 s_x - 5.3, \\; 0.23 s_y + 2.9, \\; 704)$
+
+At the warped coordinate $(w_x, w_y)$, four continuous noise fields define the climate tuple $\\mathbf{C} = (T, M, E, W)$:
+* **Temperature ($T$):** $\\text{fBm}_3(0.011 w_x, \\; 0.011 w_y, \\; 101)$
+* **Moisture ($M$):** $\\text{fBm}_3(0.013 w_x + 40.5, \\; 0.013 w_y, \\; 202)$
+* **Eerie ($E$):** $\\text{fBm}_2(0.017 w_x, \\; 0.017 w_y - 60.5, \\; 303)$
+* **Wildness ($W$):** $\\text{fBm}_2(0.012 w_x + 123.5, \\; 0.012 w_y - 77.5, \\; 505)$
+
+#### Voronoi Site Quantization (\`siteOf\`)
+
+Evaluating climate directly per tile would produce fragmented micro-biomes. To produce broad geographic continents, \`siteOf(x, y)\` quantizes space into jittered Voronoi cells of size $\\text{BIOME\\_CELL} = 384\\text{ px}$. Space is warped into $\\mathbf{f} = (f_x, f_y)$:
+
+$f_x = x + 30 \\cdot \\text{fBm}_2(0.018 x + 3.7, \\; 0.018 y - 1.3, \\; 611) + 3 \\cdot \\text{Perlin}(0.09 x, \\; 0.09 y + 5.1, \\; 612)$
+$f_y = y + 30 \\cdot \\text{fBm}_2(0.018 x - 8.1, \\; 0.018 y + 6.4, \\; 613) + 3 \\cdot \\text{Perlin}(0.09 x + 2.3, \\; 0.09 y, \\; 614)$
+
+For cell index $(c_x, c_y) = (\\lfloor f_x / 384 \\rfloor, \\; \\lfloor f_y / 384 \\rfloor)$, the generator checks the 9 neighbor cells $(i, j) \\in \\{c_x - 1, c_x, c_x + 1\\} \\times \\{c_y - 1, c_y, c_y + 1\\}$. Each cell contains a pseudo-random site:
+
+$P_{i,j} = \\left(384 \\cdot \\left(i + 0.15 + 0.70 \\frac{h_x}{255}\\right), \\quad 384 \\cdot \\left(j + 0.15 + 0.70 \\frac{h_y}{255}\\right)\\right)$
+
+where $h = \\text{hash2}(73 i + \\text{salt}, \\; 151 j - \\text{salt})$. The coordinate is assigned to the nearest site $(s_x, s_y) = \\arg\\min_P \\|\\mathbf{f} - P\\|^2$, creating organic Voronoi borders.
+
+#### Radial Origin Leash (Cubic Hermite Attenuation)
+
+To guarantee a safe starting sanctuary near the origin, radial distance $d = \\sqrt{s_x^2 + s_y^2}$ attenuates eerie and wild attributes via cubic smoothstep:
+
+$u = \\text{clamp}\\left(\\frac{d - 260}{400}, \\; 0, \\; 1\\right), \\qquad \\beta(d) = u^2 (3 - 2u)$
+$E' = E \\cdot \\beta(d), \\qquad W' = -1 + (W + 1) \\cdot \\beta(d)$
+
+For $d \\le 260\\text{ px}$, $\\beta(d) = 0$, guaranteeing peaceful temperate biomes (Meadow, Forest). Beyond $d \\ge 660\\text{ px}$, $\\beta(d) = 1$, allowing full eldritch corruption and expansion biomes.
+
+#### The 26-Biome Hyperplane Classifier (\`biomeOf\`)
+
+The climate tuple $\\mathbf{C}' = (T, M, E', W')$ is partitioned into 26 discrete biomes via hierarchical decision hyperplanes:
+1. **Wildness Partition ($W' > 0.22$):** Allocates the 10 expansion biomes across 5 temperature bands ($T < -0.20$, $T < -0.07$, $T < 0.07$, $T < 0.20$, $T \\ge 0.20$) split by moisture sign ($M > 0$).
+2. **Eerie Partition ($E' > 0.14$):** Separates Ashlands ($T > 0.12$), Crystal Fields ($T < -0.12$), Fungal Wood ($M > 0.06$), and Barrow ($M \\le 0.06$).
+3. **Temperate/Elemental Partition:** Classifies the remaining 12 core biomes (Taiga, Snow, Jungle, Badlands, Desert, Heath, Savanna, Blossom, Mire, Autumn, Forest, Meadow).
+
+Finally, \`biomeAt(x, y)\` runs a $3 \\times 3$ majority voting filter:
+
+$B(x, y) = \\arg\\max_{b} \\sum_{dy=-1}^{1} \\sum_{dx=-1}^{1} \\mathbb{I}(\\text{rawBiome}(x+dx, \\; y+dy) == b)$
+
+which eliminates single-tile isolated outliers and stabilizes boundary contours.
+
+#### Excourse: The 100,000-Tile Geography Survey (Scaling & Boundary Continuity)
+
+In earlier revisions, raw unscaled climate sampling caused rapid, jarring biome shifts every 30 to 40 tiles. Scaling coordinates by $\\text{CLIMATE\\_SCALE} = 2.5$ widens climate regions by $250\\%$, expanding contiguous biome mass from approximately $400\\text{ tiles}$ across to over $1,000\\text{ tiles}$. Across empirical 4,096-tile transect surveys, adjacent-tile biome boundary crossings fell by $57.36\\%$ (from 82,312 legacy crossings down to 35,100), ensuring that biomes read as vast geographic expanses rather than patchwork noise.
+
+### 8. Biome layering: barycentric smoothstep ground blending and subterranean stratigraphy
+
+Mellangan implements biome layering across two distinct spatial dimensions: horizontal multi-surface barycentric ground transitions on the surface, and discrete vertical stratigraphy in the underworld (\`src/level/world/Biomes.cpp\`, \`Ground.cpp\`, \`Under.cpp\`, \`FloorPainter.cpp\`).
+
+#### Horizontal Barycentric Ground Blending (\`groundBlend\`)
+
+To eliminate sharp tile transitions, \`world::groundBlend(x, y)\` blends up to 3 neighboring biomes. To avoid evaluating 25 noise octaves per rendered pixel, blend weights are computed on a coarse $2 \\times 2$ tile lattice.
+
+##### 1. Binomial Stencil Smoothing
+At lattice coordinates $(x_0, y_0) = (2 \\lfloor x/2 \\rfloor, \\; 2 \\lfloor y/2 \\rfloor)$, a $5 \\times 5$ neighborhood is evaluated using separable binomial weights $K = [1, 2, 3, 2, 1]$:
+
+$\\text{totals}[b] = \\sum_{iy=-2}^{2} \\sum_{ix=-2}^{2} K[ix + 2] \\cdot K[iy + 2] \\cdot \\mathbb{I}(\\text{biomeAt}(x_0 + 2ix, \\; y_0 + 2iy) == b)$
+
+The sum of weights is $(1 + 2 + 3 + 2 + 1)^2 = 81$. \`compactBlend()\` selects the top 3 biomes by accumulated weight and normalizes their sum to $1.0$:
+
+$\\mathbf{w} = (w_1, w_2, w_3), \\qquad \\sum_{i=1}^{k} w_i = 1.0 \\quad (k \\le 3)$
+
+##### 2. Bicubic Smoothstep Interpolation
+Sub-tile fractions $f_x = (x - x_0)/2$ and $f_y = (y - y_0)/2$ are warped via cubic Hermite curves:
+
+$S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
+
+The blend weights from the four corners of the $2 \\times 2$ cell are bilinearly interpolated using $S_x$ and $S_y$, then re-compacted to the 3 dominant biomes.
+
+##### 3. Recursive Alpha Compositing Recurrence
+\`FloorPainter::blend()\` draws up to 3 ground surfaces in order. The local tile's authoritative biome (\`own\`) is sorted to index 0, followed by foreign biomes. The layer opacity $\\alpha_i$ for layer $i$ is:
+
+$\\alpha_0 = 1.0, \\qquad \\alpha_i = \\frac{w_i}{\\sum_{j=0}^{i} w_j} \\quad (i \\ge 1)$
+
+**Theorem (Weight Preservation in Multi-Pass Blending):**
+When layer $i$ is drawn with opacity $\\alpha_i$ over an accumulator with cumulative opacity $C_{i-1} = \\sum_{j=0}^{i-1} w_j$, the visual fraction contributed by layer $i$ equals its barycentric weight $w_i$.
+
+*Proof:* In standard alpha compositing, the incremental visual contribution of layer $i$ is $\\Delta C_i = \\alpha_i (1 - C_{i-1})$. In Mellangan's normalization recurrence:
+$w_i = \\alpha_i \\sum_{j=0}^{i} w_j$
+which matches the recurrence definition $\\alpha_i = w_i / \\sum_{j=0}^{i} w_j$ identically. Thus, visual light transmission matches the mathematical blend weights with zero color drift.
+
+#### Vertical Subterranean Stratigraphy (\`Under.cpp\`)
+
+The engine models world depth through three discrete vertical layers:
+
+$\\text{Layer} \\in \\{\\text{Surface}, \\; \\text{Caves}, \\; \\text{Deep}\\}$
+
+Switching layers updates the active layer pointer and increments \`noise_epoch\`, invalidating the tile memoization table (\`memos\`).
+
+##### 1. Cave Cell Stochastic Classification ($64 \\times 64$ Tile Blocks)
+Subterranean space is discretized into $64 \\times 64$ tile blocks (\`CAVE_CELL = 64\`). The 32-bit cell hash $h = \\text{hash2}(c_x \\times 37 + \\text{seed}, \\; c_y \\times 59 - \\text{seed})$ determines cavern topology via probability intervals:
+* **Solid Rock (40%):** $h \\pmod{100} < 40$. Completely impassable granite bedrock.
+* **Pocket Cavern (33%):** $40 \\le h \\pmod{100} < 73$. An isolated cavern chamber with a single cave mouth.
+* **Through Cavern (15%):** $73 \\le h \\pmod{100} < 88$. A traversable subterranean corridor linking at least 2 distant mouths.
+* **Warren (7.2%):** $88 \\le h \\pmod{100} < 95.2$. A network of 3 to 4 irregular interconnected chambers.
+* **Descent Shaft (4.8%):** $95.2 \\le h \\pmod{100} < 100$. A deep pit connecting the Caves layer to the subterranean Deep dungeon.
+
+##### 2. Rotated Elliptic Chamber Carving
+Each chamber $r$ is carved as an ellipse rotated by angle $\\theta$, with center $(m_x, m_y)$ and semi-axes $(r_a, r_b)$:
+
+$u = (x - m_x) \\cos \\theta + (y - m_y) \\sin \\theta, \\qquad v = (y - m_y) \\cos \\theta - (x - m_x) \\sin \\theta$
+$e(x, y) = \\frac{u^2}{r_a^2} + \\frac{v^2}{r_b^2} + 0.35 \\cdot \\text{fBm}_2(0.08 x + 3.7, \\; 0.08 y - 1.9, \\; 3011)$
+
+A tile is excavated when $e(x, y) < 1.0$ and cellular noise thresholds are satisfied. Passages between rooms are carved using linear ray interpolation with dynamic width dilation.
+
+##### 3. Vertical Climate and Biome Inheritance
+Subterranean caverns maintain thematic continuity with the surface. In \`under::biomeAt(x, y)\`, the function executes:
+\`\`\`cpp
+Surfaced up;
+return world::biomeAt(x, y);
+\`\`\`
+The temporary RAII guard \`Surfaced\` temporarily switches \`active\` to \`Layer::Surface\`, queries the authoritative surface biome above, and restores \`active = Layer::Caves\` on destruction. Caves beneath frozen tundra inherit frost crystals, ice sheets, and glacial pools, while caverns beneath volcanic ashlands inherit obsidian rock and magma fissures.
+
+#### Excourse: The Three Stratigraphic Horizons (Surface, Caves, Deep)
+
+The vertical coupling between surface climate and subterranean cave generation ensures that players never experience disjointed transitions. When descending through a cave mouth at $(x, y)$, the underground biome retains the ambient soundscapes, crystal formations, and elemental monster affinities of the world above, while replacing the open sky with solid limestone roof ceilings, darkness torches, and subterranean streams.
 `,
     interactiveComponent: "status-resistance",
     mermaidCharts: [
