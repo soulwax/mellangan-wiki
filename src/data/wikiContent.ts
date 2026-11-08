@@ -1569,20 +1569,18 @@ flowchart TD
       "src/item/WeaponLab.cpp",
     ],
     content: `
-### Hands-On Tutorial 1: Creating a New Weapon Step by Step
+### Add a weapon
 
-There are two ways to add a weapon in Mellangan:
-1. **The Data-Driven Recipe Path (\`src/item/weapon/Recipe.cpp\`):** Ideal when your weapon combines one of the **16 existing \`Form\` trajectories** (\`Bolt\`, \`Volley\`, \`Orbit\`, \`Rain\`, \`Field\`, \`Seeker\`, \`Nova\`, \`Cleave\`, \`Boomerang\`, \`Trap\`, \`Lob\`, \`Beam\`, \`Whip\`, \`Wall\`, \`Spiral\`, \`Summon\`) with any combination of the **16 \`pay::Payload\` bitflags** (\`Burn\`, \`Chill\`, \`Poison\`, \`Mark\`, \`Bleed\`, \`Weaken\`, \`Fear\`, \`Stagger\`, \`Pierce\`, \`Explode\`, \`Chain\`, \`Split\`, \`Pull\`, \`Leech\`, \`Shatter\`, \`Execute\`).
-2. **The Custom \`Upgrade\` Subclass Path (\`src/item/weapon/*.cpp\`):** Ideal when your weapon introduces brand-new projectile physics or custom rendering.
+First choose what your weapon does. A **form** controls its movement or shape, such as a bolt, orbit, or boomerang. A **payload** adds an effect, such as burn, chill, or chain lightning. If an existing form and payload fit your idea, add one row to \`src/item/weapon/Recipe.cpp\` (Path A below). If the weapon needs movement or drawing code that does not exist yet, write an \`Upgrade\` class (Path B). Start with Path A if this is your first weapon.
 
 ---
 
-#### Path A: Adding a Data-Driven Weapon in \`Recipe.cpp\` (5 Minutes)
+#### Path A: Add a recipe in \`Recipe.cpp\`
 
 Suppose we want to add a new Stormcaller weapon called **\`Tempest Chakram\`** that throws a boomerang disc that both **Chains** lightning and **Marks** enemies:
 
 ##### Step 1: Add the \`Recipe\` Entry in \`src/item/weapon/Recipe.cpp\`
-Each entry in \`const std::vector<Recipe> RECIPES\` defines:
+Find \`RECIPES\` and add a row beside similar weapons. Its fields, in order, are:
 \`{ name, ownerClass, pitch, unitName, iconIndex, form, payloadMask, baseDamage, cooldown, reach, speed, count, tintColor, particleSprite }\`:
 
 \`\`\`cpp
@@ -1591,24 +1589,24 @@ Each entry in \`const std::vector<Recipe> RECIPES\` defines:
  {0.55f, 0.85f, 1.0f, 1.0f}, atlas::pt::ArcaneStar}
 \`\`\`
 
-##### Step 2: How \`RecipeWeapon\` Automatically Wires Level 1–5 & Evolution
-You do not even need to write level-up strings! \`RecipeWeapon::RecipeWeapon(const Recipe &r)\` inspects \`FormBehavior::of(r.form).area()\` and automatically synthesizes all 5 upgrade tiers:
+##### Step 2: Check the five levels
+\`RecipeWeapon\` creates the level-up descriptions from your row. It checks whether the form covers an area to decide which level-three bonus to give:
 * **Level 1:** Base weapon unlocked (\`r.pitch\`).
 * **Level 2:** \`+50% base damage\`.
 * **Level 3:** \`+1 disc\` (for projectile count forms) or \`+30% radius\` (for area forms).
 * **Level 4:** \`-20% cooldown\`.
 * **Level 5:** Evolution readiness. Level-up cards dynamically announce the required catalyst passive (such as \`"evolves with Conduit"\`), highlighted in gold when held.
 
-##### Step 3: Registering the Evolution Partner in \`src/item/Upgrade.cpp\`
-Every weapon in Mellangan must have a paired evolution partner registered in \`EVOLUTIONS[][3]\`:
+##### Step 3: Add the evolution pair in \`src/item/Upgrade.cpp\`
+Find \`EVOLUTIONS\` and add the base weapon, required passive, and evolved weapon in that order:
 \`\`\`cpp
 {"Tempest Chakram", "Conduit", "Storm Maelstrom"},
 \`\`\`
-The automated startup content verification enforces that both the partner passive and evolved weapon exist and are uniquely linked.
+The startup content check verifies the names and the one-to-one pairing. Use the exact names already registered for the passive and evolved weapon.
 
 ---
 
-#### Path B: Writing a Custom Weapon Class (\`src/item/weapon/\`)
+#### Path B: Write a weapon class when a recipe is not enough
 
 ##### Step 1: Reserve an Icon in \`src/Atlas.hpp\`
 Reserve an index in \`atlas::i::*\` for your weapon's 16x16 icon in the UI atlas.
@@ -1628,12 +1626,12 @@ public:
 ##### Step 3: Register in \`Upgrade::all()\` (\`src/item/Upgrade.cpp\`)
 Add your weapon instance to the master upgrade registry so the level-up drafting director can offer it during runs.
 
-##### Step 4: Audit Performance via \`--weapon-lab\`
-Validate your weapon's balance across all 5 tiers and evolution by running the headless auditor:
+##### Step 4: Check damage with \`--weapon-lab\`
+Run the weapon lab after the weapon works in-game. It writes a CSV file that lets you compare damage across levels:
 \`\`\`sh
 ./build/Release/Mellangan --weapon-lab weapon_audit.csv
 \`\`\`
-The tool benchmarks DPS against 42 target dummies and a marching 40-knight crowd, verifying that damage scales smoothly without dead levels or unintended balance spikes.
+Read the damage-per-second results for stationary targets and the moving crowd. Check that each upgrade changes something useful and that the evolution does not jump far beyond nearby weapons.
 `,
 
     mermaidCharts: [
@@ -1695,24 +1693,23 @@ sequenceDiagram
       "src/level/biome/Biome.cpp",
     ],
     content: `
-### Hands-On Tutorial 2: Adding a New Monster & Biome Rule
+### Add a monster, then give it a home
 
-Adding a monster or biome touches multiple subsystems (Atlas, AI Plans, Spawner masks, Codex save serialization, and World climate classification). Following the exact integration order prevents save corruption and thread-safety bugs.
+The monster and its biome are two separate changes. First give the monster an ID, artwork, behavior, and stats. Then add it to a biome's spawn list. A **spawn mask** is a number whose bits say which monsters may appear there. Existing save data also uses monster IDs as positions in an array, so ID order matters.
 
 ---
 
 #### Part 1: Step-by-Step Monster Creation
 
 ##### Step 1: Append \`EnemyKind\` at the End (\`src/entity/enemy/Enemy.hpp\`)
-**CRITICAL SAVE RULE:** Player save files store Codex kill counts as a positional array indexed by \`int(EnemyKind)\`, and \`Night::strongestUnlocked\` assumes all classic monsters precede \`EnemyKind::Cyclops\`.
-- Always append your new monster **after** existing kinds at the bottom of \`enum class EnemyKind\`.
+Saved Codex kill counts use \`int(EnemyKind)\` as array positions. Append a new kind after the existing ones, just before the enum's count marker. Reordering old kinds would change what an existing save means. \`Night::strongestUnlocked\` also relies on the ordering of classic monsters before \`Cyclops\`.
 
 ##### Step 2: Paint the 16×16 Silhouette & Verify the Atlas
 1. Add the procedural pixel-art generator for your creature's \`16×16\` cell in \`tools/make_expansion.py\` (using \`Canvas\` contour, cluster, and highlight primitives from \`tools/sprite_kit.py\`).
 2. Run \`python tools/make_assets.py --verify\` to rebuild \`res/atlas.png\` and verify deterministic RGBA/PNG hashes and 1px transparent gutters.
 
-##### Step 3: Compose a Zero-Allocation \`Plan\` in \`src/entity/enemy/ai/Plans.cpp\`
-Combine existing static \`Goal\` primitives (\`Approach\`, \`Flank\`, \`Stalk\`, \`Howl\`, \`Burrow\`, \`Raise\`, \`Melee\`, \`Ranged\`) and an interrupt (\`FALTER\` or \`HIDE\`) inside \`PLANS[]\`:
+##### Step 3: Choose existing AI goals in \`Plans.cpp\`
+A \`Plan\` is a small list of actions the monster can try. Reuse goals such as approach, stalk, or melee before writing a new goal. Add a fallback or interrupt such as \`FALTER\` or \`HIDE\`:
 
 \`\`\`cpp
 const Approach DART_IN{42, {0.8, 1.1, 3, 0, 0, true}};
@@ -1723,7 +1720,7 @@ const Plan PLANS[] = {
 };
 \`\`\`
 
-remembering that \`Goal::tick(Enemy &e, const Sense &s, double &xs, double &ys)\` runs **concurrently across worker threads** during \`PROF_THINK\` Barrier 1! Never spawn entities or mutate global \`Level\` vectors inside \`Goal::tick\`; instead, set a boolean intent flag on \`Enemy\` (such as \`e.wantsFire = true;\`) and execute the spawn on the main thread inside \`Enemy::act()\` during \`PROF_ENTITIES\`!
+\`Goal::tick()\` runs on worker threads. It may set an intent on its own enemy, such as \`e.wantsFire = true\`. Spawn the projectile later in \`Enemy::act()\` on the main thread. Changing shared level lists from a worker can race with other updates.
 
 ##### Step 4: Register Stats in \`Roster.cpp\` & Biome \`foes\` Bitmask
 Add the \`EnemyType\` row (name, sprite, radius, speed, HP, contact damage, XP value, death effect style) and include \`1ULL << int(EnemyKind::MyMonster)\` in its home biome's \`foes\` mask.
@@ -1801,12 +1798,12 @@ flowchart TD
       "src/item/relic/ExpansionRelics.cpp",
     ],
     content: `
-### Hands-On Tutorial 3: Creating a Playable Hero & Class Kit
+### Add a playable hero
 
-Playable classes in Mellangan are governed by \`class Hero : public HeroData\` (\`src/hero/Hero.hpp\`) and \`class ExpansionHero : public Hero\` (\`src/hero/ExpansionHero.hpp\`). A complete class package consists of:
-1. **The \`Hero\` definition (\`src/hero/*.cpp\`):** Base stat modifiers, unlock predicate \`bool (*met)(const Codex &)\`, passive class hook (\`equip\`, \`tick\`, \`guard\`, \`slay\`, \`wisdom\`, \`edge\`), signature weapon, and 3 favoured upgrade affinities (\`affinity[3]\`).
-2. **The Active \`HeroSkill\` (\`cast(Mob &)\`):** Automatically wrapped into a \`Spacebar\` active skill by \`HeroSkill(const Hero &hero)\` (\`src/item/skill/Skill.hpp\`), plus 2 additional draftable class skills in \`src/item/skill/\`.
-3. **Class Talents & Boss Relics (\`src/item/talent/\`, \`src/item/relic/\`):** Class-restricted passives and boss-chest relics.
+Start with the hero's data: name, starting weapon, stats, and unlock rule. Then add its active skill and any class-only talents or relics. The main types are \`HeroData\`, \`Hero\`, and \`ExpansionHero\` in \`src/hero/\`. A complete class package consists of:
+1. **Hero data and behavior (\`src/hero/*.cpp\`):** Set the starting stats and weapon. Write \`met(const Codex &)\` to decide when the class unlocks. Add passive behavior in hooks such as \`tick\` or \`guard\`, and list three favored upgrades in \`affinity[3]\`.
+2. **Active skill (\`cast(Mob &)\`):** \`HeroSkill\` connects the hero's cast function to the Space key. You can add other skills that appear in level-up choices under \`src/item/skill/\`.
+3. **Talents and relics:** Put class-only talents in \`src/item/talent/\` and boss-chest relics in \`src/item/relic/\`.
 
 ---
 
@@ -1826,7 +1823,7 @@ struct HeroData {
 };
 \`\`\`
 
-For example, in \`src/hero/Warden.cpp\` (and similarly across \`Tinkerer.cpp\`, \`Oracle.cpp\`, and \`Corsair.cpp\`), unlock predicates inspect \`const Codex &c\` (such as \`c.count(c.biomes) >= 3\`, \`c.kills() >= 200\`, \`c.shrines >= 2\`, \`c.bestStreak >= 30\`, or \`c.dawns > 0\`):
+Look at the unlock functions in \`src/hero/Warden.cpp\` and nearby hero files. They read the saved \`Codex\` and return true after a milestone, such as seeing a dawn or reaching a kill count. Here is the shape of one such function and its data row:
 
 \`\`\`cpp
 bool chronomancer(const Codex &c) { return c.dawns > 0; }
@@ -1842,9 +1839,8 @@ const HeroData CHRONO_DATA = {
 
 ---
 
-#### Step 2: Implement \`Mob\`-Symmetric \`cast(Mob &p)\` (The \`Renegade\` Rule!)
-Why does \`Hero::cast(Mob &p)\` take a \`Mob &\` instead of a \`Player &\`?
-Because **\`Renegade\`** mirror-bosses (\`src/entity/enemy/Renegade.cpp\`) can wield any hero's kit and cast the exact same active skill *against* the player!
+#### Step 2: Make the skill work for either side
+\`Hero::cast(Mob &p)\` accepts a \`Mob\` because both the player and a hostile Renegade can use a hero's skill. The caster is \`p\`; its enemies depend on \`p.hostile\`.
 - **Always use \`p.level->foes(p, ...)\` or \`p.hostile\`** when spawning projectiles or dealing area damage inside \`Hero::cast(Mob &p)\` and \`ability::*\` functions (\`src/entity/Ability.hpp\`).
 - Never hardcode \`p.level->player\` as the caster—\`testArtsBothSides()\` in \`src/test/ClassTest.cpp\` specifically tests every hero ability cast by both a \`Player\` and a hostile \`Enemy\`!
 
@@ -1926,9 +1922,9 @@ flowchart TD
       "src/entity/enemy/Boss.cpp",
     ],
     content: `
-### Hands-On Tutorial 4: World Landmarks, Interactive Encounters & 3-Phase Bosses
+### Add a landmark or a boss
 
-Mellangan's overworld isn't just open terrain—it is populated by deterministic **Settlements**, **Biome Landmarks**, and **3-Phase Regional Bosses**. Here is how to author each one step by step.
+These are separate contributions. A **landmark** places tiles and props at a site in the world. An **encounter** defines what happens when the player reaches it. A regional boss has its own combat phases. Build and check one part before adding the next.
 
 ---
 
@@ -1939,14 +1935,14 @@ Structures are divided into common settlements (\`Cottage\` .. \`Mine\`) and rar
 - Append your new landmark before \`StructureKind::Count\` in \`enum class StructureKind\`.
 
 ##### Step 2: Define the Footprint in \`STRUCTURES[]\` (\`src/level/Structure.cpp\` & \`src/level/structure/Landmarks.cpp\`)
-Every \`StructureDef\` provides four stateless callbacks driven by local tile coordinates \`(lx, ly)\` within the structure's \`w × h\` footprint:
+\`StructureDef\` has four optional functions. They receive \`(lx, ly)\`, the tile's position inside the structure's \`w × h\` rectangle:
 - \`void (*size)(uint32_t roll, int *w, int *h)\`: Sets the tile bounding box (e.g. \`*w = 9; *h = 9;\`).
 - \`bool (*dirt)(const Structure *s, int lx, int ly)\`: Returns \`true\` where dirt paths or cleared foundations replace grass.
 - \`bool (*ground)(const Structure *s, int lx, int ly, Sprite *out)\`: Overrides floor tiles (cobblestone, rune circles, grates).
 - \`bool (*prop)(const Structure *s, int lx, int ly, uint32_t roll, Prop *p)\`: Places pillars, altars, braziers, or walls with collision radii and heights.
 
 ##### Step 3: Wire the Interactive Encounter in \`src/level/encounter/Landmarks.cpp\`
-When the player approaches a landmark and presses \`E\` (or triggers its proximity event), \`encounter::*\` spawns ambient particles (\`encounter::smoke\`, \`encounter::drift\`) and resolves the reward/challenge (buffing stats, kindling a shrine, or summoning an elite guardian).
+The encounter code in \`src/level/encounter/Landmarks.cpp\` handles what happens at the site. Depending on the landmark, it can react to \`E\` or to proximity. Read a nearby encounter before adding one. It may show particles and then give a reward or start a fight.
 - Test your landmark immediately via CLI:
 \`\`\`cpp
 ./build/bin/Debug/MellanganApp.exe --dev --landmark 8
@@ -2041,13 +2037,17 @@ stateDiagram-v2
       "src/gfx/Screen.cpp",
     ],
     content: `
-### Hands-On Tutorial 5: Procedural Pixel-Art & Slang Shaders
+### Add artwork or a shader
 
-Mellangan never commits hand-edited binary blobs without a reproducible generator. Both its \`res/atlas.png\` sprite sheet and its SPIR-V GPU shaders (\`*.spv\`) are built deterministically from code.
+Artwork and shaders are separate tasks. The atlas is the large image containing the game's small sprites. \`tools/make_assets.py\` assembles it from source sheets and drawing scripts; \`tools/atlas_layout.py\` describes where each group of sprites belongs. A Slang shader is text code compiled to SPIR-V for the GPU.
 
 ---
 
-#### Part 1: Draw sprites un Atlas by any means or tools you deem fit
+#### Part 1: Add a 16 × 16 sprite
+
+Use \`tools/atlas_layout.py\` to find the band and confirm an unused cell. Draw the sprite in the generator for that band under \`tools/\`, or update the source art that generator reads. Paint within 16 × 16 pixels. The surrounding one-pixel border keeps neighboring sprites from bleeding into it.
+
+Add a named index or sprite lookup in \`src/Atlas.hpp\` so C++ can find the new image. Run \`python tools/make_assets.py --verify\` with the source-sheet path required by that script. Inspect the generated atlas and the sprite in-game. The script also has a \`--from-atlas\` mode for reusing the existing base image; check its usage before choosing that mode.
 ---
 
 #### Part 2: Authoring Slang Fragment Shaders (\`res/shaders/*.slang\`)
@@ -2055,8 +2055,8 @@ Mellangan never commits hand-edited binary blobs without a reproducible generato
 At build time, \`CMakeLists.txt\` compiles every \`res/shaders/*.slang\` file into SPIR-V via \`slangc\`:
 \`slangc <file>.slang -target spirv -profile glsl_450 -entry PixelShader -stage fragment -o shaders/<file>.spv\`
 
-##### Understanding the Vulkan2D Bindless ABI (\`flash.slang\` & \`post.slang\`)
-Every fragment shader shares the same bindless descriptor layout:
+##### Read the shader inputs (\`flash.slang\` and \`post.slang\`)
+A fragment shader calculates a pixel's final color. These shaders receive textures, a sampler, and small blocks of settings through Vulkan bindings. Keep the binding numbers and data layout in sync with the C++ renderer:
 - \`[[vk::push_constant]] Push push;\` — Contains \`cameraIndex\`, bindless \`textureIndex\`, \`texturePos\`, vertex \`colour\`, and \`model\` matrix.
 - \`[[vk::binding(1, 1)]] SamplerState sampler;\`
 - \`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\` — Bindless texture array indexing both \`res/atlas.png\`, the offscreen world target, and the offscreen additive light map (\`post.lightTexture\`).
@@ -2069,7 +2069,7 @@ float2 p = uv - 0.5;
 float2 i = floor(p);
 float2 f = saturate((p - i - 0.5) * post.scale + 0.5);
 \`\`\`
-Then \`PixelShader\` combines chromatic aberration (\`post.hurt\`), additive light-map multiplication (\`lightAt(uv) * 1.6\`, where \`0.625\` is neutral \`1.0\` so point lights can over-expose above \`1.0\`), 8-tap bloom, **ACES filmic tonemapping**, radial vignette, and pause blur!
+The final \`PixelShader\` also applies the hurt effect, light map, bloom, tone mapping, vignette, and pause blur. When changing one effect, compare the image before and after at the same scene and scale. The light map multiplies \`lightAt(uv)\` by \`1.6\`; a light value of \`0.625\` therefore acts as neutral brightness.
 `,
     mermaidCharts: [
       {
@@ -2124,9 +2124,9 @@ flowchart LR
       "src/item/WeaponLab.cpp",
     ],
     content: `
-### Hands-On Tutorial 6: Deterministic Testing, Visual QA & Profiling
+### Check a change with tests and measurements
 
-Mellangan maintains strict mathematical and engine determinism through a multi-tiered automated test suite. Tests run completely headless and independent of GPU drivers, enabling comprehensive verification across continuous integration pipelines.
+Start with \`--test\` for code behavior. Use a visual view when pixels or layout changed. Use the weapon lab for damage balance, or a soak run for performance over time. These tools answer different questions; pick the one that matches your change.
 
 #### The Modern CLI Toolchain & Test Suite
 
@@ -3580,9 +3580,13 @@ flowchart TD
       "src/item/weapon/form/FormBehavior.cpp",
     ],
     content: `
-### 1. Contributing a New Diablo Gear Base (\`src/item/loot/ItemBase.cpp\`)
+### Pick one item-system change
 
-Weapon item bases in Mellangan are synthesized automatically at startup from \`Upgrade::all()\` inside \`build()\` (\`src/item/loot/ItemBase.cpp\`), so any new weapon recipe you add to \`RECIPES[]\` immediately becomes a droppable weapon base! Offhand shields/tomes, armour pieces, and charms are declared in \`const ItemBase GEAR[]\` (\`src/item/loot/ItemBase.cpp\`):
+This chapter contains four independent tasks. A **gear base** is the item before random bonuses. An **affix** is one of those bonuses. An **ally** is a summoned companion. A **form behavior** controls how a weapon attack moves or acts. Choose one task, follow its files in order, and run the relevant test before moving to another.
+
+### 1. Add a gear base (\`src/item/loot/ItemBase.cpp\`)
+
+\`build()\` makes weapon bases from the weapons registered in \`Upgrade::all()\`. If you added a recipe to \`RECIPES[]\`, check whether it already appears as a droppable base before adding more item data. For an offhand, armour piece, or charm, add a row to \`GEAR[]\` in \`ItemBase.cpp\`:
 
 \`\`\`cpp
 const ItemBase GEAR[] = {
@@ -3593,7 +3597,7 @@ const ItemBase GEAR[] = {
 };
 \`\`\`
 
-- **Field Breakdown (\`ItemBase\`):**
+- **Read the \`ItemBase\` fields in order:**
   1. \`name\`: Display name shown as the base noun between prefix and suffix (e.g., \`"Celestial Astral Aegis of the Titan"\`).
   2. \`slots\`: Bitmask from \`namespace slot\` (\`slot::Weapon = 1\`, \`slot::Offhand = 2\`, \`slot::Armour = 4\`, \`slot::Charm = 8\`).
   3. \`icon\`: \`16 × 16\` \`Sprite\` coordinate from \`src/Atlas.hpp\`.
@@ -3603,9 +3607,9 @@ const ItemBase GEAR[] = {
 
 ---
 
-### 2. Contributing a Reversible 5-Tier Loot Affix (\`Affix.hpp\`, \`Affix.cpp\`, \`Equip.cpp\`)
+### 2. Add an affix that can be unequipped (\`Affix.hpp\`, \`Affix.cpp\`, \`Equip.cpp\`)
 
-Adding a new item stat and 5-tier affix touches three files and must obey the **Reversible Delta Invariant**: equipping an item calls \`applyItem(m, item, +1.0f)\` and unequipping it calls \`applyItem(m, item, -1.0f)\`.
+An affix changes a stat while an item is equipped. Adding one touches three files. The key check is simple: equipping applies a positive change with \`applyItem(m, item, +1.0f)\`; unequipping applies the same change with \`-1.0f\`. After both operations, the original stat should be restored.
 
 #### Step 2A: Append to \`enum class Stat\` (\`src/item/loot/Affix.hpp\`)
 
@@ -3697,9 +3701,9 @@ case Stat::NovaMastery:
 
 ---
 
-### 3. Contributing an Autonomous Summoned \`Ally\` Companion (\`Ally.hpp\`, \`Ally.cpp\`, \`Recipe.cpp\`)
+### 3. Add a summoned ally (\`Ally.hpp\`, \`Ally.cpp\`, \`Recipe.cpp\`)
 
-Summoned companions in Mellangan are pooled \`Mob\` subclasses managed by \`src/entity/Ally.cpp\`. An ally can fight either via **melee/leap contact bites** (\`kit == nullptr\`) or by **wielding a full \`RecipeWeapon\` arsenal** (\`kit != nullptr\`, such as \`"Arcane Staff"\` on \`Clockwork Drone\`).
+An ally is a \`Mob\` managed by \`src/entity/Ally.cpp\`. It can attack directly when \`kit == nullptr\`, or use a recipe weapon when \`kit\` is set. For example, the Clockwork Drone uses an Arcane Staff. Check which path your new ally needs before filling out its definition.
 
 #### Step 3A: Append to \`enum class AllyKind\` (\`src/entity/Ally.hpp\`)
 
@@ -3752,7 +3756,7 @@ const AllyDef ALLIES[] = {
 
 ---
 
-### 4. Contributing a New \`FormBehavior\` (\`src/item/weapon/form/\`, \`FormRegistry.cpp\`)
+### 4. Add a weapon form when existing forms do not fit (\`src/item/weapon/form/\`, \`FormRegistry.cpp\`)
 
 If a weapon needs a brand-new geometric attack pattern beyond the 16 built-in \`Form\` types:
 1. Append the new identifier to \`enum class Form : uint8_t\` in \`src/item/weapon/Recipe.hpp\`.
@@ -3813,9 +3817,13 @@ flowchart TD
       "src/test/AllyTest.cpp",
     ],
     content: `
-### 1. Contributing an Elite / Champion \`Trait\` (\`src/entity/Trait.hpp\`, \`src/entity/Trait.cpp\`)
+### Choose a trait, bounty, or test
 
-Elite (1–2 traits) and Champion (2–3 traits) monsters store their active modifiers as a 32-bit bitmask \`uint32_t bits\` inside \`struct Traits\` (\`src/entity/Trait.hpp\`). Adding a new monster trait takes three steps:
+These are three separate contributions. A **trait** changes an elite monster's behavior. A **bounty** gives the player a contract objective. A **headless test** checks a rule without opening the game window. Start with the part that matches your change; you do not need to implement all three.
+
+### 1. Add an elite or champion trait (\`src/entity/Trait.hpp\`, \`src/entity/Trait.cpp\`)
+
+Elite monsters can have one or two traits; champions can have two or three. \`Traits::bits\` stores which traits a monster has. Each trait uses one bit of that 32-bit number. Add a new trait in three steps:
 
 #### Step 1A: Append to \`enum class Trait\` (\`src/entity/Trait.hpp\`)
 
@@ -3887,7 +3895,7 @@ float Traits::incoming(Mob &self, float damage) {
 
 ---
 
-### 2. Contributing a Contract \`Bounty\` Objective (\`src/level/Bounty.cpp\`)
+### 2. Add a bounty objective (\`src/level/Bounty.cpp\`)
 
 Shrine and night contract bounties are implemented in \`src/level/Bounty.cpp\`. Each bounty tracks \`kind\`, \`arg\`, \`goal\`, \`baseline\`, and \`reward\` (\`0 = Chest\`, \`1 = Gold\`, \`2 = Shrine Boon\`):
 
@@ -3925,7 +3933,7 @@ case SlayElites:
 
 ---
 
-### 3. Writing Deterministic Headless \`Field\` Unit Tests (\`src/test/AllyTest.cpp\`, \`src/test/LootTest.cpp\`)
+### 3. Write a repeatable test without a game window (\`src/test/AllyTest.cpp\`, \`src/test/LootTest.cpp\`)
 
 Every contribution should include a fast, deterministic unit test in \`src/test/\` using the headless \`Field\` fixture (\`src/test/TestFixtures.hpp\`). \`Field\` initializes a complete \`Level\` and \`Player\` in memory without creating a Vulkan window or audio device, executing 180 simulation ticks (3.0 seconds of game time) in under **2 milliseconds**:
 
@@ -4609,9 +4617,9 @@ flowchart TD
   },
   {
     id: "engine-mathematics",
-    title: "32. The Mathematics of Mellangan: Worked Models & Invariants",
+    title: "32. The Mathematics of Mellangan: Models, Derivations & Limits",
     category: "core",
-    summary: "Source-checked equations and worked examples for combat, loot, spatial indexing, rendering, terrain, motion, and discrete ground states.",
+    summary: "A source-based study of the engine's mathematical models, their derivations, invariants, examples, and limits.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4636,9 +4644,15 @@ flowchart TD
       "src/level/Matter.cpp",
     ],
     content: `
-### Mathematics in the engine
+### Abstract
 
-Each worked model follows the same reading order: **inputs and units → equation → numerical example → implementation limit**. Positions in the world are measured in pixels unless labeled as tile coordinates; simulation runs at $\\Delta t=1/60$ second per tick. A formula here describes a specific code path, not a universal rule for every effect in the game.
+This chapter studies how Mellangan turns mathematical models into finite, testable game rules. Its central claim is that the engine repeatedly replaces an unbounded or continuous problem with a bounded discrete one: a short lead instead of exact interception, capped resistance instead of an unlimited multiplier, grid buckets instead of all-pairs searches, and fixed-step recurrences instead of continuous motion. The quality of each approximation depends on its units, boundary conditions, and order of operations. The chapter derives representative formulas from the named source paths, works small examples, and states where those formulas stop describing the implementation.
+
+### Scope, notation, and method
+
+Let $x,y$ denote position in **world pixels** unless a section explicitly says **tiles**. A tile is 16 pixels wide. Let $n$ be a simulation tick and $\\Delta t=1/60\\text{ s}$ its duration. Bold symbols are two-dimensional vectors; $\\|\\mathbf v\\|$ is Euclidean length. Probabilities refer to the stated random check, not necessarily to a final item or encounter. A half-open interval $[a,b)$ contains $a$ but excludes $b$.
+
+The method is source-to-equation reconstruction: identify the inputs and their units, preserve the code's order of operations, derive the resulting expression, then test it with a numerical case or invariant. The formulas describe specific code paths. They are not claims that every system with the same name follows the same model. The source files above are the primary evidence; the numerical examples are calculations from those paths.
 
 ### 1. Target prediction and the sight test
 
@@ -4646,7 +4660,7 @@ Each worked model follows the same reading order: **inputs and units → equatio
 
 $\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$
 
-The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. This is a heuristic: it is not the exact solution of the moving-target interception equation, and it uses type speed rather than the enemy's current velocity.
+The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. An exact constant-velocity interception would instead solve $\\|\\mathbf r+t\\mathbf v\\|=st$ for a nonnegative $t$ when a solution exists. This code uses a capped heuristic and type speed rather than the enemy's current velocity. The comparison identifies what the approximation omits; it does not imply that exact interception would improve play.
 
 For a living quarry, the code normalizes $\\mathbf{q}$ to $\\hat{\\mathbf{q}}$ when its length exceeds 0.001. The \`seen\` flag tests:
 
@@ -4664,7 +4678,9 @@ At 50% resistance, an effect of 40 damage per second for 4 seconds becomes 20 da
 
 The tick implementation applies damage in 0.5-second intervals and pays out any remaining fractional interval on expiry. If $T_r=1.3$ s, the portions are $0.5+0.5+0.3=1.3$ s. This explains why the integral above is useful even when duration does not divide evenly into ticks.
 
-The square is not a universal combat multiplier. Power has a per-status cap, duration is capped at 60 seconds, and reapplication may retain a stronger or longer existing effect. Bleed stacks power and deals $1.6\\times$ while the target is moving. Death or removal can also end the sequence early.
+**Derivation.** For constant damage rate $P_r$, total damage is its time integral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Substituting the two resistance reductions gives $PT(1-r)^2$. The square follows because resistance changes **both** rate and exposure time. It would be wrong to square $1-r$ for a one-time hit or an effect with fixed duration.
+
+**Boundary of the model.** Power has a per-status cap, duration is capped at 60 seconds, and reapplication may retain a stronger or longer existing effect. Bleed stacks power and deals $1.6\\times$ while the target is moving. Death or removal can end the sequence early. These cases require following the state update rather than applying the isolated-effect formula.
 
 ### 3. Loot odds: diminishing returns and conditional probability
 
@@ -4677,7 +4693,7 @@ For nonnegative magic find $m$, each extra point adds less effective magic find 
 $u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$
 $r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$
 
-These are **conditional checks**, not three final probabilities that can simply be added. \`rollRarity()\` tests unique first, then rare only if unique failed, then magic only if both failed. Therefore:
+These are **conditional checks**, not three final probabilities that can simply be added. \`rollRarity()\` tests unique first, then rare only if unique failed, then magic only if both failed. By the multiplication rule for conditional probability:
 
 $P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$
 
@@ -4689,7 +4705,7 @@ At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, w
 
 $[0,\\;2,\\;2,\\;5,\\;6]$
 
-Cell $i$ occupies the half-open interval $[\\text{start}_i,\\text{start}_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3 and 4. The last offset is also the total number of binned enemies. Building the index takes $O(N+C)$ work for $N$ binned enemies and $C$ cells, plus the storage for those arrays.
+Formally, if $c_i$ is the count in cell $i$, define $s_0=0$ and $s_{i+1}=s_i+c_i$. Then $s_i=\\sum_{j<i}c_j$ and $s_C=N$, the total number of binned enemies. Cell $i$ occupies the half-open interval $[s_i,s_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3, and 4. These intervals cannot overlap and together cover exactly $[0,N)$, provided the scatter step writes each counted enemy once. Building the index takes $O(N+C)$ work for $N$ enemies and $C$ cells, plus storage for the arrays.
 
 \`gather()\` visits the query's own cell first, then other cells touched by the query bounding square. It skips removed enemies and stops at the caller's maximum. This is a **broad-phase candidate collection**: cell membership alone does not prove a candidate lies within the requested circular radius. Buried enemies are placed in a separate \`loose\` list during grid construction.
 
@@ -4712,12 +4728,12 @@ The packed key places layer at bit 56 and above, ordered depth in bits 24–55, 
 
 \`bastion::raise()\` treats traversable cells as graph vertices and up to eight neighboring cells as edges. It seeds a FIFO queue with the gate opening, then floods outward. Each newly discovered cell stores the direction back toward the cell that discovered it. Diagonal expansion is rejected when either adjacent orthogonal cell is a wall, preventing a route through a blocked corner.
 
-Because every edge is assigned one queue step, breadth-first search minimizes the **number of grid moves**, not exact Euclidean travel distance. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. For example, moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally.
+Because every edge is assigned one queue step, breadth-first search minimizes the **number of grid moves**, not exact Euclidean travel distance. The invariant is that the first time a vertex leaves the FIFO frontier, no shorter edge-count path to it remains undiscovered. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. For example, moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally. A weighted shortest-path method would answer a different distance question.
 
 The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
 
 
-### 7. Biome calculation: continuous climate manifolds and Voronoi site quantization
+### 7. Biome classification: continuous climate and discrete sites
 
 Mellangan synthesizes its 26 distinct biomes across an infinite, seed-deterministic plane through a four-stage mathematical pipeline: coordinate rescaling, domain-warped climate noise sampling, Voronoi site quantization, and piecewise hyperplane classification (\`src/level/biome/Biome.cpp\`).
 
@@ -4773,11 +4789,11 @@ $B(x, y) = \\arg\\max_{b} \\sum_{dy=-1}^{1} \\sum_{dx=-1}^{1} \\mathbb{I}(\\text
 
 which eliminates single-tile isolated outliers and stabilizes boundary contours.
 
-#### Excourse: The 100,000-Tile Geography Survey (Scaling & Boundary Continuity)
+#### Interpretation of the 100,000-tile geography survey
 
 The $2.5$ coordinate divisor lowers the frequency of climate noise: features in those fields span about $2.5$ times as many input tiles before the separate Voronoi selection and majority filter are applied. It does not by itself specify the final size of every biome. The observed boundary counts from an earlier geography survey are historical measurements, not a mathematical guarantee for every seed or later generator revision.
 
-### 8. Biome layering: barycentric smoothstep ground blending and subterranean stratigraphy
+### 8. Biome layering: surface blends and underground strata
 
 Mellangan implements biome layering across two distinct spatial dimensions: horizontal multi-surface barycentric ground transitions on the surface, and discrete vertical stratigraphy in the underworld (\`src/level/world/Biomes.cpp\`, \`Ground.cpp\`, \`Under.cpp\`, \`FloorPainter.cpp\`).
 
@@ -4850,7 +4866,7 @@ return world::biomeAt(x, y);
 \`\`\`
 The temporary RAII guard \`Surfaced\` switches \`active\` to \`Layer::Surface\`, queries the authoritative surface biome above, and restores whichever layer was active on destruction. Cave biome selection then maps that surface biome through \`caveBelow()\`; the deep layer chooses its own biome separately.
 
-#### Excourse: The Three Stratigraphic Horizons (Surface, Caves, Deep)
+#### Interpretation of the three world layers
 
 The vertical coupling between surface climate and subterranean cave generation ensures that players never experience disjointed transitions. When descending through a cave mouth at $(x, y)$, the underground biome retains the ambient soundscapes, crystal formations, and elemental monster affinities of the world above, while replacing the open sky with solid limestone roof ceilings, darkness torches, and subterranean streams.
 
@@ -4926,7 +4942,7 @@ Key mathematical properties:
    $$N_{\\text{fBm}}(\\mathbf{x}) = \\frac{\\sum_{i=0}^{m-1} 0.5^i \\cdot \\text{Perlin}(\\mathbf{x}_i, S_i)}{\\sum_{i=0}^{m-1} 0.5^i}$$
    This is a weighted average of octave samples. Its range follows the actual range of \`noise_perlin()\`; division by the amplitude sum alone does not prove an exact $[-1,1]$ bound.
 
-#### Excourse: Multi-System Applications
+#### Applications in other engine systems
 
 1. **Continuous Climate Warping (\`src/level/biome/Biome.cpp\`):**
    Regional climate tuples $\\mathbf{C} = (T, M, \\eta, W)$ sample warped coordinates:
@@ -4970,6 +4986,12 @@ For each registered light caster within its reach, \`LightField::cast()\` measur
 $$f=1-\\frac{d}{R},\\qquad\\ell=H\\operatorname{clamp}\\left(\\frac{d}{48},0.35,2.2\\right),\\qquad a=\\operatorname{clamp}(1.5Sf,0,1),$$
 
 where $H$ is object height, $S$ is light strength, $\\ell$ controls shadow length, and $a$ is shadow alpha. With $d=48$, $R=120$, and $S=0.5$, the falloff is $0.6$, length is $H$, and alpha is $0.45$. The angle is $\\operatorname{atan2}(y-y_c,x-x_c)$, pointing away from the caster. This is a visual contact-shadow model with capped length and opacity, not ray-traced occlusion or an inverse-square light law.
+
+### Synthesis and limits
+
+The cases share a pattern. First, the engine chooses a finite representation: a capped prediction time, a resistance interval, a sequence of rarity checks, a bounded grid, a small set of blend layers, or a fixed tick. Second, it gives that representation an invariant a contributor can test: a maximum lead, a normalized weight sum, disjoint prefix-sum ranges, stable ordering for equal depth, or one-step propagation per fire pass. Third, the implementation adds exceptions, caps, or alternate paths that narrow the domain of the simple equation.
+
+For a future change, state the units and domain before changing a constant, derive the behavior of one update or decision, then test its boundary cases. A plausible rendered result is not sufficient evidence that a model preserves ordering or probability mass. Conversely, a derivation of the simplified model does not prove that every branch of the game behaves identically; the named source path and its tests remain the authority.
 `,
     interactiveComponent: "status-resistance",
     mermaidCharts: [
