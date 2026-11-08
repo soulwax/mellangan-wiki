@@ -4768,7 +4768,7 @@ The field is shared: when the player and a moving entity are on opposite sides o
 
 ### 7. Biome classification: continuous climate and discrete sites
 
-Mellangan synthesizes its 26 distinct biomes across an infinite, seed-deterministic plane through a four-stage mathematical pipeline: coordinate rescaling, domain-warped climate noise sampling, Voronoi site quantization, and piecewise hyperplane classification (\`src/level/biome/Biome.cpp\`).
+\`BIOME_COUNT\` currently covers 30 entries: 16 core biomes, 10 expansion biomes, and 4 coast biomes. The coast branch is decided first from \`landAt(x,y)\`; inland locations use climate sampled at a selected site. This distinction matters mathematically. A smooth climate field alone does not determine the final biome, because a shoreline threshold can override it before the inland classifier runs (\`src/level/biome/Biome.cpp\`).
 
 #### The Continuous Climate Manifold
 
@@ -4789,16 +4789,22 @@ At the warped coordinate $(w_x, w_y)$, four continuous noise fields define the c
 
 #### Voronoi Site Quantization (\`siteOf\`)
 
-Evaluating climate directly per tile would produce fragmented micro-biomes. \`siteOf(x, y)\` groups tile coordinates into jittered Voronoi cells of size $\\text{BIOME\\_CELL}=112$ tiles. Space is first warped into $\\mathbf{f}=(f_x,f_y)$:
+Rather than classify each inland tile from its own climate sample, \`siteOf(x,y)\` selects a nearby jittered site and classifies that site's climate. The site scale is itself a spatial function. Write $h(x,y)=\\operatorname{clamp}(1-\\sqrt{x^2+y^2}/1000,0,1)$ and let $F$ be the two-octave noise call used by the source. Then
 
-$f_x = x + 30 \\cdot \\text{fBm}_2(0.018 x + 3.7, \\; 0.018 y - 1.3, \\; 611) + 3 \\cdot \\text{Perlin}(0.09 x, \\; 0.09 y + 5.1, \\; 612)$
-$f_y = y + 30 \\cdot \\text{fBm}_2(0.018 x - 8.1, \\; 0.018 y + 6.4, \\; 613) + 3 \\cdot \\text{Perlin}(0.09 x + 2.3, \\; 0.09 y, \\; 614)$
+$$n(x,y)=F(0.0006x+5.3,\\;0.0006y-8.9;617)+0.7h^2(3-2h).$$
 
-For cell index $(c_x,c_y)=(\\lfloor f_x/112\\rfloor,\\lfloor f_y/112\\rfloor)$, the generator checks the nine neighboring cells $(i,j)\\in\\{c_x-1,c_x,c_x+1\\}\\times\\{c_y-1,c_y,c_y+1\\}$. Each cell contains a pseudo-random site:
+The scale is $q=6$ when $n<-0.12$, $q=3$ when $-0.12\\le n<0.1$, and $q=1$ otherwise. Consequently the cell width is $c=112q$ tiles, or 672, 336, or 112 tiles. The source calls these wider regimes vast and province scales. They make a single fixed Voronoi cell size an incorrect description of the current algorithm.
 
-$P_{i,j}=112\\left(i+0.15+0.70\\frac{h_x}{255},\\quad j+0.15+0.70\\frac{h_y}{255}\\right)$
+With $f=0.018/q$, the warped point used for site selection is
 
-where $h = \\text{hash2}(73 i + \\text{salt}, \\; 151 j - \\text{salt})$. The coordinate is assigned to the nearest site $(s_x, s_y) = \\arg\\min_P \\|\\mathbf{f} - P\\|^2$, creating organic Voronoi borders.
+$f_x=x+30q\\,\\text{fBm}_2(fx+3.7,\\;fy-1.3;611)+3\\,\\text{Perlin}(0.09x,\\;0.09y+5.1;612)$
+$f_y=y+30q\\,\\text{fBm}_2(fx-8.1,\\;fy+6.4;613)+3\\,\\text{Perlin}(0.09x+2.3,\\;0.09y;614)$
+
+Here the $f$ immediately inside each noise call is the **frequency** $0.018/q$; $f_x,f_y$ are the resulting warped coordinates. Their similar names should not be confused. For cell index $(c_x,c_y)=(\\lfloor f_x/c\\rfloor,\\lfloor f_y/c\\rfloor)$, the generator checks that cell and its eight neighbors. A candidate site in cell $(i,j)$ is
+
+$$P_{i,j}=c\\left(i+0.15+0.70\\frac{h_x}{255},\\quad j+0.15+0.70\\frac{h_y}{255}\\right),$$
+
+where $h=\\text{hash2}(73i+\\text{noise\\_salt}+\\text{salt},151j-\\text{noise\\_salt}-\\text{salt})$, $h_x=h\\mathbin{\\&}255$, $h_y=(h\\gg8)\\mathbin{\\&}255$, and $\\text{salt}=0$ for $q=1$ or $977q$ otherwise. The chosen site minimizes $\\|\\mathbf f-P_{i,j}\\|^2$ among the nine candidates. This is a local nearest-site search in warped coordinates, with a scale selected before the search.
 
 #### Radial Origin Leash (Cubic Hermite Attenuation)
 
@@ -4809,18 +4815,20 @@ $E' = E \\cdot \\beta(d), \\qquad W' = -1 + (W + 1) \\cdot \\beta(d)$
 
 For $d \\le 260$ tiles, $\\beta(d)=0$, setting eerie to zero and wildness to $-1$. This excludes the eerie and expansion branches of the classifier there; the remaining temperature and moisture rules can still choose several ordinary biomes. At $d \\ge660$ tiles, the original climate values are used.
 
-#### The 26-Biome Hyperplane Classifier (\`biomeOf\`)
+#### Inland classifier and coast override (\`biomeOf\`)
 
-The climate tuple $\\mathbf{C}' = (T, M, E', W')$ is partitioned into 26 discrete biomes via hierarchical decision hyperplanes:
-1. **Wildness Partition ($W' > 0.22$):** Allocates the 10 expansion biomes across 5 temperature bands ($T < -0.20$, $T < -0.07$, $T < 0.07$, $T < 0.20$, $T \\ge 0.20$) split by moisture sign ($M > 0$).
+The climate tuple $\\mathbf{C}' = (T, M, E', W')$ is partitioned into 26 **inland** biomes by an ordered set of threshold tests:
+1. **Wildness partition ($W' > 0.2$):** Allocates the 10 expansion biomes across 5 temperature bands ($T < -0.20$, $T < -0.07$, $T < 0.07$, $T < 0.20$, $T \\ge 0.20$) split by moisture sign ($M > 0$).
 2. **Eerie Partition ($E' > 0.14$):** Separates Ashlands ($T > 0.12$), Crystal Fields ($T < -0.12$), Fungal Wood ($M > 0.06$), and Barrow ($M \\le 0.06$).
-3. **Temperate/Elemental Partition:** Classifies the remaining 12 core biomes (Taiga, Snow, Jungle, Badlands, Desert, Heath, Savanna, Blossom, Mire, Autumn, Forest, Meadow).
+3. **Remaining core partition:** Classifies the other 12 core biomes (Taiga, Snow, Jungle, Badlands, Desert, Heath, Savanna, Blossom, Mire, Autumn, Forest, Meadow). The order of tests matters where conditions overlap; \`biomeOf()\` returns at the first match.
+
+Before this inland path, \`biomeForLocation()\` checks $L=\\text{landAt}(x,y)$. If $L<0$, it chooses tropical or cold sea; if $0\\le L<0.012$, it chooses warm or cold beach. Warmth is the sign of a separate two-octave noise sample, not the inland climate temperature $T$. The four coast entries therefore do not belong to the 26-way inland classifier.
 
 Finally, \`biomeAt(x, y)\` runs a $3 \\times 3$ majority voting filter:
 
 $B(x, y) = \\arg\\max_{b} \\sum_{dy=-1}^{1} \\sum_{dx=-1}^{1} \\mathbb{I}(\\text{rawBiome}(x+dx, \\; y+dy) == b)$
 
-which eliminates single-tile isolated outliers and stabilizes boundary contours.
+The code initializes the winner to the tile's own raw biome and favors that raw biome when its count ties the leader. Thus the displayed $\\arg\\max$ is shorthand for a vote with a specific tie rule. The filter removes many isolated one-tile outliers, but it does not make classification continuous: coast and climate thresholds still create discrete boundaries.
 
 #### Interpretation of the 100,000-tile geography survey
 
