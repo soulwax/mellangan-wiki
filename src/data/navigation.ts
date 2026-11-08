@@ -41,6 +41,10 @@ export const NAV_TREE: NavTreeGroup[] = [
     badgeColor: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
     items: [
       {
+        id: "tutorial-manual-tilemap",
+        shortTitle: "Draw, Map & Read a Tilemap",
+      },
+      {
         id: "tutorial-weapon",
         shortTitle: "Adding a Weapon, Recipe & Evolution",
       },

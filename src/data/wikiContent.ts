@@ -5328,4 +5328,95 @@ flowchart LR
 `,
     }],
   },
+  {
+    id: "tutorial-manual-tilemap",
+    title: "40. Your First Tilemap: Draw It, Map Its Symbols & Read It in C++",
+    category: "contribute",
+    summary: "A first contribution exercise: hand-write an ASCII tilemap, turn symbols into typed cells, inspect coordinates, and connect the idea to Mellangan structures.",
+    sourceFiles: [
+      "extern/wiki/examples/manual-tilemap/manual_map.txt",
+      "extern/wiki/examples/manual-tilemap/read_map.cpp",
+      "src/Atlas.hpp",
+      "src/level/Structure.hpp",
+      "src/level/Structure.cpp",
+      "src/level/structure/Layouts.hpp",
+      "src/level/structure/Settlements.cpp",
+      "src/level/world/Ground.cpp",
+      "src/level/FloorPainter.cpp",
+    ],
+    content: `
+### Start with a drawing, not a renderer
+
+Imagine you have just learned basic C++ and want a small, reviewable contribution. A tilemap is a grid: each character in a text row describes one tile-sized place. Make a file called \`manual_map.txt\` with **exactly** these seven rows (the working copy is in \`extern/wiki/examples/manual-tilemap/\`):
+
+\`\`\`text
+........
+..####..
+..#..#..
+..#@...T
+..#..#..
+..~~~~..
+........
+\`\`\`
+
+Each row has eight characters. The top-left character is tile \`(0, 0)\`; \`x\` increases to the right and \`y\` increases downward. The map is therefore **8 × 7 tiles**, or **128 × 112 pixels** at Mellangan's 16-pixel tile scale. Do not add spaces to align the rows: spaces would be new, unrecognized symbols.
+
+Write down the legend before writing the loader:
+
+| Symbol | Meaning in this exercise | Stored data |
+| --- | --- | --- |
+| \`.\` | ordinary grass | grass ground |
+| \`#\` | stone or paved ground | stone ground |
+| \`~\` | water | water ground |
+| \`T\` | tree on grass | grass ground + tree flag |
+| \`@\` | player start on grass | grass ground + spawn coordinate |
+
+The \`T\` and \`@\` symbols do **not** replace the ground under them. That small choice is useful later: Mellangan separates ground drawing from props, and a spawn point is location metadata rather than a texture. For this exercise the stone is just a ground type; collision and movement rules are a later step.
+
+### Turn characters into typed cells
+
+Open \`extern/wiki/examples/manual-tilemap/read_map.cpp\`. Its smallest important types are:
+
+\`\`\`cpp
+enum class Ground { Grass, Stone, Water };
+struct Cell {
+  Ground ground = Ground::Grass;
+  bool tree = false;
+};
+\`\`\`
+
+The loader opens the text file with \`std::ifstream\`, takes one row at a time with \`std::getline\`, and checks that all rows have the same width. It accepts an optional trailing carriage return so a CRLF map also works on systems that preserve it. A \`switch\` maps each character to a \`Cell\`; \`@\` additionally records \`spawnX\` and \`spawnY\`. Unknown characters, an empty map, uneven rows, and missing or duplicate spawns produce errors. This is important when a teammate edits a map by hand: a typo should name its coordinates, not silently become a different tile.
+
+The cells go into a single \`std::vector<Cell>\` in **row-major order**. For a map of width \`w\`, the cell at \`(x, y)\` is at index \`y * w + x\`. Here the spawn \`@\` is at \`(3, 3)\`, so its vector index is \`3 * 8 + 3 = 27\`. The loader's \`at(x, y)\` checks bounds before using this formula. The tree is at \`(7, 3)\`, and the four \`~\` symbols are at \`(2, 5)\` through \`(5, 5)\`.
+
+### Build it and read the result
+
+From the **wiki repository root**, compile the standalone program and give the map path as its argument. On Windows with MinGW:
+
+\`\`\`powershell
+g++ -std=c++17 -Wall -Wextra -pedantic examples/manual-tilemap/read_map.cpp -o read_map.exe
+.\\read_map.exe examples/manual-tilemap/manual_map.txt
+\`\`\`
+
+On a Unix-like shell, use the same compile command with \`-o read_map\`, then run \`./read_map examples/manual-tilemap/manual_map.txt\`. The expected output is:
+
+\`\`\`text
+size: 8 x 7
+spawn: (3, 3)
+water cells: 4
+tree at (7, 3): yes
+spawn ground is grass: yes
+\`\`\`
+
+Now change one \`.\` to \`~\` and rerun: the water count should rise to five. Change one row's length or add \`?\` and rerun: the parser should reject the map. These small experiments prove that the program reads the **file you edited**, rather than printing a hard-coded drawing. Restore the sample when finished. You can delete the local \`read_map.exe\`; it is only a build output.
+
+### Map data is not atlas data
+
+The character \`#\` means “stone ground” in *your map format*. It is not an atlas index. Mellangan's \`Sprite\` stores a rectangle \`(x, y, w, h)\` in an image. \`atlas::tile(index)\` and \`atlas::town(index)\` convert an index into such a rectangle; \`atlas::tt::Path\` names the town atlas's paved path graphic. Rendering chooses a graphic for a ground kind, then draws it at world pixel position \`(tileX * 16, tileY * 16)\`. \`FloorPainter::tile()\` follows that coordinate convention when it draws the current world's ground.
+
+For a first engine-facing extension, a **local structure layout** is the closest existing seam. \`Structure\` stores a footprint \`(x, y, w, h)\` in tiles. Its \`StructureDef\` can provide \`ground\` and \`prop\` callbacks. The callbacks receive local coordinates \`(lx, ly)\`; the world tile is \`(structure.x + lx, structure.y + ly)\`. \`structureGround()\` checks the footprint and asks the callback for a \`Sprite\`. A small ground callback could read your map's \`#\` cell and return \`masonry(s, atlas::tt::Path)\` as the paved graphic. \`T\` would belong in a prop callback, while \`@\` is a place to spawn an actor and needs separate gameplay code. Existing examples to read are \`layout::cottageGround()\` and \`layout::cottage()\` in \`Settlements.cpp\`.
+
+There is an important limit to this exercise: the **running world does not currently load this text file as a tilemap**. \`world::groundTile()\` builds its answer from water, dirt, biome, and structure rules. Dropping \`manual_map.txt\` into the game assets will not change terrain. A real contribution that uses the file in-game must choose when to load it, how it fits a structure's footprint, how water and props participate in world queries, and how the map is packaged. Keep the standalone loader and its error checks as a starting point; then add one engine integration at a time and compare it with the existing structure callbacks.
+`,
+  },
 ];
