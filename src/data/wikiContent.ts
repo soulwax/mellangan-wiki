@@ -4617,9 +4617,9 @@ flowchart TD
   },
   {
     id: "engine-mathematics",
-    title: "32. The Mathematics of Mellangan: A Study of Models and Invariants",
+    title: "32. Die Mathematik von Mellangan: Eine Untersuchung von Modellen und Invarianten",
     category: "core",
-    summary: "A dissertation-style analysis of the engine's approximations, proofs, units, boundary conditions, and source-level evidence.",
+    summary: "Eine wissenschaftliche Analyse der Näherungen, Beweise, Einheiten und Randbedingungen der Spiel-Engine anhand des Quellcodes.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4644,426 +4644,426 @@ flowchart TD
       "src/level/Matter.cpp",
     ],
     content: `
-### Abstract
+### Zusammenfassung
 
-This study asks how a real-time game turns continuous geometry, uncertain outcomes, and large spatial searches into rules that can be evaluated within a fixed update budget. Its thesis is that Mellangan's mathematical design depends less on any single formula than on a recurring three-part construction: **choose a finite representation, preserve an invariant, and state the domain in which the representation is valid**. A target lead is capped in time; resistance is capped and acts twice; a rarity roll is an ordered decision process; spatial searches use cells and prefix sums; terrain is classified at sites and blended at boundaries; motion advances through discrete recurrences. Each construction gains speed or predictability by giving up some generality.
+Diese Untersuchung fragt, wie ein Echtzeitspiel kontinuierliche Geometrie, ungewisse Ergebnisse und umfangreiche räumliche Suchen in Regeln überführt, die sich innerhalb eines festen Zeitbudgets auswerten lassen. Ihre These lautet, dass Mellangans mathematischer Entwurf weniger von einer einzelnen Formel als von einem wiederkehrenden Dreischritt abhängt: **eine endliche Darstellung wählen, eine Invariante bewahren und den Gültigkeitsbereich der Darstellung angeben**. Die Vorhersage einer Zielposition ist zeitlich begrenzt; Widerstand ist gedeckelt und wirkt zweifach; die Seltenheit wird durch eine geordnete Abfolge von Entscheidungen bestimmt; räumliche Suchen nutzen Zellen und Präfixsummen; Gelände wird an Stützpunkten klassifiziert und an Grenzen gemischt; Bewegung schreitet in diskreten Rekursionen fort. Jede dieser Konstruktionen gewinnt Geschwindigkeit oder Vorhersagbarkeit, indem sie auf einen Teil der Allgemeingültigkeit verzichtet.
 
-The evidence is the current source code named above. The chapter reconstructs the relevant equations, derives selected invariants, and uses numerical examples to expose units and edge cases. It distinguishes an exact algebraic consequence of a code path from a useful approximation to its full runtime behavior. No claim here is a benchmark of frame time or a proof of global gameplay balance. The result is a method for contributors: formulate a change in mathematical terms, identify its assumptions, and test the point where those assumptions cease to hold.
+Als Beleg dient der oben genannte aktuelle Quellcode. Das Kapitel rekonstruiert die maßgeblichen Gleichungen, leitet ausgewählte Invarianten her und verdeutlicht Einheiten und Grenzfälle anhand von Zahlenbeispielen. Es unterscheidet exakte algebraische Folgen eines Codepfads von brauchbaren Näherungen für dessen vollständiges Laufzeitverhalten. Weder die Laufzeit eines Einzelbildes noch die allgemeine Spielbalance werden hier gemessen oder bewiesen. Daraus ergibt sich ein Vorgehen für Mitwirkende: Änderungen mathematisch formulieren, ihre Voraussetzungen benennen und die Stellen prüfen, an denen diese Voraussetzungen nicht mehr gelten.
 
-### Research question and analytical framework
+### Forschungsfrage und analytischer Rahmen
 
-**Research question.** What properties must a simplified mathematical model preserve to remain useful inside Mellangan's fixed-step simulation and rendering pipeline? The answer is examined through four families: decision rules (targeting, status, loot), data transforms (spatial buckets, depth ordering, route fields), spatial synthesis (biomes, noise, ground blending), and time evolution (particles, matter, light). These families are related by their treatment of bounds, ordering, and units.
+**Forschungsfrage.** Welche Eigenschaften muss ein vereinfachtes mathematisches Modell bewahren, damit es in Mellangans Simulation mit festen Zeitschritten und seiner Darstellung nützlich bleibt? Die Antwort wird anhand von vier Gruppen untersucht: Entscheidungsregeln (Zielerfassung, Zustände, Beute), Datenumformungen (räumliche Zellen, Tiefensortierung, Richtungsfelder), räumliche Erzeugung (Biome, Rauschen, Bodenübergänge) und zeitliche Entwicklung (Partikel, Materie, Licht). Diese Gruppen verbindet der Umgang mit Grenzen, Reihenfolgen und Einheiten.
 
-An **invariant** is a property expected to remain true after a valid operation, such as a normalized blend summing to one or disjoint grid ranges covering every binned enemy. An **assumption** restricts when a derivation applies, such as constant damage rate or finite non-NaN depth. A **boundary condition** describes what happens at an edge of the domain, such as a distance threshold, a zero timer, or the edge of a grid cell. These terms matter because a correct formula with an omitted assumption can still make a false prediction about the game.
+Eine **Invariante** ist eine Eigenschaft, die nach einer gültigen Operation erhalten bleiben soll, etwa eine normierte Mischung mit der Summe eins oder disjunkte Zellbereiche, die alle zugeordneten Gegner enthalten. Eine **Voraussetzung** beschränkt den Gültigkeitsbereich einer Herleitung, etwa eine konstante Schadensrate oder eine endliche Tiefe ohne NaN-Wert. Eine **Randbedingung** beschreibt das Verhalten an einer Grenze des Bereichs, etwa an einer Entfernungsschwelle, bei einem Zählerstand von null oder am Rand einer Rasterzelle. Diese Begriffe sind wichtig: Auch eine korrekte Formel kann zu einer falschen Vorhersage über das Spiel führen, wenn ihre Voraussetzungen fehlen.
 
-| Model family | Finite representation | Property examined below | Principal limitation |
+| Modellgruppe | Endliche Darstellung | Im Folgenden untersuchte Eigenschaft | Wesentliche Einschränkung |
 | --- | --- | --- | --- |
-| Targeting and status | Capped lead; bounded resistance | Maximum lead; effect of two reductions | Moving quarry; reapplication and caps |
-| Loot and indexing | Ordered rolls; prefix-sum buckets | Probability partition; disjoint ranges | Later item rules; broad-phase candidates |
-| Rendering and routes | Integer sort keys; grid field | Stable depth order; minimum edge count | NaNs and key width; unequal step lengths |
-| Terrain and motion | Sampled biomes; fixed ticks | Blend normalization; recurrence behavior | Classification boundaries; update order |
+| Zielerfassung und Zustände | Begrenzte Vorhersage; begrenzter Widerstand | Maximale Vorhersage; Wirkung zweier Abschwächungen | Bewegliches Ziel; erneute Anwendung und Obergrenzen |
+| Beute und Indizierung | Geordnete Würfe; Zellen mit Präfixsummen | Aufteilung der Wahrscheinlichkeiten; disjunkte Bereiche | Nachgelagerte Gegenstandsregeln; Kandidaten der Grobsuche |
+| Darstellung und Wege | Ganzzahlige Sortierschlüssel; Rasterfeld | Stabile Tiefenreihenfolge; minimale Schrittzahl | NaN-Werte und Schlüsselbreite; unterschiedliche Schrittlängen |
+| Gelände und Bewegung | Abgetastete Biome; feste Zeitschritte | Normierung der Mischung; Verhalten der Rekursion | Klassifikationsgrenzen; Reihenfolge der Aktualisierung |
 
-### Sources, notation, and method
+### Quellen, Notation und Methode
 
-The source files listed for this chapter are the primary corpus. For each model, the analysis identifies the exact function, records its inputs and units, translates its operations in their executed order, derives a consequence, and then checks that consequence with a numerical example or an invariant. This is a study of implementation semantics. It does not infer design intent from a formula alone, nor treat a historical measurement as a mathematical guarantee.
+Die für dieses Kapitel aufgeführten Quelldateien bilden die Grundlage. Für jedes Modell bestimmt die Analyse die genaue Funktion, erfasst ihre Eingaben und Einheiten, überträgt ihre Operationen in der tatsächlichen Ausführungsreihenfolge in mathematische Form, leitet eine Folge ab und prüft diese anhand eines Zahlenbeispiels oder einer Invariante. Untersucht wird die Bedeutung der Implementierung. Aus einer Formel allein wird weder auf die Entwurfsabsicht geschlossen noch eine frühere Messung als mathematische Garantie behandelt.
 
-Let $x,y$ denote position in **world pixels** unless a section explicitly says **tiles**. One tile spans 16 pixels. Let $n$ be a simulation tick and $\\Delta t=1/60\\text{ s}$ its duration. Bold symbols are two-dimensional vectors; $\\|\\mathbf v\\|$ is Euclidean length. Probabilities refer to the stated random check, not necessarily to a final item or encounter. A half-open interval $[a,b)$ contains $a$ but excludes $b$. All derivatives below refer to the idealized real-valued formula; the program evaluates finite-precision numbers and may clamp them.
+Sofern ein Abschnitt nicht ausdrücklich **Kacheln** nennt, bezeichnen $x,y$ Positionen in **Weltpixeln**. Eine Kachel ist 16 Pixel breit. $n$ bezeichnet einen Simulationsschritt und $\\Delta t=1/60\\text{ s}$ dessen Dauer. Fett gesetzte Symbole sind zweidimensionale Vektoren; $\\|\\mathbf v\\|$ ist die euklidische Länge. Wahrscheinlichkeiten beziehen sich auf die angegebene Zufallsprüfung, nicht zwangsläufig auf einen endgültigen Gegenstand oder eine Begegnung. Ein halboffenes Intervall $[a,b)$ enthält $a$, aber nicht $b$. Alle folgenden Ableitungen beziehen sich auf idealisierte Formeln mit reellen Zahlen; das Programm rechnet mit begrenzter Genauigkeit und kann Werte begrenzen.
 
-The four parts below move from local decisions to data structures, then to generated space and time-dependent effects. Every result should be read with its stated assumptions. The dedicated chapters on AI, terrain, particles, and matter provide wider system context.
+Die folgenden vier Teile führen von lokalen Entscheidungen über Datenstrukturen zu erzeugtem Raum und zeitabhängigen Effekten. Jedes Ergebnis gilt unter den jeweils genannten Voraussetzungen. Die eigenen Kapitel über KI, Gelände, Partikel und Materie liefern weiteren Zusammenhang.
 
-## Part I. Decision rules under bounds
+## Teil I. Begrenzte Entscheidungsregeln
 
-### 1. Target prediction and the sight test
+### 1. Zielvorhersage und Sichtprüfung
 
-\`Enemy::sense()\` starts with the displacement $\\mathbf{r}$ from enemy to quarry, the quarry velocity $\\mathbf{v}$, and the enemy's type speed $s$. It predicts a short distance ahead:
+\`Enemy::sense()\` verwendet die Verschiebung $\\mathbf{r}$ vom Gegner zum Ziel, die Geschwindigkeit $\\mathbf{v}$ des Ziels und die Geschwindigkeit $s$ des Gegnertyps. Die Funktion sagt eine kurze Bewegung voraus:
 
 $\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$
 
-The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded distance-over-speed estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. To see what the heuristic omits, assume constant velocities and solve the hypothetical interception equation $\\|\\mathbf r+t\\mathbf v\\|=st$. Squaring both sides yields
+Die Vorhersagezeit beträgt höchstens $0.42$ Sekunden. Bei einem 100 px entfernten Ziel, einer Gegnergeschwindigkeit von 50 px/s und einer Zielgeschwindigkeit von 20 px/s senkrecht zur Sichtlinie ergäbe die unbegrenzte Schätzung aus Entfernung und Geschwindigkeit 2 s. Durch die Begrenzung gilt $\\tau=0.42$ s; der vorhergesagte Punkt liegt daher 8.4 px seitlich. Um zu erkennen, was die Heuristik auslässt, nehmen wir konstante Geschwindigkeiten an und lösen die hypothetische Abfanggleichung $\\|\\mathbf r+t\\mathbf v\\|=st$. Quadrieren beider Seiten ergibt
 
 $$ (\\mathbf v\\cdot\\mathbf v-s^2)t^2+2(\\mathbf r\\cdot\\mathbf v)t+\\mathbf r\\cdot\\mathbf r=0. $$
 
-An exact intercept would require a real, nonnegative root and would depend on the direction of $\\mathbf v$. \`Enemy::sense()\` does not solve this quadratic. Its capped expression is a short perceptual lead that remains finite even when exact interception is impossible. The comparison identifies the approximation's domain; it does not claim that exact interception would improve play.
+Ein exakter Abfangpunkt erfordert eine reelle, nichtnegative Lösung und hängt von der Richtung von $\\mathbf v$ ab. \`Enemy::sense()\` löst diese quadratische Gleichung nicht. Der begrenzte Ausdruck liefert einen kleinen Vorhalt für die Wahrnehmung und bleibt selbst dann endlich, wenn ein exaktes Abfangen unmöglich ist. Der Vergleich zeigt den Gültigkeitsbereich der Näherung; daraus folgt nicht, dass ein exaktes Abfangen das Spiel verbessern würde.
 
-For a living quarry, the code normalizes $\\mathbf{q}$ to $\\hat{\\mathbf{q}}$ when its length exceeds 0.001. The \`seen\` flag tests:
+Bei einem lebenden Ziel normiert der Code $\\mathbf{q}$ zu $\\hat{\\mathbf{q}}$, sofern seine Länge größer als 0.001 ist. Das Kennzeichen \`seen\` prüft:
 
 $\\|\\mathbf{q}\\|<300\\quad\\text{and}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$
 
-Here $\\mathbf{a}$ is the **quarry's aim**, not the enemy's facing. Thus the test asks whether the enemy is roughly in front of the quarry, using the predicted displacement. For unit aim, the strict dot threshold corresponds to a half-angle of $\\arccos(0.55)\\approx56.6^\\circ$, or an approximately $113.3^\\circ$ cone. At the boundary the strict comparison fails. If the selected quarry is dead, the code instead returns an unseen point 400 px away; nearby living allies can still be selected first.
+Hier ist $\\mathbf{a}$ die **Zielrichtung des Ziels**, nicht die Blickrichtung des Gegners. Die Prüfung fragt anhand der vorhergesagten Verschiebung also, ob sich der Gegner ungefähr vor dem Ziel befindet. Bei einer normierten Zielrichtung entspricht die strenge Skalarprodukt-Schwelle einem halben Winkel von $\\arccos(0.55)\\approx56.6^\\circ$, also einem Kegel von etwa $113.3^\\circ$. Genau an der Grenze schlägt der strenge Vergleich fehl. Ist das gewählte Ziel tot, gibt der Code stattdessen einen ungesehenen Punkt in 400 px Entfernung zurück; lebende Verbündete in der Nähe können weiterhin zuerst ausgewählt werden.
 
-### 2. Status resistance: a product of two reductions
+### 2. Zustandswiderstand: das Produkt zweier Abschwächungen
 
-\`Status::apply()\` clamps resistance to $0\\le r\\le0.75$, then scales both the incoming power and duration by $1-r$. For an isolated damage-over-time effect with constant power $P$, duration $T$, no power or duration cap, and no reapplication:
+\`Status::apply()\` begrenzt den Widerstand auf $0\\le r\\le0.75$ und multipliziert anschließend sowohl die eintreffende Stärke als auch die Dauer mit $1-r$. Für einen einzelnen Schaden-über-Zeit-Effekt mit konstanter Stärke $P$, Dauer $T$, ohne Obergrenze für Stärke oder Dauer und ohne erneute Anwendung gilt:
 
 $P_r=P(1-r),\\qquad T_r=T(1-r),\\qquad D_r=PT(1-r)^2$
 
-At 50% resistance, an effect of 40 damage per second for 4 seconds becomes 20 damage per second for 2 seconds: 40 damage instead of 160. At the 75% cap, the idealized result is $160(0.25)^2=10$.
+Bei 50 % Widerstand werden aus 40 Schadenspunkten pro Sekunde über 4 Sekunden 20 Schadenspunkte pro Sekunde über 2 Sekunden: 40 statt 160 Schadenspunkte. Bei der Obergrenze von 75 % beträgt das idealisierte Ergebnis $160(0.25)^2=10$.
 
-The tick implementation applies damage in 0.5-second intervals and pays out any remaining fractional interval on expiry. If $T_r=1.3$ s, the portions are $0.5+0.5+0.3=1.3$ s. This explains why the integral above is useful even when duration does not divide evenly into ticks.
+Die Implementierung fügt Schaden in Abständen von 0.5 Sekunden zu und rechnet beim Ablauf einen verbleibenden Teilabschnitt ab. Bei $T_r=1.3$ s ergeben sich die Abschnitte $0.5+0.5+0.3=1.3$ s. Deshalb ist das obige Integral auch dann nützlich, wenn sich die Dauer nicht gleichmäßig auf die Zeitschritte verteilt.
 
-**Derivation.** For constant damage rate $P_r$, total damage is its time integral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Substituting the two resistance reductions gives $PT(1-r)^2$. The square follows because resistance changes **both** rate and exposure time. In the uncapped interval, $\\partial D_r/\\partial r=-2PT(1-r)$, so additional resistance reduces damage but its absolute marginal effect becomes smaller as $r$ rises. This derivative stops describing the code once resistance itself reaches the 0.75 clamp or another cap applies. A one-time hit or an effect with fixed duration would have a different dependence on $r$.
+**Herleitung.** Bei konstanter Schadensrate $P_r$ ist der Gesamtschaden ihr Zeitintegral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Einsetzen der beiden Abschwächungen durch den Widerstand ergibt $PT(1-r)^2$. Das Quadrat entsteht, weil der Widerstand **sowohl** die Rate als auch die Einwirkzeit verändert. Im unbegrenzten Bereich gilt $\\partial D_r/\\partial r=-2PT(1-r)$: Zusätzlicher Widerstand verringert den Schaden, doch sein absoluter Grenznutzen sinkt mit steigendem $r$. Sobald der Widerstand die Grenze 0.75 erreicht oder eine andere Obergrenze greift, beschreibt diese Ableitung den Code nicht mehr. Ein einmaliger Treffer oder ein Effekt mit fester Dauer wäre anders von $r$ abhängig.
 
-**Boundary of the model.** Power has a per-status cap, duration is capped at 60 seconds, and reapplication may retain a stronger or longer existing effect. Bleed stacks power and deals $1.6\\times$ while the target is moving. Death or removal can end the sequence early. These cases require following the state update rather than applying the isolated-effect formula.
+**Grenzen des Modells.** Die Stärke ist je Zustand begrenzt, die Dauer auf 60 Sekunden gedeckelt, und bei erneuter Anwendung kann ein bereits vorhandener stärkerer oder längerer Effekt erhalten bleiben. Blutung addiert Stärke und verursacht während der Bewegung des Ziels den $1.6\\times$-fachen Schaden. Tod oder Entfernung können die Abfolge vorzeitig beenden. In diesen Fällen muss die Zustandsaktualisierung verfolgt werden; die Formel für den einzelnen Effekt reicht nicht aus.
 
-### 3. Loot odds: diminishing returns and conditional probability
+### 3. Beutewahrscheinlichkeiten: abnehmender Zuwachs und bedingte Wahrscheinlichkeit
 
-\`rarityOdds()\` uses $S=1+L/40$, where $L$ is item level, and the saturation function
+\`rarityOdds()\` verwendet $S=1+L/40$ mit der Gegenstandsstufe $L$ sowie die Sättigungsfunktion
 
 $f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$
 
-For nonnegative magic find $m$, $f_k'(m)>0$ while $f_k''(m)=-2k^2/(m+k)^3<0$. Thus more magic find always raises the transformed value, but each extra point contributes less than the previous point. The transform approaches $k$ as $m$ grows without bound. Unique and rare checks use different constants, $k=250$ and $k=600$ respectively; the magic check uses raw magic find. Each check is capped at 1:
+Für einen nichtnegativen Bonus auf magische Funde $m$ gilt $f_k'(m)>0$, während $f_k''(m)=-2k^2/(m+k)^3<0$ ist. Ein höherer Bonus erhöht den umgerechneten Wert stets, doch jeder weitere Punkt trägt weniger bei als der vorherige. Für unbegrenzt wachsendes $m$ nähert sich der Wert $k$. Die Prüfungen auf einzigartige und seltene Gegenstände verwenden $k=250$ beziehungsweise $k=600$; die Prüfung auf magische Gegenstände nutzt den unveränderten Bonus. Jede Prüfungswahrscheinlichkeit ist auf 1 begrenzt:
 
 $u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$
 $r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$
 
-These are **conditional checks**, not three final probabilities that can simply be added. \`rollRarity()\` tests unique first, then rare only if unique failed, then magic only if both failed. By the multiplication rule for conditional probability:
+Dies sind **bedingte Prüfungen**, keine drei endgültigen Wahrscheinlichkeiten, die sich einfach addieren ließen. \`rollRarity()\` prüft zuerst auf einzigartige Gegenstände, bei Fehlschlag auf seltene und erst bei erneutem Fehlschlag auf magische. Nach der Multiplikationsregel für bedingte Wahrscheinlichkeiten gilt:
 
 $P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$
 
-The remaining probability is $P(O)=(1-u)(1-r)(1-g)$, where $O$ means the rarity roll reaches the later superior-or-normal choice. These four outcomes partition the initial roll: $u+(1-u)[r+(1-r)(g+1-g)]=1$. This identity is a useful check on an edited probability table. It also shows why the order matters: if rare were checked first, the final unique probability would become $(1-r)u$ rather than $u$.
+Die verbleibende Wahrscheinlichkeit ist $P(O)=(1-u)(1-r)(1-g)$. Dabei bedeutet $O$, dass die Seltenheitsbestimmung die spätere Entscheidung zwischen verbessert und gewöhnlich erreicht. Diese vier Ergebnisse teilen den ursprünglichen Wurf vollständig auf: $u+(1-u)[r+(1-r)(g+1-g)]=1$. Diese Identität hilft bei der Prüfung einer geänderten Wahrscheinlichkeitstabelle. Sie zeigt auch, warum die Reihenfolge wichtig ist: Würde zuerst auf selten geprüft, betrüge die endgültige Wahrscheinlichkeit für einzigartig $(1-r)u$ statt $u$.
 
-At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, while the rare check is 2.222%. The actual probability of reaching and passing the rare check is about $0.997143\\times0.022222=2.216\\%$. Item generation can subsequently impose a rarity floor or handle a unique result specially, so these equations describe the initial rarity roll, not every final drop outcome.
+Bei Gegenstandsstufe 40 und ohne Bonus auf magische Funde ist $S=2$: Die Prüfung auf einzigartig hat eine Wahrscheinlichkeit von etwa 0.286 %, die auf selten von 2.222 %. Die tatsächliche Wahrscheinlichkeit, die Prüfung auf selten zu erreichen und zu bestehen, beträgt etwa $0.997143\\times0.022222=2.216\\%$. Die Gegenstandserzeugung kann danach eine Mindestseltenheit festlegen oder ein einzigartiges Ergebnis gesondert behandeln. Die Gleichungen beschreiben daher die anfängliche Seltenheitsbestimmung und nicht jedes endgültige Beuteergebnis.
 
-## Part II. Data structures as mathematical transformations
+## Teil II. Datenstrukturen als mathematische Umformungen
 
-### 4. Prefix sums: turning a crowd into contiguous buckets
+### 4. Präfixsummen: aus einer Menge zusammenhängende Zellbereiche bilden
 
-\`Level::buildGrid()\` counts non-buried enemies by grid cell, builds prefix sums, and scatters pointers into a contiguous array. Suppose four cells have counts $[2,0,3,1]$. The exclusive offsets are
+\`Level::buildGrid()\` zählt nicht vergrabene Gegner je Rasterzelle, bildet Präfixsummen und verteilt Zeiger in einem zusammenhängenden Feld. Angenommen, vier Zellen enthalten jeweils $[2,0,3,1]$ Gegner. Die exklusiven Anfangspositionen lauten
 
 $[0,\\;2,\\;2,\\;5,\\;6]$
 
-Formally, if $c_i$ is the count in cell $i$, define $s_0=0$ and $s_{i+1}=s_i+c_i$. Then $s_i=\\sum_{j<i}c_j$ and $s_C=N$, the total number of binned enemies. Cell $i$ occupies the half-open interval $[s_i,s_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3, and 4.
+Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dann gilt $s_i=\\sum_{j<i}c_j$ und $s_C=N$, wobei $N$ die Gesamtzahl der zugeordneten Gegner ist. Zelle $i$ belegt das halboffene Intervall $[s_i,s_{i+1})$. Zelle 1 ist leer, weil ihre beiden Anfangspositionen gleich sind; Zelle 2 belegt die Indizes 2, 3 und 4.
 
-**Proposition: the cell ranges form a partition.** If all $c_i$ are nonnegative and the scatter writes exactly $c_i$ enemies into cell $i$, the ranges are disjoint and their union is $[0,N)$. The proof follows from $s_{i+1}=s_i+c_i$: the next range begins where the previous range ends, and the final end is $N$. This is stronger than merely observing that the total count is correct; it rules out overlap and gaps. Building the index takes $O(N+C)$ work for $N$ enemies and $C$ cells, plus storage for the arrays.
+**Behauptung: Die Zellbereiche bilden eine Zerlegung.** Sind alle $c_i$ nichtnegativ und schreibt die Verteilung genau $c_i$ Gegner in Zelle $i$, dann überschneiden sich die Bereiche nicht und ihre Vereinigung ist $[0,N)$. Der Beweis folgt aus $s_{i+1}=s_i+c_i$: Jeder Bereich beginnt genau dort, wo der vorige endet, und der letzte endet bei $N$. Das ist stärker als die bloße Feststellung, dass die Gesamtzahl stimmt; auch Überschneidungen und Lücken sind ausgeschlossen. Der Aufbau des Index benötigt $O(N+C)$ Arbeit für $N$ Gegner und $C$ Zellen sowie Speicher für die Felder.
 
-\`gather()\` visits the query's own cell first, then other cells touched by the query bounding square. It skips removed enemies and stops at the caller's maximum. This is a **broad-phase candidate collection**: cell membership alone does not prove a candidate lies within the requested circular radius. Buried enemies are placed in a separate \`loose\` list during grid construction.
+\`gather()\` besucht zuerst die Zelle der Abfrage und danach weitere Zellen, die deren umschließendes Quadrat berührt. Die Funktion überspringt entfernte Gegner und endet beim vom Aufrufer vorgegebenen Höchstwert. Dies ist eine **grobe Kandidatensuche**: Die Zugehörigkeit zu einer Zelle beweist noch nicht, dass ein Kandidat innerhalb des angefragten Kreisradius liegt. Vergrabene Gegner werden beim Aufbau des Rasters in einer eigenen Liste \`loose\` abgelegt.
 
-### 5. Sorting float depths with integers
+### 5. Gleitkomma-Tiefen mit Ganzzahlen sortieren
 
-\`LevelRender.cpp\` converts the bits of a 32-bit float into an unsigned key. For a nonnegative value it flips the sign bit; for a negative value it flips all bits. For ordinary finite numbers this puts numeric order into unsigned integer order:
+\`LevelRender.cpp\` wandelt das Bitmuster einer 32-Bit-Gleitkommazahl in einen vorzeichenlosen Schlüssel um. Bei nichtnegativen Werten kehrt der Code das Vorzeichenbit um, bei negativen Werten alle Bits. Für gewöhnliche endliche Zahlen entspricht die Reihenfolge der vorzeichenlosen Ganzzahlen danach der numerischen Reihenfolge:
 
-| Depth | Raw float bits | Ordered bits |
+| Tiefe | Ursprüngliches Gleitkomma-Bitmuster | Geordnetes Bitmuster |
 |:---|:---|:---|
 | $-10$ | \`C1200000\` | \`3EDFFFFF\` |
 | $-0$ | \`80000000\` | \`7FFFFFFF\` |
 | $+0$ | \`00000000\` | \`80000000\` |
 | $+10$ | \`41200000\` | \`C1200000\` |
 
-**Proposition: the transform preserves finite depth order.** Among nonnegative finite IEEE-754 values, unsigned bit patterns increase with numeric value; flipping the sign bit moves that entire range above the negative range. Among negative finite values, the raw unsigned patterns run in reverse numeric order; complementing all bits reverses them again. The two transformed ranges meet around zero. The two zeros compare equal numerically but get adjacent, distinct keys. NaNs do not have a normal numerical ordering, so the proposition excludes them. It also assumes the 32-bit float representation used by this source path.
+**Behauptung: Die Umwandlung bewahrt die Reihenfolge endlicher Tiefenwerte.** Bei nichtnegativen endlichen IEEE-754-Werten wachsen die vorzeichenlos interpretierten Bitmuster mit dem Zahlenwert; das Umkehren des Vorzeichenbits verschiebt den gesamten Bereich über die negativen Werte. Bei negativen endlichen Werten verlaufen die ursprünglichen vorzeichenlosen Bitmuster entgegen der numerischen Reihenfolge; die Umkehrung aller Bits dreht sie erneut um. Die beiden umgewandelten Bereiche treffen um null aufeinander. Beide Nullen sind numerisch gleich, erhalten aber benachbarte, verschiedene Schlüssel. NaN-Werte haben keine gewöhnliche numerische Ordnung und sind daher von der Behauptung ausgenommen. Vorausgesetzt wird außerdem die hier verwendete 32-Bit-Gleitkommadarstellung.
 
-The packed key places layer at bit 56 and above, ordered depth in bits 24–55, and the draw index in the low 24 bits. Three stable 12-bit counting passes at shifts 24, 36, and 48 sort bits 24–59. Thus the sort covers the depth and only the low four layer bits; current layer values fit there. They do **not** sort the low index bits, so stability preserves insertion order for equal layer and depth. Each pass scans the keys and 4096 buckets, giving $O(3(N+4096))$ work. The packed representation also assumes the draw index fits in 24 bits.
+Der gepackte Schlüssel enthält die Ebene ab Bit 56, die geordnete Tiefe in den Bits 24–55 und den Zeichenindex in den untersten 24 Bits. Drei stabile Zählsortierdurchläufe mit je 12 Bits und Verschiebungen um 24, 36 und 48 sortieren die Bits 24–59. Damit erfasst die Sortierung die Tiefe und nur die unteren vier Bits der Ebene; die aktuellen Ebenenwerte passen dort hinein. Die unteren Indexbits werden **nicht** sortiert: Bei gleicher Ebene und Tiefe bleibt aufgrund der Stabilität die Einfügereihenfolge erhalten. Jeder Durchlauf verarbeitet die Schlüssel und 4096 Zellen; der Aufwand beträgt $O(3(N+4096))$. Die gepackte Darstellung setzt außerdem voraus, dass der Zeichenindex in 24 Bits passt.
 
-### 6. A gate field as a graph problem
+### 6. Ein Tor-Richtungsfeld als Graphenproblem
 
-\`bastion::raise()\` treats traversable cells as graph vertices and up to eight neighboring cells as edges. It seeds a FIFO queue with the gate opening, then floods outward. Each newly discovered cell stores the direction back toward the cell that discovered it. Diagonal expansion is rejected when either adjacent orthogonal cell is a wall, preventing a route through a blocked corner.
+\`bastion::raise()\` behandelt begehbare Zellen als Knoten eines Graphen und Verbindungen zu bis zu acht Nachbarzellen als Kanten. Die Funktion legt die Toröffnung in eine Warteschlange nach dem Prinzip „zuerst hinein, zuerst heraus“ und breitet sich von dort aus. Jede neu entdeckte Zelle speichert die Richtung zurück zur Zelle, von der aus sie entdeckt wurde. Eine diagonale Ausbreitung wird verworfen, wenn eine der beiden angrenzenden Zellen in gerader Richtung eine Wand ist. So führt kein Weg durch eine blockierte Ecke.
 
-**Proposition: the stored direction follows a minimum-hop route to an opening.** Every gate opening enters the queue at distance zero. A discovered neighbor receives one more edge than the cell that discovered it. FIFO order processes all distance-$d$ cells before any distance-$(d+1)$ cell, so a later discovery cannot produce a shorter edge-count route. The direction stored at a cell points back along that first route. This proof assumes every accepted edge has unit cost and the wall and corner checks define a fixed graph during construction.
+**Behauptung: Die gespeicherte Richtung folgt einem Weg mit minimaler Schrittzahl zu einer Öffnung.** Jede Toröffnung gelangt mit Abstand null in die Warteschlange. Ein entdeckter Nachbar liegt eine Kante weiter entfernt als die Zelle, von der aus er entdeckt wurde. Durch die Reihenfolge der Warteschlange werden alle Zellen mit Abstand $d$ vor den Zellen mit Abstand $d+1$ verarbeitet. Eine spätere Entdeckung kann deshalb keinen Weg mit weniger Kanten ergeben. Die gespeicherte Richtung weist auf diesem ersten Weg zurück. Der Beweis setzt voraus, dass jede zulässige Kante gleich viel kostet und dass die Wand- und Eckprüfungen beim Aufbau einen festen Graphen bilden.
 
-The result minimizes the **number of grid moves**, not exact Euclidean travel distance. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. Moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally. A weighted shortest-path method would answer a different distance question.
+Das Ergebnis minimiert die **Anzahl der Rasterschritte**, nicht die genaue euklidische Weglänge. Ein diagonaler und ein gerader Schritt zählen jeweils als eine Kante, obwohl sie geometrisch unterschiedlich lang sind. Ein diagonaler Zellschritt ist $16\\sqrt{2}$ px lang, ein gerader dagegen 16 px. Ein Verfahren mit gewichteten Kanten würde eine andere Frage nach dem kürzesten Weg beantworten.
 
-The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
+Das Feld wird gemeinsam genutzt: Befinden sich Spieler und eine bewegliche Einheit auf gegenüberliegenden Seiten einer Bastion und bewegt sich die Einheit bereits auf den Spieler zu, kann \`route()\` ihre gewünschte Geschwindigkeit durch die gespeicherte, normierte Richtung mal Geschwindigkeit ersetzen. Dies ist eine lokale Wegregel und keine allgemeine Lösung für kürzeste Wege um jedes Hindernis oder zu jedem beweglichen Ziel.
 
 
-## Part III. Space, classification, and generated texture
+## Teil III. Raum, Klassifikation und erzeugte Texturen
 
-### 7. Biome classification: continuous climate and discrete sites
+### 7. Biome klassifizieren: kontinuierliches Klima und einzelne Stützpunkte
 
-\`BIOME_COUNT\` currently covers 30 entries: 16 core biomes, 10 expansion biomes, and 4 coast biomes. The coast branch is decided first from \`landAt(x,y)\`; inland locations use climate sampled at a selected site. This distinction matters mathematically. A smooth climate field alone does not determine the final biome, because a shoreline threshold can override it before the inland classifier runs (\`src/level/biome/Biome.cpp\`).
+\`BIOME_COUNT\` umfasst derzeit 30 Einträge: 16 Grundbiome, 10 zusätzliche Biome und 4 Küstenbiome. Der Küstenzweig wird zuerst anhand von \`landAt(x,y)\` entschieden; im Landesinneren wird das Klima an einem ausgewählten Stützpunkt abgetastet. Dieser Unterschied ist mathematisch bedeutsam. Ein glattes Klimafeld bestimmt das endgültige Biom nicht allein, denn eine Küstenschwelle kann es überschreiben, bevor die Klassifikation des Landesinneren beginnt (\`src/level/biome/Biome.cpp\`).
 
-#### The Continuous Climate Manifold
+#### Die kontinuierliche Klimalandschaft
 
-Tile coordinates $(x, y)$ are scaled by $\\text{CLIMATE\\_SCALE} = 2.5$:
+Kachelkoordinaten $(x, y)$ werden mit $\\text{CLIMATE\\_SCALE} = 2.5$ skaliert:
 
 $s_x = \\frac{x}{2.5}, \\qquad s_y = \\frac{y}{2.5}$
 
-To prevent grid artifacts, the scaled coordinates undergo multi-octave domain warping:
+Um Rasterartefakte zu vermeiden, werden die skalierten Koordinaten durch Rauschen mit mehreren Oktaven verzerrt:
 
 $w_x = s_x + 5 \\cdot \\text{fBm}_2(0.045 s_x + 11.3, \\; 0.045 s_y - 4.1, \\; 701) + 0.9 \\cdot \\text{Perlin}(0.23 s_x + 3.1, \\; 0.23 s_y - 8.7, \\; 703)$
 $w_y = s_y + 5 \\cdot \\text{fBm}_2(0.045 s_x - 7.7, \\; 0.045 s_y + 9.2, \\; 702) + 0.9 \\cdot \\text{Perlin}(0.23 s_x - 5.3, \\; 0.23 s_y + 2.9, \\; 704)$
 
-At the warped coordinate $(w_x, w_y)$, four continuous noise fields define the climate tuple $\\mathbf{C} = (T, M, E, W)$:
-* **Temperature ($T$):** $\\text{fBm}_3(0.011 w_x, \\; 0.011 w_y, \\; 101)$
-* **Moisture ($M$):** $\\text{fBm}_3(0.013 w_x + 40.5, \\; 0.013 w_y, \\; 202)$
-* **Eerie ($E$):** $\\text{fBm}_2(0.017 w_x, \\; 0.017 w_y - 60.5, \\; 303)$
-* **Wildness ($W$):** $\\text{fBm}_2(0.012 w_x + 123.5, \\; 0.012 w_y - 77.5, \\; 505)$
+An der verzerrten Koordinate $(w_x, w_y)$ bestimmen vier kontinuierliche Rauschfelder das Klimatupel $\\mathbf{C} = (T, M, E, W)$:
+* **Temperatur ($T$):** $\\text{fBm}_3(0.011 w_x, \\; 0.011 w_y, \\; 101)$
+* **Feuchtigkeit ($M$):** $\\text{fBm}_3(0.013 w_x + 40.5, \\; 0.013 w_y, \\; 202)$
+* **Unheimlichkeit ($E$):** $\\text{fBm}_2(0.017 w_x, \\; 0.017 w_y - 60.5, \\; 303)$
+* **Wildheit ($W$):** $\\text{fBm}_2(0.012 w_x + 123.5, \\; 0.012 w_y - 77.5, \\; 505)$
 
-#### Voronoi Site Quantization (\`siteOf\`)
+#### Quantisierung durch Voronoi-Stützpunkte (\`siteOf\`)
 
-Rather than classify each inland tile from its own climate sample, \`siteOf(x,y)\` selects a nearby jittered site and classifies that site's climate. The site scale is itself a spatial function. Write $h(x,y)=\\operatorname{clamp}(1-\\sqrt{x^2+y^2}/1000,0,1)$ and let $F$ be the two-octave noise call used by the source. Then
+Statt jede Kachel im Landesinneren anhand ihres eigenen Klimawerts zu klassifizieren, wählt \`siteOf(x,y)\` einen nahe gelegenen, versetzten Stützpunkt und klassifiziert dessen Klima. Auch die Stützpunktskala hängt vom Ort ab. Sei $h(x,y)=\\operatorname{clamp}(1-\\sqrt{x^2+y^2}/1000,0,1)$ und $F$ der im Quellcode verwendete Rauschaufruf mit zwei Oktaven. Dann gilt
 
 $$n(x,y)=F(0.0006x+5.3,\\;0.0006y-8.9;617)+0.7h^2(3-2h).$$
 
-The scale is $q=6$ when $n<-0.12$, $q=3$ when $-0.12\\le n<0.1$, and $q=1$ otherwise. Consequently the cell width is $c=112q$ tiles, or 672, 336, or 112 tiles. The source calls these wider regimes vast and province scales. They make a single fixed Voronoi cell size an incorrect description of the current algorithm.
+Die Skala beträgt $q=6$ bei $n<-0.12$, $q=3$ bei $-0.12\\le n<0.1$ und sonst $q=1$. Die Zellbreite ist daher $c=112q$ Kacheln, also 672, 336 oder 112 Kacheln. Im Quellcode heißen die größeren Bereiche weitläufige und Provinzskalen. Eine einzige feste Voronoi-Zellgröße würde den aktuellen Algorithmus deshalb falsch beschreiben.
 
-With frequency $\\phi=0.018/q$, the warped point used for site selection is
+Mit der Frequenz $\\phi=0.018/q$ ergibt sich für die Auswahl des Stützpunkts der verzerrte Punkt
 
 $f_x=x+30q\\,\\text{fBm}_2(\\phi x+3.7,\\;\\phi y-1.3;611)+3\\,\\text{Perlin}(0.09x,\\;0.09y+5.1;612)$
 $f_y=y+30q\\,\\text{fBm}_2(\\phi x-8.1,\\;\\phi y+6.4;613)+3\\,\\text{Perlin}(0.09x+2.3,\\;0.09y;614)$
 
-For cell index $(c_x,c_y)=(\\lfloor f_x/c\\rfloor,\\lfloor f_y/c\\rfloor)$, the generator checks that cell and its eight neighbors. A candidate site in cell $(i,j)$ is
+Beim Zellindex $(c_x,c_y)=(\\lfloor f_x/c\\rfloor,\\lfloor f_y/c\\rfloor)$ untersucht der Generator diese Zelle und ihre acht Nachbarn. Ein möglicher Stützpunkt in Zelle $(i,j)$ liegt bei
 
 $$P_{i,j}=c\\left(i+0.15+0.70\\frac{h_x}{255},\\quad j+0.15+0.70\\frac{h_y}{255}\\right),$$
 
-where $h=\\text{hash2}(73i+\\text{noise\\_salt}+\\text{salt},151j-\\text{noise\\_salt}-\\text{salt})$, $h_x=h\\mathbin{\\&}255$, $h_y=(h\\gg8)\\mathbin{\\&}255$, and $\\text{salt}=0$ for $q=1$ or $977q$ otherwise. The chosen site minimizes $\\|\\mathbf f-P_{i,j}\\|^2$ among the nine candidates. This is a local nearest-site search in warped coordinates. Because $q$ depends on the query location, the construction is not a single global Voronoi diagram with one uniform site set. Scale transitions are an additional source of biome boundaries.
+wobei $h=\\text{hash2}(73i+\\text{noise\\_salt}+\\text{salt},151j-\\text{noise\\_salt}-\\text{salt})$, $h_x=h\\mathbin{\\&}255$, $h_y=(h\\gg8)\\mathbin{\\&}255$ und $\\text{salt}=0$ für $q=1$, sonst $977q$. Unter den neun Kandidaten wird der Stützpunkt mit dem kleinsten $\\|\\mathbf f-P_{i,j}\\|^2$ gewählt. Dies ist eine lokale Suche nach dem nächsten Stützpunkt in verzerrten Koordinaten. Da $q$ vom Abfrageort abhängt, entsteht kein einzelnes globales Voronoi-Diagramm mit einer einheitlichen Menge von Stützpunkten. Übergänge zwischen den Skalen schaffen zusätzliche Biomgrenzen.
 
-#### Radial Origin Leash (Cubic Hermite Attenuation)
+#### Radiale Abschwächung vom Ursprung aus (kubische Hermite-Funktion)
 
-To bias starting terrain toward calmer biomes, the code measures the distance $d=\\sqrt{s_x^2+s_y^2}$ of the **selected Voronoi site's tile coordinates** from the world origin. These site coordinates are not the earlier climate-scale coordinates. It attenuates eerie and wild attributes via cubic smoothstep:
+Um das Startgebiet eher ruhigen Biomen zuzuordnen, misst der Code den Abstand $d=\\sqrt{s_x^2+s_y^2}$ der **Kachelkoordinaten des ausgewählten Voronoi-Stützpunkts** vom Weltursprung. Diese Stützpunktkoordinaten sind nicht die zuvor verwendeten skalierten Klimakoordinaten. Unheimlichkeit und Wildheit werden mit einer kubischen Glättungsfunktion abgeschwächt:
 
 $u = \\text{clamp}\\left(\\frac{d - 260}{400}, \\; 0, \\; 1\\right), \\qquad \\beta(d) = u^2 (3 - 2u)$
 $E' = E \\cdot \\beta(d), \\qquad W' = -1 + (W + 1) \\cdot \\beta(d)$
 
-For $d \\le 260$ tiles, $\\beta(d)=0$, setting eerie to zero and wildness to $-1$. This excludes the eerie and expansion branches of the classifier there; the remaining temperature and moisture rules can still choose several ordinary biomes. At $d \\ge660$ tiles, the original climate values are used.
+Für $d \\le 260$ Kacheln ist $\\beta(d)=0$; dadurch wird Unheimlichkeit auf null und Wildheit auf $-1$ gesetzt. Dort entfallen die Zweige für unheimliche und zusätzliche Biome, während die übrigen Temperatur- und Feuchtigkeitsregeln weiterhin verschiedene gewöhnliche Biome auswählen können. Ab $d \\ge660$ Kacheln gelten die ursprünglichen Klimawerte.
 
-#### Inland classifier and coast override (\`biomeOf\`)
+#### Klassifikation des Landesinneren und Vorrang der Küste (\`biomeOf\`)
 
-The climate tuple $\\mathbf{C}' = (T, M, E', W')$ is partitioned into 26 **inland** biomes by an ordered set of threshold tests:
-1. **Wildness partition ($W' > 0.2$):** Allocates the 10 expansion biomes across 5 temperature bands ($T < -0.20$, $T < -0.07$, $T < 0.07$, $T < 0.20$, $T \\ge 0.20$) split by moisture sign ($M > 0$).
-2. **Eerie Partition ($E' > 0.14$):** Separates Ashlands ($T > 0.12$), Crystal Fields ($T < -0.12$), Fungal Wood ($M > 0.06$), and Barrow ($M \\le 0.06$).
-3. **Remaining core partition:** Classifies the other 12 core biomes (Taiga, Snow, Jungle, Badlands, Desert, Heath, Savanna, Blossom, Mire, Autumn, Forest, Meadow). The order of tests matters where conditions overlap; \`biomeOf()\` returns at the first match.
+Das Klimatupel $\\mathbf{C}' = (T, M, E', W')$ wird durch geordnete Schwellenprüfungen auf 26 Biome des **Landesinneren** verteilt:
+1. **Wildheit ($W' > 0.2$):** Ordnet die 10 zusätzlichen Biome fünf Temperaturbereichen ($T < -0.20$, $T < -0.07$, $T < 0.07$, $T < 0.20$, $T \\ge 0.20$) zu, die nach dem Vorzeichen der Feuchtigkeit ($M > 0$) unterteilt werden.
+2. **Unheimlichkeit ($E' > 0.14$):** Unterscheidet Aschelande ($T > 0.12$), Kristallfelder ($T < -0.12$), Pilzwald ($M > 0.06$) und Hügelgräber ($M \\le 0.06$).
+3. **Übrige Grundbiome:** Klassifiziert die anderen 12 Grundbiome (Taiga, Schnee, Dschungel, Ödland, Wüste, Heide, Savanne, Blütenland, Moor, Herbstwald, Wald, Wiese). Wo sich Bedingungen überschneiden, ist die Reihenfolge entscheidend; \`biomeOf()\` gibt den ersten Treffer zurück.
 
-Before this inland path, \`biomeForLocation()\` checks $L=\\text{landAt}(x,y)$. If $L<0$, it chooses tropical or cold sea; if $0\\le L<0.012$, it chooses warm or cold beach. Warmth is the sign of a separate two-octave noise sample, not the inland climate temperature $T$. The four coast entries therefore do not belong to the 26-way inland classifier.
+Vor diesem Zweig für das Landesinnere prüft \`biomeForLocation()\` den Wert $L=\\text{landAt}(x,y)$. Bei $L<0$ wählt die Funktion tropisches oder kaltes Meer; bei $0\\le L<0.012$ einen warmen oder kalten Strand. Die Wärme ergibt sich aus dem Vorzeichen einer eigenen Rauschprobe mit zwei Oktaven, nicht aus der Temperatur $T$ des Landesinneren. Die vier Küstenbiome gehören daher nicht zu dessen 26 Klassifikationsergebnissen.
 
-Finally, \`biomeAt(x, y)\` runs a $3 \\times 3$ majority voting filter:
+Schließlich wendet \`biomeAt(x, y)\` eine Mehrheitsentscheidung über $3 \\times 3$ Kacheln an:
 
 $B(x, y) = \\arg\\max_{b} \\sum_{dy=-1}^{1} \\sum_{dx=-1}^{1} \\mathbb{I}(\\text{rawBiome}(x+dx, \\; y+dy) == b)$
 
-The code initializes the winner to the tile's own raw biome and favors that raw biome when its count ties the leader. Thus the displayed $\\arg\\max$ is shorthand for a vote with a specific tie rule. The filter removes many isolated one-tile outliers, but it does not make classification continuous: coast and climate thresholds still create discrete boundaries.
+Der Code setzt zunächst das ursprüngliche Biom der Kachel als Gewinner ein und bevorzugt dieses Biom bei Gleichstand mit dem führenden Ergebnis. Das angegebene $\\arg\\max$ steht somit verkürzt für eine Abstimmung mit einer besonderen Gleichstandsregel. Der Filter entfernt viele vereinzelte Ausreißer von einer Kachel Größe, macht die Klassifikation aber nicht kontinuierlich: Küsten- und Klimaschwellen erzeugen weiterhin scharfe Grenzen.
 
-#### Interpretation of the 100,000-tile geography survey
+#### Einordnung der geografischen Untersuchung mit 100.000 Kacheln
 
-The $2.5$ coordinate divisor lowers the frequency of climate noise: features in those fields span about $2.5$ times as many input tiles before the separate Voronoi selection and majority filter are applied. It does not by itself specify the final size of every biome. The observed boundary counts from an earlier geography survey are historical measurements, not a mathematical guarantee for every seed or later generator revision.
+Der Koordinatenteiler $2.5$ senkt die Frequenz des Klimarauschens: Strukturen in diesen Feldern erstrecken sich über etwa $2.5$-mal so viele Eingabekacheln, bevor die eigene Voronoi-Auswahl und der Mehrheitsfilter angewendet werden. Daraus allein folgt nicht die endgültige Größe jedes Bioms. Die früher gemessene Anzahl von Grenzen ist eine historische Beobachtung und keine mathematische Garantie für jeden Startwert oder spätere Versionen des Generators.
 
-### 8. Biome layering: surface blends and underground strata
+### 8. Biomschichten: Übergänge an der Oberfläche und Schichten im Untergrund
 
-Mellangan implements biome layering across two distinct spatial dimensions: horizontal multi-surface barycentric ground transitions on the surface, and discrete vertical stratigraphy in the underworld (\`src/level/world/Biomes.cpp\`, \`Ground.cpp\`, \`Under.cpp\`, \`FloorPainter.cpp\`).
+Mellangan setzt Biomschichten in zwei verschiedenen Raumrichtungen um: waagerechte, nach Gewichten gemischte Bodenübergänge an der Oberfläche und einzelne senkrechte Schichten in der Unterwelt (\`src/level/world/Biomes.cpp\`, \`Ground.cpp\`, \`Under.cpp\`, \`FloorPainter.cpp\`).
 
-#### Horizontal Barycentric Ground Blending (\`groundBlend\`)
+#### Waagerechte Bodenmischung mit Gewichten (\`groundBlend\`)
 
-To soften sharp tile transitions, \`world::groundBlend(x, y)\` blends up to three neighboring biomes. A lattice node uses a $5\\times5$ stencil of biome samples. The results are memoized on a two-tile lattice and interpolated for intervening tiles, so the stencil need not be recomputed for every drawn tile.
+Um harte Kachelübergänge abzumildern, mischt \`world::groundBlend(x, y)\` bis zu drei benachbarte Biome. Ein Gitterpunkt verwendet eine Schablone aus $5\\times5$ Biomproben. Die Ergebnisse werden auf einem Gitter mit zwei Kacheln Abstand zwischengespeichert und für dazwischenliegende Kacheln interpoliert. Die Schablone muss daher nicht für jede gezeichnete Kachel neu berechnet werden.
 
-##### 1. Binomial Stencil Smoothing
-At lattice coordinates $(x_0, y_0) = (2 \\lfloor x/2 \\rfloor, \\; 2 \\lfloor y/2 \\rfloor)$, a $5 \\times 5$ neighborhood is evaluated using separable binomial weights $K = [1, 2, 3, 2, 1]$:
+##### 1. Glättung mit einer binomialen Schablone
+An den Gitterkoordinaten $(x_0, y_0) = (2 \\lfloor x/2 \\rfloor, \\; 2 \\lfloor y/2 \\rfloor)$ wird eine Umgebung aus $5 \\times 5$ Kacheln mit den trennbaren binomialen Gewichten $K = [1, 2, 3, 2, 1]$ ausgewertet:
 
 $\\text{totals}[b] = \\sum_{iy=-2}^{2} \\sum_{ix=-2}^{2} K[ix + 2] \\cdot K[iy + 2] \\cdot \\mathbb{I}(\\text{biomeAt}(x_0 + 2ix, \\; y_0 + 2iy) == b)$
 
-The sum of weights is $(1 + 2 + 3 + 2 + 1)^2 = 81$. \`compactBlend()\` selects the top 3 biomes by accumulated weight and normalizes their sum to $1.0$:
+Die Summe der Gewichte beträgt $(1 + 2 + 3 + 2 + 1)^2 = 81$. \`compactBlend()\` wählt die drei Biome mit den höchsten Gesamtgewichten und normiert ihre Summe auf $1.0$:
 
 $\\mathbf{w} = (w_1, w_2, w_3), \\qquad \\sum_{i=1}^{k} w_i = 1.0 \\quad (k \\le 3)$
 
-##### 2. Smoothed Bilinear Interpolation
-Sub-tile fractions $f_x = (x - x_0)/2$ and $f_y = (y - y_0)/2$ are warped via cubic Hermite curves:
+##### 2. Geglättete bilineare Interpolation
+Die Bruchteile innerhalb einer Kachel, $f_x = (x - x_0)/2$ und $f_y = (y - y_0)/2$, werden mit kubischen Hermite-Kurven umgeformt:
 
 $S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
 
-The blend weights from the four corners of the $2 \\times 2$ cell are bilinearly interpolated using $S_x$ and $S_y$, then re-compacted to the three dominant biomes. Before that final truncation, the four bilinear coefficients are nonnegative and sum to one. Each corner blend also sums to one, so their weighted mixture sums to one. \`compactBlend()\` discards all but the top three and renormalizes those survivors. Thus normalization is preserved, while exact contribution from a discarded fourth biome is deliberately lost. A change in which biome ranks third may still produce a visible transition.
+Die Mischgewichte der vier Ecken der $2 \\times 2$-Zelle werden mit $S_x$ und $S_y$ bilinear interpoliert und anschließend erneut auf die drei vorherrschenden Biome reduziert. Vor dieser letzten Kürzung sind die vier bilinearen Koeffizienten nichtnegativ und ergeben zusammen eins. Auch jede Eckmischung ergibt eins; ihre gewichtete Mischung hat deshalb ebenfalls die Summe eins. \`compactBlend()\` verwirft alle bis auf die drei stärksten Anteile und normiert diese erneut. Die Normierung bleibt somit erhalten, während der genaue Beitrag eines verworfenen vierten Bioms bewusst verloren geht. Wechselt das Biom auf Rang drei, kann dennoch ein sichtbarer Übergang entstehen.
 
-##### 3. Recursive Alpha Compositing Recurrence
-\`FloorPainter::blend()\` draws up to 3 ground surfaces in order. The local tile's authoritative biome (\`own\`) is sorted to index 0, followed by foreign biomes. The layer opacity $\\alpha_i$ for layer $i$ is:
+##### 3. Rekursive Zusammensetzung mit Alphawerten
+\`FloorPainter::blend()\` zeichnet bis zu drei Bodenoberflächen nacheinander. Das maßgebliche Biom der örtlichen Kachel (\`own\`) steht an Index 0, gefolgt von fremden Biomen. Die Deckkraft $\\alpha_i$ für Schicht $i$ lautet:
 
 $\\alpha_0 = 1.0, \\qquad \\alpha_i = \\frac{w_i}{\\sum_{j=0}^{i} w_j} \\quad (i \\ge 1)$
 
-**Theorem (Weight Preservation in Multi-Pass Blending):**
-After drawing through layer $i-1$, the displayed color is the weighted mean of those layers, with total weight $C_{i-1} = \\sum_{j=0}^{i-1} w_j$. Drawing layer $i$ with opacity $\\alpha_i=w_i/(C_{i-1}+w_i)$ produces the weighted mean through layer $i$.
+**Satz (Erhaltung der Gewichte beim Mischen in mehreren Durchläufen):**
+Nach dem Zeichnen bis einschließlich Schicht $i-1$ ist die dargestellte Farbe das gewichtete Mittel dieser Schichten mit dem Gesamtgewicht $C_{i-1} = \\sum_{j=0}^{i-1} w_j$. Wird Schicht $i$ mit der Deckkraft $\\alpha_i=w_i/(C_{i-1}+w_i)$ gezeichnet, entsteht das gewichtete Mittel bis einschließlich Schicht $i$.
 
-*Proof:* If the previous color is $F_{i-1}=\\sum_{j<i}w_j c_j/C_{i-1}$, ordinary source-over compositing gives
+*Beweis:* Ist die bisherige Farbe $F_{i-1}=\\sum_{j<i}w_j c_j/C_{i-1}$, ergibt die gewöhnliche Überlagerung
 $$F_i=(1-\\alpha_i)F_{i-1}+\\alpha_i c_i=\\frac{C_{i-1}}{C_{i-1}+w_i}F_{i-1}+\\frac{w_i}{C_{i-1}+w_i}c_i=\\frac{\\sum_{j\\le i}w_jc_j}{\\sum_{j\\le i}w_j}.$$
-The base layer is drawn opaque, so the induction starts with $F_0=c_0$. With normalized final weights, $\\sum_j w_j=1$ and the final color is $\\sum_jw_jc_j$. This describes alpha weights before tinting, texture details, and later lighting.
+Die Grundschicht wird deckend gezeichnet; die Induktion beginnt daher mit $F_0=c_0$. Bei normierten Endgewichten gilt $\\sum_j w_j=1$, und die endgültige Farbe ist $\\sum_jw_jc_j$. Dies beschreibt die Alphagewichte vor Einfärbung, Texturdetails und späterer Beleuchtung.
 
-#### Vertical Subterranean Stratigraphy (\`Under.cpp\`)
+#### Senkrechte Schichtung im Untergrund (\`Under.cpp\`)
 
-The engine models world depth through three discrete vertical layers:
+Die Spiel-Engine beschreibt die Tiefe der Welt durch drei getrennte senkrechte Ebenen:
 
-$\\text{Layer} \\in \\{\\text{Surface}, \\; \\text{Caves}, \\; \\text{Deep}\\}$
+$\\text{Ebene} \\in \\{\\text{Oberfläche}, \\; \\text{Höhlen}, \\; \\text{Tiefe}\\}$
 
-Switching layers updates the active layer pointer and increments \`noise_epoch\`, invalidating the tile memoization table (\`memos\`).
+Ein Ebenenwechsel aktualisiert den Zeiger auf die aktive Ebene und erhöht \`noise_epoch\`. Dadurch werden die gespeicherten Kachelergebnisse (\`memos\`) ungültig.
 
-##### 1. Cave Cell Stochastic Classification ($64 \\times 64$ Tile Blocks)
-Subterranean space is divided into $64 \\times 64$ tile cells (\`CAVE_CELL = 64\`). The cell hash begins with $h=\\text{hash2}(73c_x+11,151c_y-7)$. \`kindOf()\` reserves residues $h\\bmod100<40$ for Solid, then rescales the other 60 residues with integer division, $r=\\lfloor100((h\\bmod100)-40)/60\\rfloor$. Its initial classification is:
+##### 1. Zufallsbasierte Klassifikation von Höhlenzellen ($64 \\times 64$ Kacheln)
+Der Untergrund ist in Zellen aus $64 \\times 64$ Kacheln eingeteilt (\`CAVE_CELL = 64\`). Der Zell-Hash beginnt mit $h=\\text{hash2}(73c_x+11,151c_y-7)$. \`kindOf()\` reserviert die Reste $h\\bmod100<40$ für massives Gestein und skaliert die übrigen 60 Reste mittels Ganzzahldivision um: $r=\\lfloor100((h\\bmod100)-40)/60\\rfloor$. Die anfängliche Einteilung lautet:
 
-| Kind | Original residues | Count out of 100 |
+| Art | Ursprüngliche Reste | Anzahl von 100 |
 |:---|:---|---:|
-| Solid | 0–39 | 40 |
-| Pocket | 40–72 | 33 |
-| Through | 73–87 | 15 |
-| Warren | 88–94 | 7 |
-| Descent | 95–99 | 5 |
+| Massives Gestein | 0–39 | 40 |
+| Hohlraum | 40–72 | 33 |
+| Durchgang | 73–87 | 15 |
+| Höhlensystem | 88–94 | 7 |
+| Abstieg | 95–99 | 5 |
 
-These are counts of hash residues, not guaranteed observed frequencies in a finite map. Later generation can reject a cell or change a Through cell with too few mouths into a Pocket, so the finished world need not keep these exact proportions.
+Dies sind Anzahlen von Hash-Resten, keine garantierten Häufigkeiten in einer endlichen Karte. Bei der weiteren Erzeugung kann eine Zelle verworfen oder ein Durchgang mit zu wenigen Öffnungen in einen Hohlraum umgewandelt werden. Die fertige Welt muss diese Anteile daher nicht genau einhalten.
 
-##### 2. Rotated Elliptic Chamber Carving
-Each chamber $r$ is carved as an ellipse rotated by angle $\\theta$, with center $(m_x, m_y)$ and semi-axes $(r_a, r_b)$:
+##### 2. Ausschneiden gedrehter elliptischer Kammern
+Jede Kammer $r$ wird als um den Winkel $\\theta$ gedrehte Ellipse mit Mittelpunkt $(m_x, m_y)$ und Halbachsen $(r_a, r_b)$ ausgeschnitten:
 
 $u = (x - m_x) \\cos \\theta + (y - m_y) \\sin \\theta, \\qquad v = (y - m_y) \\cos \\theta - (x - m_x) \\sin \\theta$
 $e(x, y) = \\frac{u^2}{r_a^2} + \\frac{v^2}{r_b^2} + 0.35 \\cdot \\text{fBm}_2(0.08 x + 3.7, \\; 0.08 y - 1.9, \\; 3011)$
 
-A tile is excavated when $e(x, y) < 1.0$ and cellular noise thresholds are satisfied. Passages between rooms are carved using linear ray interpolation with dynamic width dilation.
+Eine Kachel wird ausgehöhlt, wenn $e(x, y) < 1.0$ ist und die Schwellenwerte des zellulären Rauschens erfüllt sind. Gänge zwischen Räumen entstehen durch lineare Strahlinterpolation mit veränderlicher Breite.
 
-##### 3. Vertical Climate and Biome Inheritance
-Subterranean caverns maintain thematic continuity with the surface. In \`under::biomeAt(x, y)\`, the function executes:
+##### 3. Übernahme von Klima und Biom in der Tiefe
+Unterirdische Höhlen behalten einen thematischen Bezug zur Oberfläche. In \`under::biomeAt(x, y)\` führt die Funktion Folgendes aus:
 \`\`\`cpp
 Surfaced up;
 return world::biomeAt(x, y);
 \`\`\`
-The temporary RAII guard \`Surfaced\` switches \`active\` to \`Layer::Surface\`, queries the authoritative surface biome above, and restores whichever layer was active on destruction. Cave biome selection then maps that surface biome through \`caveBelow()\`; the deep layer chooses its own biome separately.
+Das vorübergehende RAII-Objekt \`Surfaced\` setzt \`active\` auf \`Layer::Surface\`, fragt das maßgebliche Biom der darüberliegenden Oberfläche ab und stellt beim Auflösen die zuvor aktive Ebene wieder her. Die Auswahl des Höhlenbioms ordnet dieses Oberflächenbiom anschließend mit \`caveBelow()\` zu; die tiefe Ebene wählt ihr eigenes Biom gesondert.
 
-#### Interpretation of the three world layers
+#### Einordnung der drei Weltebenen
 
-The vertical coupling between surface climate and subterranean cave generation ensures that players never experience disjointed transitions. When descending through a cave mouth at $(x, y)$, the underground biome retains the ambient soundscapes, crystal formations, and elemental monster affinities of the world above, while replacing the open sky with solid limestone roof ceilings, darkness torches, and subterranean streams.
+Die senkrechte Verknüpfung zwischen Oberflächenklima und Höhlenerzeugung schafft einen erkennbaren Übergang. Beim Abstieg durch einen Höhleneingang bei $(x, y)$ übernimmt das unterirdische Biom Merkmale der Welt darüber, während an die Stelle des offenen Himmels eine Höhlendecke, Dunkelheit und unterirdische Gewässer treten.
 
 
-### 9. Procedural noise: cache-free analytical hash and rotated spectral fBm
+### 9. Prozedurales Rauschen: Hash ohne Zwischenspeicher und gedrehte fraktale Brownsche Bewegung
 
-Continuous spatial variation in \`src/level/Noise.c\` uses a coordinate hash instead of a permutation table, a fixed 16-entry gradient table, quintic interpolation, and rotated fractal octaves. The hash depends on integer lattice coordinates, a caller-supplied seed, and the world salt; changing the salt changes the generated pattern.
+Für kontinuierliche räumliche Unterschiede verwendet \`src/level/Noise.c\` einen Koordinaten-Hash statt einer Permutationstabelle, eine feste Tabelle mit 16 Gradienten, Interpolation fünften Grades und gedrehte fraktale Oktaven. Der Hash hängt von ganzzahligen Gitterkoordinaten, einem vom Aufrufer übergebenen Startwert und dem Welt-Salt ab; ein anderer Salt verändert das erzeugte Muster.
 
-#### Cache-Free Analytical Hash (\`noise_hash\`)
+#### Analytischer Hash ohne Zwischenspeicher (\`noise_hash\`)
 
-Given 2D integer lattice coordinates $(ix, iy) \\in \\mathbb{Z}^2$, a regional seed $S$, and a world salt $\\sigma$, \`noise_hash\` mixes all 32 bits using large prime multipliers and Murmur-style avalanche shifts:
+Aus zweidimensionalen ganzzahligen Gitterkoordinaten $(ix, iy) \\in \\mathbb{Z}^2$, einem regionalen Startwert $S$ und einem Welt-Salt $\\sigma$ mischt \`noise_hash\` alle 32 Bits mithilfe großer Primzahl-Multiplikatoren und Bitverschiebungen nach dem Murmur-Verfahren:
 
 $$h_0 = (ix \\cdot K_x) \\oplus (iy \\cdot K_y) \\oplus (S \\cdot K_s) \\oplus (\\sigma \\cdot K_\\phi)$$
 
 $$h_1 = h_0 \\oplus (h_0 \\gg 13), \\qquad h_2 = h_1 \\cdot M, \\qquad h_{\\text{final}} = h_2 \\oplus (h_2 \\gg 15)$$
 
-where:
+wobei gilt:
 - $K_x = \\text{0x8DA6B343} = 2376487747$
 - $K_y = \\text{0xD8163841} = 3625293889$
 - $K_s = \\text{0xCB1AB31F} = 3407467295$
-- $K_\\phi = \\text{0x9E3779B1} = 2654435761$ (derived from the golden ratio $2^{32} \\cdot (\\sqrt{5} - 1)/2$)
-- $M = \\text{0x5BD1E995} = 1540483477$ (MurmurHash2 mixing constant)
+- $K_\\phi = \\text{0x9E3779B1} = 2654435761$ (aus dem goldenen Schnitt $2^{32} \\cdot (\\sqrt{5} - 1)/2$ abgeleitet)
+- $M = \\text{0x5BD1E995} = 1540483477$ (Mischkonstante von MurmurHash2)
 
-This path needs no permutation-table lookup. Exact instruction count, cache behavior, and cycle cost depend on the compiler and target CPU, so the source establishes the algorithm rather than a universal timing claim.
+Dieses Verfahren benötigt keinen Zugriff auf eine Permutationstabelle. Die genaue Anzahl von Anweisungen, das Zwischenspeicherverhalten und die benötigten Prozessortakte hängen vom Compiler und der Ziel-CPU ab. Der Quellcode belegt daher den Algorithmus, aber keine allgemeingültige Laufzeitangabe.
 
-#### The 16-Gon Equiangular Gradient Ring
+#### Der Ring aus 16 gleichmäßig verteilten Gradienten
 
-Classical implementations randomly pick from 4 or 8 cardinal axes. Mellangan precomputes 16 equiangular 2D unit vectors scaled by $\\sqrt{2}$:
+Klassische Implementierungen wählen zufällig aus 4 oder 8 Hauptrichtungen. Mellangan berechnet vorab 16 gleichwinklig verteilte zweidimensionale Einheitsvektoren, die mit $\\sqrt{2}$ skaliert sind:
 
 $$\\mathbf{g}_k = \\sqrt{2} \\begin{pmatrix} \\cos\\left(k \\frac{\\pi}{8}\\right) \\\\ \\sin\\left(k \\frac{\\pi}{8}\\right) \\end{pmatrix}, \\qquad k \\in \\{0, 1, \\dots, 15\\}$$
 
-The gradient index is extracted from the most significant 4 bits of the avalanched hash:
+Der Gradientenindex stammt aus den obersten 4 Bits des durchmischten Hash-Werts:
 
 $$k = h_{\\text{final}} \\gg 28$$
 
-The table's entries have length approximately $\\sqrt{2}$, apart from decimal rounding. At a corner offset $\\mathbf d$, the dot product is $\\mathbf g_k\\cdot\\mathbf d$ and satisfies $|\\mathbf g_k\\cdot\\mathbf d|\\le\\sqrt{2}\\|\\mathbf d\\|$ by Cauchy–Schwarz. This bound explains the chosen scale; it does not prove that every sampled noise value attains either endpoint of $[-1,1]$.
+Die Tabelleneinträge haben abgesehen von dezimalen Rundungen ungefähr die Länge $\\sqrt{2}$. Bei einem Abstand $\\mathbf d$ von einer Ecke ist das Skalarprodukt $\\mathbf g_k\\cdot\\mathbf d$ und erfüllt nach Cauchy-Schwarz die Schranke $|\\mathbf g_k\\cdot\\mathbf d|\\le\\sqrt{2}\\|\\mathbf d\\|$. Diese Schranke erklärt die gewählte Skalierung; sie beweist nicht, dass Rauschproben die beiden Endpunkte von $[-1,1]$ erreichen.
 
-#### Negative-Coordinate Flooring and Quintic $C^2$ Fade
+#### Abrunden negativer Koordinaten und Glättung fünften Grades mit $C^2$-Stetigkeit
 
-To prevent coordinate truncation bugs for negative coordinates (where standard C casting \`(int32_t)-0.5f\` rounds towards zero to \`0\` instead of \`-1\`), Mellangan evaluates floor coordinates without branch instructions:
+Um Fehler beim Abschneiden negativer Koordinaten zu vermeiden (eine gewöhnliche C-Umwandlung von \`(int32_t)-0.5f\` rundet gegen null auf \`0\` statt auf \`-1\`), berechnet Mellangan die abgerundeten Koordinaten ohne Verzweigung:
 
 $$\\text{ifloor}(v) = \\lfloor v \\rfloor = \\text{int}(v) - [v < \\text{float}(\\text{int}(v))]$$
 
-Within each lattice cell, sub-tile fractional coordinates $(dx, dy) = (x - \\lfloor x \\rfloor, y - \\lfloor y \\rfloor)$ are smoothed using Ken Perlin's quintic polynomial:
+Innerhalb jeder Gitterzelle werden die gebrochenen Koordinaten $(dx, dy) = (x - \\lfloor x \\rfloor, y - \\lfloor y \\rfloor)$ mit Ken Perlins Polynom fünften Grades geglättet:
 
 $$u = \\text{fade}(dx) = 6 dx^5 - 15 dx^4 + 10 dx^3 = dx^3 (dx (6 dx - 15) + 10)$$
 
 $$v = \\text{fade}(dy) = 6 dy^5 - 15 dy^4 + 10 dy^3 = dy^3 (dy (6 dy - 15) + 10)$$
 
-The first and second derivatives of the quintic fade curve satisfy:
+Für die erste und zweite Ableitung der Glättungskurve fünften Grades gilt:
 
 $$f'(0) = f'(1) = 0, \\qquad f''(0) = f''(1) = 0$$
 
-Both the first and second derivatives of the fade curve vanish at integer boundaries. Combined with shared corner gradients, this makes the interpolated value and its first two derivatives meet smoothly at cell edges in the ideal mathematical construction; floating-point evaluation remains approximate.
+An ganzzahligen Grenzen verschwinden sowohl die erste als auch die zweite Ableitung der Glättungskurve. Zusammen mit den gemeinsamen Eckgradienten gehen der interpolierte Wert und seine ersten beiden Ableitungen im idealen mathematischen Modell an Zellrändern glatt ineinander über; die Berechnung mit Gleitkommazahlen bleibt eine Näherung.
 
-#### Rotated Spectral Fractal Brownian Motion (\`noise_fbm\`)
+#### Gedrehte fraktale Brownsche Bewegung (\`noise_fbm\`)
 
-Summing octaves of raw Perlin noise along cardinal axes creates noticeable alignment artifacts (cross-hatching) because each octave's grid lines align with the axes. To eliminate harmonic alignment, Mellangan multiplies the coordinate vector by a Pythagorean rotation matrix at each octave:
+Werden Oktaven von unverändertem Perlin-Rauschen entlang der Hauptachsen addiert, entstehen sichtbare Ausrichtungsartefakte, weil die Gitterlinien jeder Oktave mit den Achsen zusammenfallen. Um diese wiederkehrende Ausrichtung zu vermeiden, multipliziert Mellangan den Koordinatenvektor bei jeder Oktave mit einer pythagoreischen Rotationsmatrix:
 
 $$\\begin{pmatrix} x_{i+1} \\\\ y_{i+1} \\end{pmatrix} = \\begin{pmatrix} 1.6 & -1.2 \\\\ 1.2 & 1.6 \\end{pmatrix} \\begin{pmatrix} x_i \\\\ y_i \\end{pmatrix}$$
 
-This transformation decomposes into exact frequency scaling and planar rotation:
+Diese Umformung lässt sich in eine genaue Frequenzskalierung und eine Drehung in der Ebene zerlegen:
 
 $$\\begin{pmatrix} 1.6 & -1.2 \\\\ 1.2 & 1.6 \\end{pmatrix} = 2.0 \\begin{pmatrix} \\cos\\theta & -\\sin\\theta \\\\ \\sin\\theta & \\cos\\theta \\end{pmatrix}, \\qquad \\theta = \\arctan\\left(\\frac{1.2}{1.6}\\right) = \\arctan(0.75) \\approx 36.87^\\circ$$
 
-Key mathematical properties:
-1. **Exact Lacunarity (Frequency Doubling):** Because $1.6^2 + 1.2^2 = 2.56 + 1.44 = 4.0 = 2.0^2$, the spectral frequency doubles ($\\lambda = 2.0$) at every octave.
-2. **De-correlated Lattice Alignment:** Rotating the grid by $36.87^\\circ$ between successive octaves decorrelates high-frequency features from low-frequency features.
-3. **Cheap Coordinate Transform:** The matrix uses four floating-point multiplications and two additions per octave, with no runtime sine or cosine call. Its decimal literals are represented approximately in binary floating point.
-4. **Octave Seed Progression:** To vary the gradient pattern between octaves, the seed increments by a fixed odd constant:
+Wichtige mathematische Eigenschaften:
+1. **Genaue Frequenzverdopplung:** Weil $1.6^2 + 1.2^2 = 2.56 + 1.44 = 4.0 = 2.0^2$ gilt, verdoppelt sich die Frequenz ($\\lambda = 2.0$) mit jeder Oktave.
+2. **Entkoppelte Gitterausrichtung:** Die Drehung des Gitters um $36.87^\\circ$ zwischen aufeinanderfolgenden Oktaven verringert die Übereinstimmung hochfrequenter und niederfrequenter Strukturen.
+3. **Günstige Koordinatenumformung:** Die Matrix benötigt je Oktave vier Gleitkomma-Multiplikationen und zwei Additionen, aber keine Berechnung von Sinus oder Kosinus zur Laufzeit. Ihre Dezimalzahlen werden im binären Gleitkommaformat näherungsweise dargestellt.
+4. **Fortschreibung des Startwerts:** Um das Gradientenmuster zwischen den Oktaven zu verändern, wird der Startwert jeweils um eine feste ungerade Konstante erhöht:
    $$S_i = S + i \\cdot \\text{0x9E3779B9u}$$
-5. **Amplitude Normalization:** The octave sum is divided by the sum of amplitudes:
+5. **Normierung der Amplitude:** Die Summe der Oktaven wird durch die Summe ihrer Amplituden geteilt:
    $$N_{\\text{fBm}}(\\mathbf{x}) = \\frac{\\sum_{i=0}^{m-1} 0.5^i \\cdot \\text{Perlin}(\\mathbf{x}_i, S_i)}{\\sum_{i=0}^{m-1} 0.5^i}$$
-   This is a weighted average of octave samples. Its range follows the actual range of \`noise_perlin()\`; division by the amplitude sum alone does not prove an exact $[-1,1]$ bound.
+   Dies ist ein gewichtetes Mittel der Oktavenproben. Sein Wertebereich hängt vom tatsächlichen Wertebereich von \`noise_perlin()\` ab; allein die Division durch die Amplitudensumme beweist keine genaue Schranke von $[-1,1]$.
 
-#### Applications in other engine systems
+#### Anwendungen in anderen Systemen der Spiel-Engine
 
-1. **Continuous Climate Warping (\`src/level/biome/Biome.cpp\`):**
-   Regional climate tuples $\\mathbf{C} = (T, M, \\eta, W)$ sample warped coordinates:
+1. **Kontinuierliche Verzerrung des Klimas (\`src/level/biome/Biome.cpp\`):**
+   Regionale Klimatupel $\\mathbf{C} = (T, M, \\eta, W)$ werden an verzerrten Koordinaten abgetastet:
    $$w_x = s_x + 5.0 \\cdot \\text{fBm}_2(0.045 s_x + 11.3, 0.045 s_y - 4.1) + 0.9 \\cdot \\text{Perlin}(0.23 s_x + 3.1, 0.23 s_y - 8.7)$$
-2. **Dynamic Torch Flicker (\`src/level/LightField.cpp\`):**
-   Light radii oscillate via incommensurate frequencies ($3.1$ and $11.7$ rad/s), generating a warm non-repeating organic flicker:
+2. **Dynamisches Flackern von Fackeln (\`src/level/LightField.cpp\`):**
+   Lichtradien schwanken mit nicht kommensurablen Frequenzen ($3.1$ und $11.7$ rad/s); dadurch entsteht ein warmes, sich nicht genau wiederholendes Flackern:
    $$\\Delta L(t) = 1.0 + 0.10 \\cdot \\text{Perlin}(3.1 t, \\text{seed} \\cdot 0.37, 909) + 0.05 \\cdot \\text{Perlin}(11.7 t, \\text{seed} \\cdot 0.53, 910)$$
-3. **Parallax Cloud Strata (\`src/level/Sky.cpp\`):**
-   Cloud cover combines slow parallax wind displacement $(o_x, o_y)$ with high-frequency horizon turbulence to simulate atmospheric depth.
+3. **Wolkenschichten mit Parallaxe (\`src/level/Sky.cpp\`):**
+   Die Wolkendecke verbindet eine langsame, durch Parallaxe verschobene Windbewegung $(o_x, o_y)$ mit hochfrequenten Wirbeln am Horizont, um räumliche Tiefe in der Atmosphäre darzustellen.
 
-## Part IV. Time evolution and visible effects
+## Teil IV. Zeitliche Entwicklung und sichtbare Effekte
 
-### 10. Particle motion: identify the time unit first
+### 10. Partikelbewegung: zuerst die Zeiteinheit bestimmen
 
-\`Spark\` and \`Drift\` store horizontal velocities in pixels per second and multiply displacement by $\\Delta t$. \`Debris\` stores velocities and gravity in pixels per simulation tick. The same member names \`xa\`, \`ya\`, and \`za\` therefore have different units in these two families. Read the update equation before comparing their parameter values.
+\`Spark\` und \`Drift\` speichern waagerechte Geschwindigkeiten in Pixeln pro Sekunde und multiplizieren die Verschiebung mit $\\Delta t$. \`Debris\` speichert Geschwindigkeiten und Schwerkraft dagegen in Pixeln pro Simulationsschritt. Dieselben Membernamen \`xa\`, \`ya\` und \`za\` haben in diesen beiden Gruppen somit unterschiedliche Einheiten. Vor einem Vergleich ihrer Parameterwerte muss die jeweilige Aktualisierungsgleichung gelesen werden.
 
-#### Spark damping, worked through
+#### Dämpfung eines Funkens im Einzelnen
 
-For a spark, one update first multiplies velocity by $k=e^{-5\\Delta t}$, then moves by the damped velocity:
+Bei einem Funken multipliziert ein Aktualisierungsschritt zuerst die Geschwindigkeit mit $k=e^{-5\\Delta t}$ und verschiebt ihn dann mit der gedämpften Geschwindigkeit:
 
 $$\\mathbf v_{n+1}=e^{-5\\Delta t}\\mathbf v_n,\\qquad\\mathbf x_{n+1}=\\mathbf x_n+\\Delta t\\,\\mathbf v_{n+1}.$$
 
-At 60 Hz, $k=e^{-5/60}\\approx0.9200$. After 30 ticks, or half a second, the speed ratio is $k^{30}=e^{-2.5}\\approx0.0821$. The speed half-life is $\\ln 2/5\\approx0.139$ seconds. Because movement uses the **new**, damped velocity, repeated substitution yields
+Bei 60 Hz gilt $k=e^{-5/60}\\approx0.9200$. Nach 30 Schritten oder einer halben Sekunde beträgt das Geschwindigkeitsverhältnis $k^{30}=e^{-2.5}\\approx0.0821$. Die Halbwertszeit der Geschwindigkeit ist $\\ln 2/5\\approx0.139$ Sekunden. Da die Bewegung die **neue**, bereits gedämpfte Geschwindigkeit verwendet, ergibt wiederholtes Einsetzen
 
 $$\\mathbf x_n-\\mathbf x_0=\\Delta t\\sum_{j=1}^{n}k^j\\mathbf v_0=\\Delta t\\,\\mathbf v_0\\frac{k(1-k^n)}{1-k}.$$
 
-The infinite-time displacement factor at 60 Hz is about $0.192$ s times the initial speed, compared with $0.2$ s for the continuous differential equation $d\\mathbf v/dt=-5\\mathbf v$. This small difference comes from discrete update order, not from a different drag constant. The spark's finite lifetime shortens the actual path further. Damping alone does not imply gravity or wall collision; those behaviors belong to other effect types.
+Der Verschiebungsfaktor für unendlich lange Zeit beträgt bei 60 Hz ungefähr $0.192$ s mal Anfangsgeschwindigkeit, gegenüber $0.2$ s für die kontinuierliche Differentialgleichung $d\\mathbf v/dt=-5\\mathbf v$. Der kleine Unterschied entsteht durch die Reihenfolge der diskreten Aktualisierung und nicht durch eine andere Bremskonstante. Die endliche Lebensdauer des Funkens verkürzt den tatsächlichen Weg weiter. Aus der Dämpfung allein folgen weder Schwerkraft noch Kollisionen mit Wänden; diese Verhaltensweisen gehören zu anderen Effekten.
 
-\`Drift\` adds gravity after damping: $v_{y,n+1}=kv_{y,n}+g\\Delta t$, where $k=e^{-d\\Delta t}$ and $d$ is its drag coefficient. For constant $g$ and $d>0$, this discrete recurrence approaches $v_{y,\\infty}=g\\Delta t/(1-e^{-d\\Delta t})$. Sway is a separate oscillating term in horizontal displacement, while spin changes image rotation.
+\`Drift\` fügt nach der Dämpfung die Schwerkraft hinzu: $v_{y,n+1}=kv_{y,n}+g\\Delta t$, wobei $k=e^{-d\\Delta t}$ und $d$ der Bremskoeffizient ist. Bei konstantem $g$ und $d>0$ nähert sich diese diskrete Rekursion $v_{y,\\infty}=g\\Delta t/(1-e^{-d\\Delta t})$. Das Schwanken ist ein eigener schwingender Anteil der waagerechten Verschiebung; die Drehung verändert die Ausrichtung des Bildes.
 
-#### Debris uses tick units
+#### Trümmer verwenden Einheiten pro Simulationsschritt
 
-For airborne debris, the base update is $v_{x,n+1}=d v_{x,n}$, $v_{y,n+1}=d v_{y,n}$, and $v_{z,n+1}=v_{z,n}-g$, with no $\\Delta t$ factor. Near the floor, horizontal damping uses $0.85$ instead of $d$. The object attempts $\\lfloor\\|\\mathbf v\\|+1\\rfloor$ axis-separated substeps; blocked components reverse and shrink by the bounce factor. A default debris lifetime of 40–59 ticks is about 0.67–0.98 seconds at 60 Hz. These are discrete game effects, so converting $g$ to a per-second acceleration requires multiplying by $60^2$ and considering the exact update order. See the dedicated particle chapter for collision and subclass behavior.
+Für Trümmer in der Luft lautet die grundlegende Aktualisierung $v_{x,n+1}=d v_{x,n}$, $v_{y,n+1}=d v_{y,n}$ und $v_{z,n+1}=v_{z,n}-g$, ohne Faktor $\\Delta t$. In Bodennähe verwendet die waagerechte Dämpfung $0.85$ statt $d$. Das Objekt versucht $\\lfloor\\|\\mathbf v\\|+1\\rfloor$ Teilschritte mit getrennten Achsen; blockierte Geschwindigkeitsanteile kehren ihre Richtung um und werden um den Rückprallfaktor verkleinert. Die übliche Lebensdauer von 40–59 Schritten entspricht bei 60 Hz etwa 0.67–0.98 Sekunden. Da dies diskrete Spieleffekte sind, erfordert die Umrechnung von $g$ in eine Beschleunigung pro Sekunde die Multiplikation mit $60^2$ sowie die Berücksichtigung der genauen Aktualisierungsreihenfolge. Kollisionen und das Verhalten einzelner Unterklassen behandelt das eigene Partikelkapitel.
 
-### 11. Reactive ground as a discrete state machine
+### 11. Reaktiver Boden als diskreter Zustandsautomat
 
-\`Matter\` stores one state and a time counter per occupied tile. Its own clock advances every $0.1$ second, even though the game ticks every $1/60$ second. When a tile is set for duration $T$, the stored counter is approximately $T/0.1$ tenths. Expiry follows the \`EXPIRE\` table, while incoming Fire, Chill, Water, Charge, or Spore follows \`REACTIONS\` in \`LevelMatter.cpp\`.
+\`Matter\` speichert für jede belegte Kachel einen Zustand und einen Zeitzähler. Die eigene Uhr schreitet alle $0.1$ Sekunden fort, obwohl das Spiel alle $1/60$ Sekunden einen Schritt ausführt. Wird eine Kachel für die Dauer $T$ gesetzt, enthält der Zähler ungefähr $T/0.1$ Zehntelsekunden. Der Ablauf richtet sich nach der Tabelle \`EXPIRE\`; eintreffendes Feuer, Kälte, Wasser, Ladung oder Sporen folgen \`REACTIONS\` in \`LevelMatter.cpp\`.
 
-For example, a Wet tile chilled at $t=0$ becomes Frozen for 12 seconds. On expiry it becomes Wet for another 6 seconds; then it becomes None. That is a sequence of state transitions, $\\text{Wet}\\xrightarrow{\\text{Chill}}\\text{Frozen}\\xrightarrow{12s}\\text{Wet}\\xrightarrow{6s}\\text{None}$, not one continuous temperature equation.
+Eine nasse Kachel, die bei $t=0$ abgekühlt wird, gefriert beispielsweise für 12 Sekunden. Danach wird sie für weitere 6 Sekunden nass und nimmt schließlich den leeren Zustand an. Dies ist eine Folge von Zustandsübergängen, $\\text{Nass}\\xrightarrow{\\text{Kälte}}\\text{Gefroren}\\xrightarrow{12s}\\text{Nass}\\xrightarrow{6s}\\text{Leer}$, keine kontinuierliche Temperaturgleichung.
 
-Fire spreads every tenth matter step, approximately once per second. It tests four cardinal neighbors and requires both an empty stored state and a burnable prop. The scan queues changes and applies them afterward.
+Feuer breitet sich jeden zehnten Materieschritt aus, also ungefähr einmal pro Sekunde. Dabei prüft es die vier direkten Nachbarn und setzt sowohl einen leeren gespeicherten Zustand als auch ein brennbares Objekt voraus. Die Suche merkt Änderungen vor und wendet sie erst danach an.
 
-**Proposition: one spread pass cannot carry ordinary fire through two previously unlit tiles in a line.** Every source examined during the pass was already Burning when the scan began; newly scheduled changes become Burning only after the scan. Therefore the second unlit tile cannot use the first newly lit tile as a source until a later pass. Along an uninterrupted one-tile-wide fuel strip, the leading edge advances at most one tile, or 16 world pixels, per spread pass. The proof assumes this ordinary spread path; oil ignition is a separate immediate eight-neighbor burst and does not follow the bound. Expiry, missing fuel, and competing states may slow or stop the front.
+**Behauptung: Ein Ausbreitungsdurchlauf kann gewöhnliches Feuer nicht über zwei zuvor unbeleuchtete Kacheln in einer Reihe tragen.** Jede während des Durchlaufs untersuchte Quelle brannte bereits zu Beginn der Suche; neu vorgemerkte Änderungen werden erst danach brennend. Die zweite unbeleuchtete Kachel kann die erste neu entzündete Kachel deshalb erst in einem späteren Durchlauf als Quelle nutzen. Entlang eines durchgehenden, eine Kachel breiten Streifens aus Brennstoff rückt die Front pro Durchlauf höchstens um eine Kachel oder 16 Weltpixel vor. Der Beweis gilt für diese gewöhnliche Ausbreitung; die Entzündung von Öl ist ein eigener, sofortiger Ausbruch auf acht Nachbarn und folgt dieser Schranke nicht. Ablaufende Zustände, fehlender Brennstoff und konkurrierende Zustände können die Front verlangsamen oder anhalten.
 
-### 12. Light-cast shadow geometry
+### 12. Geometrie der von Licht erzeugten Schatten
 
-For each registered light caster within its reach, \`LightField::cast()\` measures planar distance $d$ from caster to object. It skips $d<6$ and $d>R$, where $R$ is caster reach. For eligible objects it computes
+Für jede registrierte Lichtquelle in Reichweite misst \`LightField::cast()\` den ebenen Abstand $d$ zwischen Lichtquelle und Objekt. Abstände $d<6$ und $d>R$ werden übersprungen, wobei $R$ die Reichweite der Lichtquelle ist. Für geeignete Objekte berechnet die Funktion
 
 $$f=1-\\frac{d}{R},\\qquad\\ell=H\\operatorname{clamp}\\left(\\frac{d}{48},0.35,2.2\\right),\\qquad a=\\operatorname{clamp}(1.5Sf,0,1),$$
 
-where $H$ is object height, $S$ is light strength, $\\ell$ controls shadow length, and $a$ is shadow alpha. With $d=48$, $R=120$, and $S=0.5$, the falloff is $0.6$, length is $H$, and alpha is $0.45$. The angle is $\\operatorname{atan2}(y-y_c,x-x_c)$, pointing away from the caster.
+wobei $H$ die Objekthöhe und $S$ die Lichtstärke bezeichnet. $\\ell$ bestimmt die Schattenlänge und $a$ den Alphawert des Schattens. Bei $d=48$, $R=120$ und $S=0.5$ beträgt der Abfall $0.6$, die Länge $H$ und der Alphawert $0.45$. Der Winkel ist $\\operatorname{atan2}(y-y_c,x-x_c)$ und weist von der Lichtquelle weg.
 
-The ratios $d/R$ and $d/48$ are dimensionless when both distances are in pixels. Consequently $f$ and $a$ are dimensionless, while $\\ell$ retains the length unit of $H$. This unit check catches a common mistake: supplying $d$ in tiles to a formula whose constants 6, 48, and $R$ are pixel distances would change both eligibility and shadow length by a factor tied to tile size. This is a visual contact-shadow model with capped length and opacity, not ray-traced occlusion or an inverse-square light law.
+Die Verhältnisse $d/R$ und $d/48$ sind dimensionslos, wenn beide Entfernungen in Pixeln angegeben sind. Daher sind $f$ und $a$ dimensionslos, während $\\ell$ die Längeneinheit von $H$ behält. Diese Einheitenprüfung deckt einen häufigen Fehler auf: Würde $d$ in Kacheln an eine Formel übergeben, deren Konstanten 6, 48 und $R$ Pixelabstände sind, änderten sich sowohl die Auswahl der Objekte als auch die Schattenlänge um einen von der Kachelgröße abhängigen Faktor. Dies ist ein Modell für sichtbare Kontaktschatten mit begrenzter Länge und Deckkraft, keine Strahlverfolgung und kein Abstandsquadratgesetz für Licht.
 
-### Discussion: what the models have in common
+### Diskussion: Gemeinsamkeiten der Modelle
 
-Across the four parts, the same design move appears in different forms. The engine maps a large space of possibilities onto a smaller representation, then arranges the update so a useful property survives that mapping. Capping target lead bounds the influence of distant motion. Ordered rarity checks turn three conditional chances into mutually exclusive outcomes. Prefix sums turn cell counts into nonoverlapping memory ranges. Stable radix passes preserve draw order where the selected key bits tie. Ground-blend normalization preserves total weight after reducing many candidate biomes to three. Deferred fire writes limit how far one ordinary spread pass can propagate. These are distinct algorithms, but each can be evaluated by asking what information is discarded and what invariant remains.
+In allen vier Teilen erscheint derselbe Entwurfsgedanke in unterschiedlicher Form. Die Spiel-Engine bildet einen großen Möglichkeitsraum auf eine kleinere Darstellung ab und gestaltet die Aktualisierung so, dass eine nützliche Eigenschaft erhalten bleibt. Die zeitliche Begrenzung der Zielvorhersage begrenzt den Einfluss entfernter Bewegung. Geordnete Seltenheitsprüfungen machen aus drei bedingten Chancen einander ausschließende Ergebnisse. Präfixsummen machen aus Zellanzahlen nicht überlappende Speicherbereiche. Stabile Sortierdurchläufe bewahren die Zeichenreihenfolge, wenn die berücksichtigten Schlüsselbits gleich sind. Die Normierung der Bodenmischung erhält das Gesamtgewicht, nachdem viele mögliche Biome auf drei reduziert wurden. Verzögerte Änderungen des Feuerzustands begrenzen die Ausbreitung in einem gewöhnlichen Durchlauf. Diese Algorithmen unterscheiden sich, lassen sich aber alle danach beurteilen, welche Information sie verwerfen und welche Invariante erhalten bleibt.
 
-The proofs also reveal a recurring distinction between **local correctness** and **global behavior**. The prefix-sum partition says where candidates are stored; it does not say that every candidate is within a query circle. The blend proof says how weighted colors compose; it does not guarantee that site classification is continuous across every border. A shortest path in edge count need not be shortest in pixels. The resistance square describes one isolated damage-over-time application, not reapplication, immunity, or death. Treating those limits as part of the model prevents a locally correct derivation from becoming an overbroad claim.
+Die Beweise zeigen außerdem einen wiederkehrenden Unterschied zwischen **lokaler Korrektheit** und **Gesamtverhalten**. Die Zerlegung durch Präfixsummen beschreibt, wo Kandidaten gespeichert sind, aber nicht, ob jeder Kandidat im Suchkreis liegt. Der Beweis zur Mischung erklärt, wie gewichtete Farben zusammengesetzt werden, garantiert jedoch keine stetige Klassifikation an jeder Grenze. Ein Weg mit der geringsten Kantenzahl muss in Pixeln nicht der kürzeste sein. Das Quadrat beim Widerstand beschreibt eine einzelne Anwendung von Schaden über Zeit, nicht erneute Anwendung, Immunität oder Tod. Werden solche Grenzen als Teil des Modells betrachtet, wird aus einer lokal korrekten Herleitung keine zu weitgehende Behauptung.
 
-### Threats to validity
+### Grenzen der Aussagekraft
 
-Three limits govern the conclusions. **Source evolution:** these equations describe the named functions at the present revision; a new coast rule, status cap, or sort key can invalidate a formula without changing its title. **Numerical realization:** float rounding, integer truncation, hash residues, and strict comparisons can differ at thresholds from ideal real-number algebra. **System composition:** rendering, game rules, and later item-generation steps may modify the visible or final outcome after the mathematical step studied here. The historical geography survey is observational evidence, not a proof of future biome frequencies. None of the complexity bounds alone establishes a measured frame time on a particular machine.
+Drei Grenzen bestimmen die Schlussfolgerungen. **Entwicklung des Quellcodes:** Die Gleichungen beschreiben die genannten Funktionen in der vorliegenden Fassung; eine neue Küstenregel, Zustandsobergrenze oder ein anderer Sortierschlüssel kann eine Formel ungültig machen, ohne dass sich ihr Titel ändert. **Numerische Umsetzung:** Gleitkomma-Rundungen, das Abschneiden von Ganzzahlen, Hash-Reste und strenge Vergleiche können an Schwellen von der idealen Rechnung mit reellen Zahlen abweichen. **Zusammenspiel der Systeme:** Darstellung, Spielregeln und spätere Schritte der Gegenstandserzeugung können das sichtbare oder endgültige Ergebnis nach dem hier untersuchten mathematischen Schritt verändern. Die frühere geografische Untersuchung liefert Beobachtungen, aber keinen Beweis für künftige Biom-Häufigkeiten. Aus den Aufwandsgrenzen allein folgt keine gemessene Laufzeit eines Einzelbildes auf einem bestimmten Rechner.
 
-### Reproduction and conclusion
+### Nachvollziehen und Schlussfolgerung
 
-A contributor can reproduce the small results without running the full game: use $P=40$, $T=4$, and $r=0.5$ to obtain $D_r=40$; prefix-sum $[2,0,3,1]$ to obtain $[0,2,2,5,6]$; evaluate $e^{-5(30/60)}$ to obtain the half-second spark speed ratio; and check that the rarity outcome expressions sum to one. Then compare each calculation with the cited function and run the relevant headless tests after changing its code. For terrain or rendering changes, inspect representative boundaries and equal-key cases in addition to the numerical check.
+Die kleinen Ergebnisse lassen sich ohne Start des vollständigen Spiels nachvollziehen: Mit $P=40$, $T=4$ und $r=0.5$ ergibt sich $D_r=40$; aus $[2,0,3,1]$ entsteht die Präfixsumme $[0,2,2,5,6]$; $e^{-5(30/60)}$ liefert das Geschwindigkeitsverhältnis eines Funkens nach einer halben Sekunde; und die Ausdrücke für die Seltenheitsergebnisse summieren sich zu eins. Danach kann jede Rechnung mit der genannten Funktion verglichen und nach einer Codeänderung der passende Test ohne grafische Oberfläche ausgeführt werden. Bei Änderungen an Gelände oder Darstellung sollten zusätzlich zur Zahlenprüfung typische Grenzen und Fälle mit gleichen Schlüsseln betrachtet werden.
 
-The study's answer to its research question is therefore conditional: a simplified model remains useful when its representation is explicit, its preserved property is testable, and its domain is stated. Before changing a constant, identify its units, derive one update or decision in the code's actual order, and test the boundary where a cap, tie, or alternate branch takes over. A formula becomes an engineering tool only when these conditions accompany it.
+Die Antwort der Untersuchung auf ihre Forschungsfrage gilt somit unter Bedingungen: Ein vereinfachtes Modell bleibt nützlich, wenn seine Darstellung klar benannt, die erhaltene Eigenschaft prüfbar und sein Gültigkeitsbereich angegeben ist. Vor der Änderung einer Konstante sollten ihre Einheiten bestimmt, eine Aktualisierung oder Entscheidung in der tatsächlichen Reihenfolge des Codes hergeleitet und die Grenze geprüft werden, an der eine Obergrenze, ein Gleichstand oder ein anderer Zweig greift. Erst zusammen mit diesen Bedingungen wird eine Formel zu einem Werkzeug für die Entwicklung.
 `,
     interactiveComponent: "status-resistance",
     mermaidCharts: [
       {
-        title: "From counts to spatial queries",
+        title: "Von Zellanzahlen zu räumlichen Abfragen",
         chart: `
 flowchart LR
-    A[Count enemies per cell] --> B[Prefix sums]
-    B --> C[Scatter into contiguous ranges]
-    C --> D[Gather nearby cell candidates]
-    D --> E[Caller applies exact checks]
+    A[Gegner je Zelle zählen] --> B[Präfixsummen bilden]
+    B --> C[Auf zusammenhängende Bereiche verteilen]
+    C --> D[Kandidaten aus nahen Zellen sammeln]
+    D --> E[Aufrufer prüft die Kandidaten genau]
 `,
       },
     ],
