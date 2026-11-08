@@ -4609,9 +4609,9 @@ flowchart TD
   },
   {
     id: "engine-mathematics",
-    title: "32. The Mathematics of Mellangan: Geometry, Probability, Sorting, Navigation & Biomes",
+    title: "32. The Mathematics of Mellangan: Worked Models & Invariants",
     category: "core",
-    summary: "Worked derivations of target geometry, resistance, conditional loot odds, spatial indexing, radix sorting, bastion routing, 4D climate manifolds, and barycentric ground layering.",
+    summary: "Source-checked equations and worked examples for combat, loot, spatial indexing, rendering, terrain, motion, and discrete ground states.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4630,11 +4630,15 @@ flowchart TD
       "src/level/LightField.cpp",
       "src/level/Sky.cpp",
       "src/level/world/Terrain.cpp",
+      "src/particle/Spark.cpp",
+      "src/particle/Drift.cpp",
+      "src/particle/debris/Debris.cpp",
+      "src/level/Matter.cpp",
     ],
     content: `
 ### Mathematics in the engine
 
-The useful question is not just what a formula calculates, but what it assumes. These examples connect equations to the code paths that use them, including the cases where a neat model stops matching the implementation.
+Each worked model follows the same reading order: **inputs and units → equation → numerical example → implementation limit**. Positions in the world are measured in pixels unless labeled as tile coordinates; simulation runs at $\\Delta t=1/60$ second per tick. A formula here describes a specific code path, not a universal rule for every effect in the game.
 
 ### 1. Target prediction and the sight test
 
@@ -4702,7 +4706,7 @@ Cell $i$ occupies the half-open interval $[\\text{start}_i,\\text{start}_{i+1})$
 
 The two zeros compare equal numerically but get adjacent, distinct keys. NaNs do not have a normal numerical ordering, so the transformation should not be interpreted as a mathematical ordering of NaN values.
 
-The packed key contains layer in bits 56–63, ordered depth in bits 24–55, and the draw index in the low 24 bits. Three stable 12-bit counting passes at shifts 24, 36 and 48 sort the layer and depth. They do **not** sort the low index bits; stability preserves insertion order for equal layer and depth. Each pass scans the keys and 4096 buckets, giving $O(3(N+4096))$ work. The packed representation assumes the draw index fits in 24 bits.
+The packed key places layer at bit 56 and above, ordered depth in bits 24–55, and the draw index in the low 24 bits. Three stable 12-bit counting passes at shifts 24, 36, and 48 sort bits 24–59. Thus the sort covers the depth and only the low four layer bits; current layer values fit there. They do **not** sort the low index bits, so stability preserves insertion order for equal layer and depth. Each pass scans the keys and 4096 buckets, giving $O(3(N+4096))$ work. The packed representation also assumes the draw index fits in 24 bits.
 
 ### 6. A gate field as a graph problem
 
@@ -4736,25 +4740,25 @@ At the warped coordinate $(w_x, w_y)$, four continuous noise fields define the c
 
 #### Voronoi Site Quantization (\`siteOf\`)
 
-Evaluating climate directly per tile would produce fragmented micro-biomes. To produce broad geographic continents, \`siteOf(x, y)\` quantizes space into jittered Voronoi cells of size $\\text{BIOME\\_CELL} = 384\\text{ px}$. Space is warped into $\\mathbf{f} = (f_x, f_y)$:
+Evaluating climate directly per tile would produce fragmented micro-biomes. \`siteOf(x, y)\` groups tile coordinates into jittered Voronoi cells of size $\\text{BIOME\\_CELL}=112$ tiles. Space is first warped into $\\mathbf{f}=(f_x,f_y)$:
 
 $f_x = x + 30 \\cdot \\text{fBm}_2(0.018 x + 3.7, \\; 0.018 y - 1.3, \\; 611) + 3 \\cdot \\text{Perlin}(0.09 x, \\; 0.09 y + 5.1, \\; 612)$
 $f_y = y + 30 \\cdot \\text{fBm}_2(0.018 x - 8.1, \\; 0.018 y + 6.4, \\; 613) + 3 \\cdot \\text{Perlin}(0.09 x + 2.3, \\; 0.09 y, \\; 614)$
 
-For cell index $(c_x, c_y) = (\\lfloor f_x / 384 \\rfloor, \\; \\lfloor f_y / 384 \\rfloor)$, the generator checks the 9 neighbor cells $(i, j) \\in \\{c_x - 1, c_x, c_x + 1\\} \\times \\{c_y - 1, c_y, c_y + 1\\}$. Each cell contains a pseudo-random site:
+For cell index $(c_x,c_y)=(\\lfloor f_x/112\\rfloor,\\lfloor f_y/112\\rfloor)$, the generator checks the nine neighboring cells $(i,j)\\in\\{c_x-1,c_x,c_x+1\\}\\times\\{c_y-1,c_y,c_y+1\\}$. Each cell contains a pseudo-random site:
 
-$P_{i,j} = \\left(384 \\cdot \\left(i + 0.15 + 0.70 \\frac{h_x}{255}\\right), \\quad 384 \\cdot \\left(j + 0.15 + 0.70 \\frac{h_y}{255}\\right)\\right)$
+$P_{i,j}=112\\left(i+0.15+0.70\\frac{h_x}{255},\\quad j+0.15+0.70\\frac{h_y}{255}\\right)$
 
 where $h = \\text{hash2}(73 i + \\text{salt}, \\; 151 j - \\text{salt})$. The coordinate is assigned to the nearest site $(s_x, s_y) = \\arg\\min_P \\|\\mathbf{f} - P\\|^2$, creating organic Voronoi borders.
 
 #### Radial Origin Leash (Cubic Hermite Attenuation)
 
-To guarantee a safe starting sanctuary near the origin, radial distance $d = \\sqrt{s_x^2 + s_y^2}$ attenuates eerie and wild attributes via cubic smoothstep:
+To bias starting terrain toward calmer biomes, the code measures the distance $d=\\sqrt{s_x^2+s_y^2}$ of the **selected Voronoi site's tile coordinates** from the world origin. These site coordinates are not the earlier climate-scale coordinates. It attenuates eerie and wild attributes via cubic smoothstep:
 
 $u = \\text{clamp}\\left(\\frac{d - 260}{400}, \\; 0, \\; 1\\right), \\qquad \\beta(d) = u^2 (3 - 2u)$
 $E' = E \\cdot \\beta(d), \\qquad W' = -1 + (W + 1) \\cdot \\beta(d)$
 
-For $d \\le 260\\text{ px}$, $\\beta(d) = 0$, guaranteeing peaceful temperate biomes (Meadow, Forest). Beyond $d \\ge 660\\text{ px}$, $\\beta(d) = 1$, allowing full eldritch corruption and expansion biomes.
+For $d \\le 260$ tiles, $\\beta(d)=0$, setting eerie to zero and wildness to $-1$. This excludes the eerie and expansion branches of the classifier there; the remaining temperature and moisture rules can still choose several ordinary biomes. At $d \\ge660$ tiles, the original climate values are used.
 
 #### The 26-Biome Hyperplane Classifier (\`biomeOf\`)
 
@@ -4771,7 +4775,7 @@ which eliminates single-tile isolated outliers and stabilizes boundary contours.
 
 #### Excourse: The 100,000-Tile Geography Survey (Scaling & Boundary Continuity)
 
-In earlier revisions, raw unscaled climate sampling caused rapid, jarring biome shifts every 30 to 40 tiles. Scaling coordinates by $\\text{CLIMATE\\_SCALE} = 2.5$ widens climate regions by $250\\%$, expanding contiguous biome mass from approximately $400\\text{ tiles}$ across to over $1,000\\text{ tiles}$. Across empirical 4,096-tile transect surveys, adjacent-tile biome boundary crossings fell by $57.36\\%$ (from 82,312 legacy crossings down to 35,100), ensuring that biomes read as vast geographic expanses rather than patchwork noise.
+The $2.5$ coordinate divisor lowers the frequency of climate noise: features in those fields span about $2.5$ times as many input tiles before the separate Voronoi selection and majority filter are applied. It does not by itself specify the final size of every biome. The observed boundary counts from an earlier geography survey are historical measurements, not a mathematical guarantee for every seed or later generator revision.
 
 ### 8. Biome layering: barycentric smoothstep ground blending and subterranean stratigraphy
 
@@ -4790,7 +4794,7 @@ The sum of weights is $(1 + 2 + 3 + 2 + 1)^2 = 81$. \`compactBlend()\` selects t
 
 $\\mathbf{w} = (w_1, w_2, w_3), \\qquad \\sum_{i=1}^{k} w_i = 1.0 \\quad (k \\le 3)$
 
-##### 2. Bicubic Smoothstep Interpolation
+##### 2. Smoothed Bilinear Interpolation
 Sub-tile fractions $f_x = (x - x_0)/2$ and $f_y = (y - y_0)/2$ are warped via cubic Hermite curves:
 
 $S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
@@ -4803,11 +4807,11 @@ The blend weights from the four corners of the $2 \\times 2$ cell are bilinearly
 $\\alpha_0 = 1.0, \\qquad \\alpha_i = \\frac{w_i}{\\sum_{j=0}^{i} w_j} \\quad (i \\ge 1)$
 
 **Theorem (Weight Preservation in Multi-Pass Blending):**
-When layer $i$ is drawn with opacity $\\alpha_i$ over an accumulator with cumulative opacity $C_{i-1} = \\sum_{j=0}^{i-1} w_j$, the visual fraction contributed by layer $i$ equals its barycentric weight $w_i$.
+After drawing through layer $i-1$, the displayed color is the weighted mean of those layers, with total weight $C_{i-1} = \\sum_{j=0}^{i-1} w_j$. Drawing layer $i$ with opacity $\\alpha_i=w_i/(C_{i-1}+w_i)$ produces the weighted mean through layer $i$.
 
-*Proof:* In standard alpha compositing, the incremental visual contribution of layer $i$ is $\\Delta C_i = \\alpha_i (1 - C_{i-1})$. In Mellangan's normalization recurrence:
-$w_i = \\alpha_i \\sum_{j=0}^{i} w_j$
-which matches the recurrence definition $\\alpha_i = w_i / \\sum_{j=0}^{i} w_j$ identically. Thus, visual light transmission matches the mathematical blend weights with zero color drift.
+*Proof:* If the previous color is $F_{i-1}=\\sum_{j<i}w_j c_j/C_{i-1}$, ordinary source-over compositing gives
+$$F_i=(1-\\alpha_i)F_{i-1}+\\alpha_i c_i=\\frac{C_{i-1}}{C_{i-1}+w_i}F_{i-1}+\\frac{w_i}{C_{i-1}+w_i}c_i=\\frac{\\sum_{j\\le i}w_jc_j}{\\sum_{j\\le i}w_j}.$$
+The base layer is drawn opaque, so the induction starts with $F_0=c_0$. With normalized final weights, $\\sum_j w_j=1$ and the final color is $\\sum_jw_jc_j$. This describes alpha weights before tinting, texture details, and later lighting.
 
 #### Vertical Subterranean Stratigraphy (\`Under.cpp\`)
 
@@ -4818,12 +4822,17 @@ $\\text{Layer} \\in \\{\\text{Surface}, \\; \\text{Caves}, \\; \\text{Deep}\\}$
 Switching layers updates the active layer pointer and increments \`noise_epoch\`, invalidating the tile memoization table (\`memos\`).
 
 ##### 1. Cave Cell Stochastic Classification ($64 \\times 64$ Tile Blocks)
-Subterranean space is discretized into $64 \\times 64$ tile blocks (\`CAVE_CELL = 64\`). The 32-bit cell hash $h = \\text{hash2}(c_x \\times 37 + \\text{seed}, \\; c_y \\times 59 - \\text{seed})$ determines cavern topology via probability intervals:
-* **Solid Rock (40%):** $h \\pmod{100} < 40$. Completely impassable granite bedrock.
-* **Pocket Cavern (33%):** $40 \\le h \\pmod{100} < 73$. An isolated cavern chamber with a single cave mouth.
-* **Through Cavern (15%):** $73 \\le h \\pmod{100} < 88$. A traversable subterranean corridor linking at least 2 distant mouths.
-* **Warren (7.2%):** $88 \\le h \\pmod{100} < 95.2$. A network of 3 to 4 irregular interconnected chambers.
-* **Descent Shaft (4.8%):** $95.2 \\le h \\pmod{100} < 100$. A deep pit connecting the Caves layer to the subterranean Deep dungeon.
+Subterranean space is divided into $64 \\times 64$ tile cells (\`CAVE_CELL = 64\`). The cell hash begins with $h=\\text{hash2}(73c_x+11,151c_y-7)$. \`kindOf()\` reserves residues $h\\bmod100<40$ for Solid, then rescales the other 60 residues with integer division, $r=\\lfloor100((h\\bmod100)-40)/60\\rfloor$. Its initial classification is:
+
+| Kind | Original residues | Count out of 100 |
+|:---|:---|---:|
+| Solid | 0–39 | 40 |
+| Pocket | 40–72 | 33 |
+| Through | 73–87 | 15 |
+| Warren | 88–94 | 7 |
+| Descent | 95–99 | 5 |
+
+These are counts of hash residues, not guaranteed observed frequencies in a finite map. Later generation can reject a cell or change a Through cell with too few mouths into a Pocket, so the finished world need not keep these exact proportions.
 
 ##### 2. Rotated Elliptic Chamber Carving
 Each chamber $r$ is carved as an ellipse rotated by angle $\\theta$, with center $(m_x, m_y)$ and semi-axes $(r_a, r_b)$:
@@ -4839,7 +4848,7 @@ Subterranean caverns maintain thematic continuity with the surface. In \`under::
 Surfaced up;
 return world::biomeAt(x, y);
 \`\`\`
-The temporary RAII guard \`Surfaced\` temporarily switches \`active\` to \`Layer::Surface\`, queries the authoritative surface biome above, and restores \`active = Layer::Caves\` on destruction. Caves beneath frozen tundra inherit frost crystals, ice sheets, and glacial pools, while caverns beneath volcanic ashlands inherit obsidian rock and magma fissures.
+The temporary RAII guard \`Surfaced\` switches \`active\` to \`Layer::Surface\`, queries the authoritative surface biome above, and restores whichever layer was active on destruction. Cave biome selection then maps that surface biome through \`caveBelow()\`; the deep layer chooses its own biome separately.
 
 #### Excourse: The Three Stratigraphic Horizons (Surface, Caves, Deep)
 
@@ -4848,7 +4857,7 @@ The vertical coupling between surface climate and subterranean cave generation e
 
 ### 9. Procedural noise: cache-free analytical hash and rotated spectral fBm
 
-Continuous spatial variation across Mellangan (\`src/level/Noise.h\`, \`src/level/Noise.c\`) is evaluated without storing permutation tables in memory. Classical Perlin noise relies on a 256 or 512-entry lookup array $P[256]$, which produces L1 cache evictions, wraps periodically, and requires integer modulo operations. Mellangan replaces table lookups with a branch-free, register-resident integer hash, a 16-element gradient circle, and a Pythagorean rotational octave transformation.
+Continuous spatial variation in \`src/level/Noise.c\` uses a coordinate hash instead of a permutation table, a fixed 16-entry gradient table, quintic interpolation, and rotated fractal octaves. The hash depends on integer lattice coordinates, a caller-supplied seed, and the world salt; changing the salt changes the generated pattern.
 
 #### Cache-Free Analytical Hash (\`noise_hash\`)
 
@@ -4865,7 +4874,7 @@ where:
 - $K_\\phi = \\text{0x9E3779B1} = 2654435761$ (derived from the golden ratio $2^{32} \\cdot (\\sqrt{5} - 1)/2$)
 - $M = \\text{0x5BD1E995} = 1540483477$ (MurmurHash2 mixing constant)
 
-Because this computation takes only 8 arithmetic and bitwise instructions, it executes entirely inside CPU registers in fewer than 4 clock cycles, completely bypassing memory buses.
+This path needs no permutation-table lookup. Exact instruction count, cache behavior, and cycle cost depend on the compiler and target CPU, so the source establishes the algorithm rather than a universal timing claim.
 
 #### The 16-Gon Equiangular Gradient Ring
 
@@ -4877,11 +4886,9 @@ The gradient index is extracted from the most significant 4 bits of the avalanch
 
 $$k = h_{\\text{final}} \\gg 28$$
 
-The top bits of a multiplicative hash exhibit optimal entropy and uniformity. The $\\sqrt{2}$ scale factor guarantees that for the maximum corner displacement vector $(\\pm 0.5, \\pm 0.5)$, the dot product spans the full normalized interval $[-1.0, 1.0]$:
+The table's entries have length approximately $\\sqrt{2}$, apart from decimal rounding. At a corner offset $\\mathbf d$, the dot product is $\\mathbf g_k\\cdot\\mathbf d$ and satisfies $|\\mathbf g_k\\cdot\\mathbf d|\\le\\sqrt{2}\\|\\mathbf d\\|$ by Cauchy–Schwarz. This bound explains the chosen scale; it does not prove that every sampled noise value attains either endpoint of $[-1,1]$.
 
-$$\\max_{\\mathbf{d} \\in \\{\\pm 0.5\\}^2} |\\mathbf{g}_k \\cdot \\mathbf{d}| = \\sqrt{2} \\cdot \\left(\\frac{1}{2} + 0\\right) = \\frac{\\sqrt{2}}{2} \\approx 0.707 \\implies \\sqrt{2} \\cdot 0.707 \\approx 1.0$$
-
-#### Branch-Free Flooring and Quintic $C^2$ Fade
+#### Negative-Coordinate Flooring and Quintic $C^2$ Fade
 
 To prevent coordinate truncation bugs for negative coordinates (where standard C casting \`(int32_t)-0.5f\` rounds towards zero to \`0\` instead of \`-1\`), Mellangan evaluates floor coordinates without branch instructions:
 
@@ -4897,7 +4904,7 @@ The first and second derivatives of the quintic fade curve satisfy:
 
 $$f'(0) = f'(1) = 0, \\qquad f''(0) = f''(1) = 0$$
 
-Both the first derivative (surface tangent) and second derivative (surface curvature) vanish at integer cell boundaries. This guarantees $C^2$ continuity everywhere across the endless plane, preventing optical creasing in dynamic lighting and normal calculations.
+Both the first and second derivatives of the fade curve vanish at integer boundaries. Combined with shared corner gradients, this makes the interpolated value and its first two derivatives meet smoothly at cell edges in the ideal mathematical construction; floating-point evaluation remains approximate.
 
 #### Rotated Spectral Fractal Brownian Motion (\`noise_fbm\`)
 
@@ -4912,12 +4919,12 @@ $$\\begin{pmatrix} 1.6 & -1.2 \\\\ 1.2 & 1.6 \\end{pmatrix} = 2.0 \\begin{pmatri
 Key mathematical properties:
 1. **Exact Lacunarity (Frequency Doubling):** Because $1.6^2 + 1.2^2 = 2.56 + 1.44 = 4.0 = 2.0^2$, the spectral frequency doubles ($\\lambda = 2.0$) at every octave.
 2. **De-correlated Lattice Alignment:** Rotating the grid by $36.87^\\circ$ between successive octaves decorrelates high-frequency features from low-frequency features.
-3. **Integer Arithmetic Efficiency:** The matrix entries are exact decimal fractions ($8/5$ and $6/5$), requiring only 4 multiplications and 2 additions with zero calls to transcendental sine or cosine functions.
-4. **Golden Ratio Seed Progression:** To ensure statistical independence between octaves, the seed increments by the golden ratio integer constant:
+3. **Cheap Coordinate Transform:** The matrix uses four floating-point multiplications and two additions per octave, with no runtime sine or cosine call. Its decimal literals are represented approximately in binary floating point.
+4. **Octave Seed Progression:** To vary the gradient pattern between octaves, the seed increments by a fixed odd constant:
    $$S_i = S + i \\cdot \\text{0x9E3779B9u}$$
-5. **Exact Strict Normalization:** The octave sum is normalized by the sum of amplitudes:
+5. **Amplitude Normalization:** The octave sum is divided by the sum of amplitudes:
    $$N_{\\text{fBm}}(\\mathbf{x}) = \\frac{\\sum_{i=0}^{m-1} 0.5^i \\cdot \\text{Perlin}(\\mathbf{x}_i, S_i)}{\\sum_{i=0}^{m-1} 0.5^i}$$
-   This guarantees that the composite output strictly stays within the range $[-1.0, 1.0]$ regardless of octave count $m$.
+   This is a weighted average of octave samples. Its range follows the actual range of \`noise_perlin()\`; division by the amplitude sum alone does not prove an exact $[-1,1]$ bound.
 
 #### Excourse: Multi-System Applications
 
@@ -4929,6 +4936,40 @@ Key mathematical properties:
    $$\\Delta L(t) = 1.0 + 0.10 \\cdot \\text{Perlin}(3.1 t, \\text{seed} \\cdot 0.37, 909) + 0.05 \\cdot \\text{Perlin}(11.7 t, \\text{seed} \\cdot 0.53, 910)$$
 3. **Parallax Cloud Strata (\`src/level/Sky.cpp\`):**
    Cloud cover combines slow parallax wind displacement $(o_x, o_y)$ with high-frequency horizon turbulence to simulate atmospheric depth.
+
+### 10. Particle motion: identify the time unit first
+
+\`Spark\` and \`Drift\` store horizontal velocities in pixels per second and multiply displacement by $\\Delta t$. \`Debris\` stores velocities and gravity in pixels per simulation tick. The same member names \`xa\`, \`ya\`, and \`za\` therefore have different units in these two families. Read the update equation before comparing their parameter values.
+
+#### Spark damping, worked through
+
+For a spark, one update first multiplies velocity by $k=e^{-5\\Delta t}$, then moves by the damped velocity:
+
+$$\\mathbf v_{n+1}=e^{-5\\Delta t}\\mathbf v_n,\\qquad\\mathbf x_{n+1}=\\mathbf x_n+\\Delta t\\,\\mathbf v_{n+1}.$$
+
+At 60 Hz, $k=e^{-5/60}\\approx0.9200$. After 30 ticks, or half a second, the speed ratio is $k^{30}=e^{-2.5}\\approx0.0821$. The speed half-life is $\\ln 2/5\\approx0.139$ seconds. This is velocity damping; it does not imply a spark has gravity or collides with walls. Its visible lifetime is independently chosen at spawn.
+
+\`Drift\` adds gravity after damping: $v_{y,n+1}=kv_{y,n}+g\\Delta t$, where $k=e^{-d\\Delta t}$ and $d$ is its drag coefficient. For constant $g$ and $d>0$, this discrete recurrence approaches $v_{y,\\infty}=g\\Delta t/(1-e^{-d\\Delta t})$. Sway is a separate oscillating term in horizontal displacement, while spin changes image rotation.
+
+#### Debris uses tick units
+
+For airborne debris, the base update is $v_{x,n+1}=d v_{x,n}$, $v_{y,n+1}=d v_{y,n}$, and $v_{z,n+1}=v_{z,n}-g$, with no $\\Delta t$ factor. Near the floor, horizontal damping uses $0.85$ instead of $d$. The object attempts $\\lfloor\\|\\mathbf v\\|+1\\rfloor$ axis-separated substeps; blocked components reverse and shrink by the bounce factor. A default debris lifetime of 40–59 ticks is about 0.67–0.98 seconds at 60 Hz. These are discrete game effects, so converting $g$ to a per-second acceleration requires multiplying by $60^2$ and considering the exact update order. See the dedicated particle chapter for collision and subclass behavior.
+
+### 11. Reactive ground as a discrete state machine
+
+\`Matter\` stores one state and a time counter per occupied tile. Its own clock advances every $0.1$ second, even though the game ticks every $1/60$ second. When a tile is set for duration $T$, the stored counter is approximately $T/0.1$ tenths. Expiry follows the \`EXPIRE\` table, while incoming Fire, Chill, Water, Charge, or Spore follows \`REACTIONS\` in \`LevelMatter.cpp\`.
+
+For example, a Wet tile chilled at $t=0$ becomes Frozen for 12 seconds. On expiry it becomes Wet for another 6 seconds; then it becomes None. That is a sequence of state transitions, $\\text{Wet}\\xrightarrow{\\text{Chill}}\\text{Frozen}\\xrightarrow{12s}\\text{Wet}\\xrightarrow{6s}\\text{None}$, not one continuous temperature equation.
+
+Fire spreads every tenth matter step, approximately once per second. It tests four cardinal neighbors and requires both an empty stored state and a burnable prop. The scan queues changes and applies them afterward. Consequently a newly lit tile cannot light the next tile in the same spread pass. Along an uninterrupted one-tile-wide fuel strip, the leading edge advances at most one tile, or 16 world pixels, per spread pass. Oil ignition is a separate immediate eight-neighbor burst and does not follow this bound.
+
+### 12. Light-cast shadow geometry
+
+For each registered light caster within its reach, \`LightField::cast()\` measures planar distance $d$ from caster to object. It skips $d<6$ and $d>R$, where $R$ is caster reach. For eligible objects it computes
+
+$$f=1-\\frac{d}{R},\\qquad\\ell=H\\operatorname{clamp}\\left(\\frac{d}{48},0.35,2.2\\right),\\qquad a=\\operatorname{clamp}(1.5Sf,0,1),$$
+
+where $H$ is object height, $S$ is light strength, $\\ell$ controls shadow length, and $a$ is shadow alpha. With $d=48$, $R=120$, and $S=0.5$, the falloff is $0.6$, length is $H$, and alpha is $0.45$. The angle is $\\operatorname{atan2}(y-y_c,x-x_c)$, pointing away from the caster. This is a visual contact-shadow model with capped length and opacity, not ray-traced occlusion or an inverse-square light law.
 `,
     interactiveComponent: "status-resistance",
     mermaidCharts: [
@@ -5155,5 +5196,136 @@ The five afflictions each trade a benefit for a cost: Spore Crown grants poison 
 
 Campaign saves record the mutation and affliction bitsets. When extending either enum, keep the bit width and save format in mind, add its source or offer mapping, apply and reverse its effects as appropriate, and verify interactions with Synod scrutiny and existing immunities.
 `,
+  },
+  {
+    id: "particle-physics",
+    title: "38. Particle Motion, Debris Physics & Collision",
+    category: "graphics",
+    summary: "The fixed-step particle lifecycle, per-second effects, per-tick debris, collision response, and render interpolation.",
+    sourceFiles: [
+      "src/Math.hpp",
+      "src/SpriteObject.hpp",
+      "src/level/Level.cpp",
+      "src/level/LevelRender.cpp",
+      "src/level/LevelSpace.cpp",
+      "src/particle/Particle.hpp",
+      "src/particle/Spark.cpp",
+      "src/particle/Drift.cpp",
+      "src/particle/Mote.cpp",
+      "src/particle/Shockwave.cpp",
+      "src/particle/Arc.cpp",
+      "src/particle/VisualDetail.hpp",
+      "src/particle/debris/Debris.cpp",
+      "src/particle/debris/Debris.hpp",
+    ],
+    content: `
+### One fixed update, several kinds of motion
+
+The game advances simulation at \`DT = 1 / 60\` second. The main loop can run multiple fixed ticks before one render. \`Level::spawn()\` owns visual effects in a \`vector<unique_ptr<SpriteObject>>\` and assigns their \`level\` pointer. \`Level::tick()\` visits each live particle, then moves survivors toward the front of the vector and resizes it. The loop uses the vector's current size, so an effect spawned during a particle tick can also be visited in that same tick. These effects are separate from ordinary EnTT-owned entities and weapon projectiles.
+
+The \`Particle\` base class stores \`life\` and \`maxLife\` in **seconds**. Each tick subtracts \`DT\`; when life reaches zero it sets \`removed\`. Its \`frac() = life / maxLife\` gives a remaining-life fraction for fades and size changes. \`SpriteObject\` supplies position \`(x, y, z)\`, velocity fields \`(xa, ya, za)\`, drawing hooks, and the removal flag. Rendering places an effect at screen position \`(floor(x), floor(y - z))\`, so positive \`z\` appears above the ground.
+
+### Sparks: radial launch and exponential damping
+
+\`Spark::burst()\` chooses a random angle and a speed in \`[0.3, 1.0] × requestedSpeed\` for each spark. It initializes \`xa = cos(angle) × speed\` and \`ya = sin(angle) × speed\`. At each tick, \`Spark::tick()\` first ages the effect, then computes \`k = exp(-5 × DT)\`, multiplies both velocity components by \`k\`, and advances \`x += xa × DT\`, \`y += ya × DT\`. The launch speed is therefore in pixels per second. There is no gravity or terrain collision in this class. Remaining life scales its opacity and sprite size; a glowing spark can also stamp light into the light pass. \`burst()\` skips a whole burst if the live spark count is already above 700; this is a threshold check at burst entry, so a burst may take the count past 700.
+
+### Drift: configurable falling and floating
+
+\`Drift\` uses the same seconds-based velocity convention. With \`age = maxLife - life\` and \`k = exp(-drag × DT)\`, its update is \`xa *= k\`, \`ya = ya × k + gravity × DT\`, \`x += (xa + cos(age × 5 + rot) × sway) × DT\`, \`y += ya × DT\`, and \`rot += spin × DT\`. Positive gravity accelerates downward in screen coordinates; negative gravity makes an effect rise. Sway changes the horizontal displacement without changing stored \`xa\`. Rendering combines a short fade-in, an end fade, rotation, and optional size growth. Call sites such as \`flourish::scatter()\` set drag, spin, gravity, and launch velocity after construction. Drift does not collide with the world.
+
+### Debris: height, substeps, and axis-specific bounce
+
+\`Debris\` is a separate \`SpriteObject\` branch. It starts with a random direction sampled inside a unit sphere and normalized, then adds an upward component to \`za\`. Its \`life\` is an **integer number of ticks**, initially 40–59. Unlike Spark and Drift, the base debris update does **not** multiply displacement by \`DT\`: velocities, gravity, and damping are expressed per simulation tick. A debris fragment loses horizontal speed by a factor of 0.85 when \`z <= 1\`, otherwise by its configurable \`drag\`; then \`za -= gravity\`.
+
+\`attemptMove()\` chooses \`steps = int(sqrt(xa² + ya² + za²) + 1)\`. For each substep it tries X, Y, and Z separately, each with one \`velocity / steps\` displacement. If the proposed height is below zero, it clamps \`z\` to zero and calls \`collide()\`. When the proposed height is below 12, horizontal movement also tests \`Level::blocks(x, y)\`, which checks nearby solid props by their circular radii. The default collision response reverses and scales only the velocity component for the blocked axis: for example, a vertical hit applies \`za *= -bounce\`. These substeps make fast fragments less likely to cross small blockers in one tick. They are a simple discrete collision scheme, not a general rigid-body solver.
+
+Debris subclasses specialize that scheme. Blood uses stronger drag and a small bounce. Chips launch faster, spin while airborne, and fade at the end. Snow falls slowly with wind and removes itself on a vertical collision. Smoke and flame use negative gravity to rise. Meat sheds blood during flight and can scatter more blood when it hits while falling fast. \`Debris::shed()\` combines a new fragment's random velocity with part of the parent's velocity. \`Debris::gore()\` composes blood with smoke or meat depending on the caller.
+
+### Animated effects and the draw pass
+
+Not every particle integrates velocity. \`Mote\` recomputes a curved path from its starting point toward the player's current position, using squared age for progress and a sine-shaped sideways bend. \`Shockwave\` eases an expanding ring radius. \`Arc\` holds fixed lightning nodes, redraws jittered segments, and can charge ground once. These are scripted visual paths; their appearance should not be read as collision physics.
+
+\`Level::render()\` queues visible particles with entities and props for depth sorting, while \`renderLight()\` invokes their light hooks separately. Before drawing, \`Level::blend()\` can interpolate positions between the previous and current simulation tick on high-refresh displays; \`unblend()\` restores simulation coordinates afterward. The reduced-particles option uses \`showParticle()\` to filter cosmetic effects from the draw and light passes, but it does not skip their simulation ticks. Live-count limits also guard creation: \`Drift::room()\` requires fewer than 360 drifts and \`Debris::room()\` fewer than 1,200 debris objects. A new effect should state whether its speed is per second or per tick, and whether it needs collision, height, light, or only an age-driven render animation.
+`,
+    mermaidCharts: [{
+      title: "Particle lifecycle and motion families",
+      chart: `
+flowchart LR
+    Spawn[Level spawn] --> Tick[Fixed 60 Hz particle tick]
+    Tick --> Seconds[Particle life in seconds]
+    Tick --> Debris[Debris life in ticks]
+    Seconds --> Spark[Spark velocity and drag]
+    Seconds --> Drift[Drift gravity sway and spin]
+    Seconds --> Scripted[Mote Shockwave Arc paths]
+    Debris --> Substeps[Axis substeps and collisions]
+    Spark --> Cull[Remove and compact]
+    Drift --> Cull
+    Scripted --> Cull
+    Substeps --> Cull
+    Cull --> Render[Visible depth sorted draw and light]
+`,
+    }],
+  },
+  {
+    id: "reactive-ground",
+    title: "39. Reactive Ground: Fire, Ice, Charge, Spores & Regrowth",
+    category: "world",
+    summary: "Sparse timed terrain states, table-driven reactions, controlled fire spread, ground hazards, and campaign recovery.",
+    sourceFiles: [
+      "src/level/Matter.hpp",
+      "src/level/Matter.cpp",
+      "src/level/LevelMatter.cpp",
+      "src/level/Level.hpp",
+      "src/level/Level.cpp",
+      "src/level/LevelRender.cpp",
+      "src/entity/enemy/SynodFoe.cpp",
+      "src/campaign/Campaign.cpp",
+      "src/test/CampaignTest.cpp",
+    ],
+    content: `
+### From a cause to a ground state
+
+Reactive ground is enabled by \`RunRules::matter\`. \`Stuff\` names the state of a tile: None, Wet, Burning, Frozen, Oiled, Spored, Charged, Ash, or Limed. \`Cause\` names an incoming stimulus: Fire, Chill, Water, Charge, or Spore. \`Level::react(x, y, cause)\` reads the tile's effective state, finds the first matching row in the \`REACTIONS\` table, writes the new state and duration to \`Matter\`, and triggers any steam, burst, or current effect. It returns false when matter is disabled or no row matches; a cause does not automatically affect every state.
+
+\`Level::stuffAt()\` first checks the stored matter state. If the tile has no stored state, it treats lava as Burning, a deterministic Badlands tar tile as Oiled, and a sufficiently deep sky puddle as Wet. These fallback states can therefore participate in reactions without filling the sparse matter store in advance. For example, Fire ignites an otherwise empty tile only when \`kindling(x, y)\` finds a suitable, non-submerged prop; Fire on Wet makes steam and clears that wet state; Chill on Wet makes Frozen; Charge on Wet makes Charged.
+
+### Sparse storage and clocks
+
+\`Matter\` divides tile coordinates into \`16 × 16\` pages. A page contains a byte of \`Stuff\` and a 16-bit time counter per tile, plus a live-cell count. Pages are allocated only when a nonempty state is written and erased when their final live cell disappears. Floor division keeps negative world coordinates in the correct page. \`set()\` converts seconds to tenths of a second, capped at 60,000 units. A zero counter does not expire by itself, so callers supplying temporary effects must provide a positive duration.
+
+The game ticks at 60 Hz, but \`Matter::tick()\` advances its timer on a \`0.1\`-second clock. On expiry, Burning becomes Ash for 20 seconds, Frozen becomes Wet for 6, and Charged becomes Wet for 4; other timed states become None. Every tenth matter step, roughly once per second, Burning checks its four cardinal neighbors. It schedules fire only where the destination has no stored matter and \`fuel(x, y)\` says a burnable prop is present. Changes are collected first and applied after the scan, so a newly lit tile cannot spread again in the same pass. The fire stops when fuel ends, reaches water, or meets an occupied tile such as lime.
+
+When a Burning state expires, \`Level::scorch()\` can record the burned prop as a harvested terrain edit with a regrowth day three campaign days later. \`Campaign::regrow()\` clears due edits from the surface edit map when a day advances. Fire itself is transient matter; the terrain edit is what lets a burned plant remain absent after the flames and ash disappear.
+
+### Chain reactions and actors
+
+The reaction table includes special effects beyond state replacement. Igniting Oiled ground starts a short burn and writes Burning into the eight surrounding tiles unless they contain Limed matter. This burst writes those neighbors directly, so it is distinct from the slower fuel-limited cardinal spread. Charging a Wet tile calls \`Level::current()\`, which walks connected wet tiles through four-neighbor adjacency and marks them Charged, up to a 48-tile queue limit. Each tile changed to Charged is no longer Wet, which also prevents the search from revisiting it.
+
+Spored ground poisons actors other than Mycel foes. When a creature dies on spores, \`sprout()\` can schedule a Sporeling after six seconds, with at most four pending sprouts. Fire can consume Spored ground into a brief burn. Synod Limers write Limed tiles around themselves; no Fire or Spore reaction row starts from Limed, and a mob standing there has Burn and Poison ended.
+
+\`Level::tread()\` applies the ground's effects to a mob. Burning applies Burn, Wet ends an existing Burn, Charged applies a brief damaging Burn status, and Spored applies Poison. Bosses receive half the ground damage in the Burning and Charged branches. \`Level::footing()\` separately multiplies movement pace: Wet \`0.85\`, Frozen \`1.1\`, and Oiled \`0.8\`, when those are stored matter states. Afflictions can further change the player's ground damage, including Glass Skin on Charged and Frost Blood on Burning. The player is checked by \`matterTick()\`; enemy movement calls its own tread path.
+
+### Rendering and checks
+
+\`Matter::render()\` visits only pages overlapping the camera and draws a translucent tile-colored rectangle for each live state; Burning alpha flickers with time and tile position. Reactions also emit ordinary Spark particles for steam, flare, and electric current, connecting this system to the particle chapter without making the particles themselves the authority for terrain state.
+
+\`testMatter()\` and \`testMatterTable()\` in \`CampaignTest.cpp\` check freezing and thawing, pace, fuel-limited fire, wet quenching, electric propagation, oil bursts, lime blocking, sporeling growth, and empty-page cleanup. When adding a state or reaction, update \`Stuff\`, \`EXPIRE\`, \`LOOK\`, the reaction table, and these behavior tests together; the enum order indexes the expiry and color arrays.
+`,
+    mermaidCharts: [{
+      title: "Ground reaction and expiry examples",
+      chart: `
+flowchart LR
+    Wet[Wet] -->|Chill| Frozen[Frozen]
+    Frozen -->|Timer| Wet
+    Wet -->|Charge| Charged[Charged]
+    Charged -->|Timer| Wet
+    Wet -->|Fire| Dry[None and steam]
+    Fuel[Empty tile with fuel] -->|Fire| Burning[Burning]
+    Burning -->|Timer| Ash[Ash]
+    Ash -->|Timer| Dry
+    Oiled[Oiled] -->|Fire| Burst[Burning and neighbor burst]
+    Spored[Spored] -->|Fire| Burning
+`,
+    }],
   },
 ];

@@ -4,7 +4,6 @@ import {
   Binary,
   Eye,
   Flame,
-  Volume2,
   Sparkles,
   Shield,
   RotateCcw,
@@ -23,7 +22,7 @@ export const EngineMathLab: React.FC = () => {
   const [resistancePct, setResistancePct] = useState<number>(50);
   const [baseDotDamage, setBaseDotDamage] = useState<number>(100);
 
-  // Tab 2: Quadratic Attenuation
+  // Tab 2: LightField contact-shadow falloff
   const [attenDistance, setAttenDistance] = useState<number>(120);
   const [attenRadius, setAttenRadius] = useState<number>(160);
 
@@ -50,7 +49,9 @@ export const EngineMathLab: React.FC = () => {
 
   // Tab 2 Calculations
   const attenRatio = attenDistance / attenRadius;
-  const attenFactor = 1.0 / (1.0 + attenRatio * attenRatio);
+  const attenFactor = attenDistance < 6 || attenDistance > attenRadius
+    ? 0
+    : 1 - attenRatio;
   const attenPct = attenFactor * 100;
 
   // Tab 3 Calculations
@@ -61,12 +62,15 @@ export const EngineMathLab: React.FC = () => {
   const facingRad = (entityAngleDeg * Math.PI) / 180;
   const fx = Math.cos(facingRad);
   const fy = Math.sin(facingRad);
-  const dotProduct = dist > 0.001 ? (fx * dx + fy * dy) / dist : 1;
+  // The canvas shows the quarry at its centre and the enemy at the clicked point.
+  // One canvas pixel represents 300 / 210 world pixels.
+  const worldDist = dist * (300 / 210);
+  const dotProduct = dist > 0.001 ? (fx * dx + fy * dy) / dist : 0;
   const angleRad = Math.acos(Math.max(-1, Math.min(1, dotProduct)));
   const angleDeg = (angleRad * 180) / Math.PI;
-  const HALF_FOV_DEG = 113 / 2; // 56.5 deg
-  const COS_HALF_FOV = Math.cos((HALF_FOV_DEG * Math.PI) / 180); // ~0.5519
-  const isTargetVisible = dotProduct >= COS_HALF_FOV && dist <= 240;
+  const COS_HALF_FOV = 0.55;
+  const HALF_FOV_DEG = (Math.acos(COS_HALF_FOV) * 180) / Math.PI;
+  const isTargetVisible = dotProduct > COS_HALF_FOV && worldDist < 300;
 
   // Tab 4 Calculations
   const MF_FACTOR = 250;
@@ -188,6 +192,9 @@ export const EngineMathLab: React.FC = () => {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+    ctx.fillStyle = "#e2e8f0";
+    ctx.font = "bold 10px monospace";
+    ctx.fillText("QUARRY", cx - 23, cy + 25);
 
     // Draw Target
     ctx.save();
@@ -203,17 +210,18 @@ export const EngineMathLab: React.FC = () => {
     ctx.fillStyle = "#e2e8f0";
     ctx.font = "bold 10px monospace";
     ctx.fillText(
-      isTargetVisible ? "IN SIGHT" : "HIDDEN",
+      isTargetVisible ? "IN AIM" : "OUT OF AIM",
       targetX + 12,
       targetY + 4
     );
+    ctx.fillText("ENEMY", targetX + 12, targetY + 18);
     ctx.restore();
   }, [activeTab, entityAngleDeg, targetX, targetY, facingRad, isTargetVisible]);
 
   const handleSightCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
+    const x = Math.round((e.clientX - rect.left) * e.currentTarget.width / rect.width);
+    const y = Math.round((e.clientY - rect.top) * e.currentTarget.height / rect.height);
     setTargetX(x);
     setTargetY(y);
   };
@@ -263,8 +271,8 @@ export const EngineMathLab: React.FC = () => {
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            <Volume2 className="w-3.5 h-3.5" />
-            Quadratic 1/(1+d²)
+            <Flame className="w-3.5 h-3.5" />
+            Shadow Falloff
           </button>
 
           <button
@@ -277,7 +285,7 @@ export const EngineMathLab: React.FC = () => {
             }`}
           >
             <Eye className="w-3.5 h-3.5" />
-            113° Dot Cone
+            Quarry Aim Cone
           </button>
 
           <button
@@ -441,7 +449,7 @@ export const EngineMathLab: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Quadratic Attenuation */}
+      {/* Tab 2: LightField contact-shadow falloff */}
       {activeTab === "attenuation" && (
         <div className="p-4 sm:p-6 space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -449,7 +457,7 @@ export const EngineMathLab: React.FC = () => {
               <div className="p-4 rounded-xl bg-dark-900 border border-dark-800 space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-300">
-                    Distance to Emitter (d):
+                    Caster to Object Distance (d):
                   </label>
                   <span className="text-sm font-mono font-bold text-amber-400">
                     {attenDistance} px
@@ -466,7 +474,7 @@ export const EngineMathLab: React.FC = () => {
 
                 <div className="flex items-center justify-between pt-2 border-t border-dark-800">
                   <label className="text-xs font-bold text-slate-300">
-                    Nominal Radius (R):
+                    Caster Reach (R):
                   </label>
                   <span className="text-sm font-mono font-bold text-sky-400">
                     {attenRadius} px
@@ -486,7 +494,7 @@ export const EngineMathLab: React.FC = () => {
                     d / R Ratio: <strong className="text-slate-200">{attenRatio.toFixed(2)}</strong>
                   </div>
                   <div>
-                    Attenuation A(d):{" "}
+                    Shadow Falloff f(d):{" "}
                     <strong className="text-amber-400">{attenFactor.toFixed(4)}</strong>
                   </div>
                 </div>
@@ -495,19 +503,18 @@ export const EngineMathLab: React.FC = () => {
               <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/30 text-xs text-slate-300 leading-relaxed space-y-2">
                 <div className="font-bold text-amber-300 flex items-center gap-1.5">
                   <Flame className="w-4 h-4" />
-                  Dual Use in Lighting &amp; Audio:
+                  Contact shadow in LightField.cpp:
                 </div>
                 <p>
-                  Both <code>LightField::cast</code> and <code>Audio::playAt</code> utilize the
-                  singularity-free inverse quadratic formula:
+                  A caster contributes only when the object lies between 6 pixels and its
+                  reach. Within that interval, the shadow fades linearly with distance:
                 </p>
                 <div className="p-2 rounded bg-dark-950 font-mono text-xs text-amber-300 text-center">
-                  A(d) = 1.0 / (1.0 + (d / R)²)
+                  f(d) = 1 - d / R; alpha = clamp(1.5 × strength × f, 0, 1)
                 </div>
                 <p>
-                  Unlike naive <code>1/d²</code>, which explodes to infinity at <code>d = 0</code>,
-                  this function is perfectly bounded at <code>A(0) = 1.0</code>, drops to exactly{" "}
-                  <code>0.50</code> at <code>d = R</code>, and falls smoothly to near zero.
+                  The displayed bar shows falloff before strength and alpha clamping. The
+                  very near region is skipped, and the shadow ends at reach.
                 </p>
               </div>
             </div>
@@ -515,7 +522,7 @@ export const EngineMathLab: React.FC = () => {
             <div className="lg:col-span-7 space-y-4">
               <div className="p-4 rounded-xl bg-dark-900 border border-dark-800 space-y-3">
                 <div className="text-xs font-mono text-slate-400">
-                  Dynamic Falloff Intensity at d = {attenDistance} px:
+                  Contact Shadow Falloff at d = {attenDistance} px:
                 </div>
                 <div className="w-full h-6 rounded-full bg-dark-950 border border-dark-750 overflow-hidden relative">
                   <div
@@ -523,7 +530,7 @@ export const EngineMathLab: React.FC = () => {
                     style={{ width: `${Math.min(100, attenPct)}%` }}
                   />
                   <span className="absolute inset-0 flex items-center justify-center text-[11px] font-mono font-bold text-slate-900 drop-shadow">
-                    {attenPct.toFixed(1)}% Intensity Remaining
+                    {attenPct.toFixed(1)}% Falloff Remaining
                   </span>
                 </div>
               </div>
@@ -531,31 +538,23 @@ export const EngineMathLab: React.FC = () => {
               {/* Radial Canvas Visualization */}
               <div className="p-4 rounded-xl bg-[#090710] border border-dark-800 flex flex-col items-center">
                 <div className="text-xs font-mono text-slate-400 mb-2 w-full flex justify-between">
-                  <span>Emitter Radial Light / Sound Wave</span>
+                  <span>Caster Reach and Object Distance</span>
                   <span className="text-sky-400">R = {attenRadius} px</span>
                 </div>
-                <div className="relative w-[340px] h-[220px] rounded-lg bg-black border border-dark-750 flex items-center justify-center overflow-hidden">
-                  {/* Outer zone */}
-                  <div
-                    className="absolute rounded-full border border-dashed border-sky-500/40 pointer-events-none"
-                    style={{
-                      width: `${attenRadius * 1.5}px`,
-                      height: `${attenRadius * 1.5}px`,
-                    }}
-                  />
-                  {/* Half-power boundary (d = R) */}
+                <div className="relative w-full max-w-[340px] h-[220px] rounded-lg bg-black border border-dark-750 flex items-center justify-center overflow-hidden">
+                  {/* Caster reach, shown at 0.4 canvas px per world px */}
                   <div
                     className="absolute rounded-full border border-sky-400/80 pointer-events-none"
                     style={{
-                      width: `${attenRadius}px`,
-                      height: `${attenRadius}px`,
+                      width: `${attenRadius * 0.8}px`,
+                      height: `${attenRadius * 0.8}px`,
                     }}
                   />
                   {/* Center emitter glow */}
                   <div
                     className="w-8 h-8 rounded-full bg-amber-400 blur-sm flex items-center justify-center shadow-lg shadow-amber-500/80"
                   />
-                  {/* Observer listener */}
+                  {/* Object casting the shadow */}
                   <div
                     className="absolute w-4 h-4 rounded-full bg-emerald-400 border border-white transition-all shadow"
                     style={{
@@ -564,7 +563,7 @@ export const EngineMathLab: React.FC = () => {
                   />
                 </div>
                 <div className="text-[10px] font-mono text-slate-500 mt-2 text-center">
-                  Inner circle: R (50% power). Outer dashed: 1.5R (30% power). Green dot: Listener at d.
+                  Circle: caster reach R. Green dot: object at distance d. Canvas scale: 0.4 px per world pixel.
                 </div>
               </div>
             </div>
@@ -580,7 +579,7 @@ export const EngineMathLab: React.FC = () => {
               <div className="p-4 rounded-xl bg-dark-900 border border-dark-800 space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-300">
-                    Entity Facing Angle (θ):
+                    Quarry Aim Angle (θ):
                   </label>
                   <span className="text-sm font-mono font-bold text-sky-400">
                     {entityAngleDeg}°
@@ -598,7 +597,7 @@ export const EngineMathLab: React.FC = () => {
                 <div className="pt-2 border-t border-dark-800 text-xs font-mono space-y-1.5">
                   <div className="flex justify-between">
                     <span className="text-slate-400">Dot Product (u · v):</span>
-                    <strong className={dotProduct >= COS_HALF_FOV ? "text-emerald-400" : "text-rose-400"}>
+                    <strong className={dotProduct > COS_HALF_FOV ? "text-emerald-400" : "text-rose-400"}>
                       {dotProduct.toFixed(3)}
                     </strong>
                   </div>
@@ -607,12 +606,12 @@ export const EngineMathLab: React.FC = () => {
                     <strong className="text-slate-200">{angleDeg.toFixed(1)}°</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Threshold cos(56.5°):</span>
-                    <strong className="text-amber-400">≥ {COS_HALF_FOV.toFixed(3)}</strong>
+                    <span className="text-slate-400">Threshold cos(56.6°):</span>
+                    <strong className="text-amber-400">&gt; {COS_HALF_FOV.toFixed(3)}</strong>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Target Distance:</span>
-                    <strong className="text-slate-200">{dist.toFixed(1)} px (max 240)</strong>
+                    <span className="text-slate-400">Enemy Distance:</span>
+                    <strong className="text-slate-200">{worldDist.toFixed(1)} world px (&lt; 300)</strong>
                   </div>
                 </div>
 
@@ -624,26 +623,26 @@ export const EngineMathLab: React.FC = () => {
                   }`}
                 >
                   {isTargetVisible
-                    ? "✓ TARGET ACQUIRED (INSIDE 113° CONE)"
-                    : "✗ TARGET HIDDEN (BLIND SPOT OR TOO FAR)"}
+                    ? "✓ ENEMY IN QUARRY'S AIM CONE"
+                    : "✗ ENEMY OUTSIDE AIM OR RANGE"}
                 </div>
               </div>
 
               <div className="p-4 rounded-xl bg-dark-900 border border-dark-800 text-xs text-slate-300 leading-relaxed space-y-2">
                 <div className="font-bold text-sky-300 flex items-center gap-1.5">
                   <Eye className="w-4 h-4" />
-                  Zero-Trigonometry Detection in Plans.cpp:
+                  Quarry aim test in Enemy.cpp:
                 </div>
                 <p>
-                  Instead of computing expensive <code>atan2</code> or <code>acos</code> per frame for
-                  hundreds of entities, Mellangan takes the 2D dot product between the normalized
-                  displacement vector and the entity&apos;s unit heading:
+                  The enemy tests whether it lies in front of its quarry. This canvas puts the quarry
+                  at the centre and the enemy at the clicked point. The game first leads the quarry&apos;s
+                  position, then takes a dot product with the quarry&apos;s aim:
                 </p>
                 <div className="p-2 rounded bg-dark-950 font-mono text-[11px] text-sky-300 text-center">
-                  (fx * dx + fy * dy) / dist &gt;= cos(113° / 2) ≈ 0.5519
+                  quarryAim · directionToEnemy &gt; 0.55; distance &lt; 300
                 </div>
                 <p>
-                  Single multiply-accumulate and comparison per candidate entity!
+                  The canvas isolates the cone test; it does not simulate the velocity lead.
                 </p>
               </div>
             </div>
@@ -655,7 +654,7 @@ export const EngineMathLab: React.FC = () => {
                   width={440}
                   height={300}
                   onClick={handleSightCanvasClick}
-                  className="cursor-crosshair block w-full max-w-[440px] h-[300px]"
+                  className="cursor-crosshair block w-full max-w-[440px] h-auto"
                 />
               </div>
               <span className="text-[10px] font-mono text-slate-500 mt-2">

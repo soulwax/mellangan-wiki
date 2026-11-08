@@ -111,6 +111,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         shortTitle: "64-Bit Radix Y-Sort & LightField",
       },
       {
+        id: "particle-physics",
+        shortTitle: "Particle Motion, Debris & Collision",
+      },
+      {
         id: "intro-playback",
         shortTitle: "Intro Video & Audio Playback",
       },
@@ -142,6 +146,10 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "biome-events-chart-hud",
         shortTitle: "26 BiomeEvents, RLE Chart & HUD Pins",
+      },
+      {
+        id: "reactive-ground",
+        shortTitle: "Reactive Ground, Fire & Spores",
       },
     ],
   },
