@@ -4619,7 +4619,7 @@ flowchart TD
     id: "engine-mathematics",
     title: "32. Die Mathematik von Mellangan: Eine Untersuchung von Modellen und Invarianten",
     category: "core",
-    summary: "Eine wissenschaftliche Analyse der Näherungen, Beweise, Einheiten und Randbedingungen der Spiel-Engine anhand des Quellcodes.",
+    summary: "Eine wissenschaftliche Analyse der Näherungen, Beweise, Einheiten und Randbedingungen des Spielsystems anhand des Quellcodes.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4687,7 +4687,7 @@ Ein exakter Abfangpunkt erfordert eine reelle, nichtnegative Lösung und hängt 
 
 Bei einem lebenden Ziel normiert der Code $\\mathbf{q}$ zu $\\hat{\\mathbf{q}}$, sofern seine Länge größer als 0.001 ist. Das Kennzeichen \`seen\` prüft:
 
-$\\|\\mathbf{q}\\|<300\\quad\\text{and}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$
+$\\|\\mathbf{q}\\|<300\\quad\\text{und}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$
 
 Hier ist $\\mathbf{a}$ die **Zielrichtung des Ziels**, nicht die Blickrichtung des Gegners. Die Prüfung fragt anhand der vorhergesagten Verschiebung also, ob sich der Gegner ungefähr vor dem Ziel befindet. Bei einer normierten Zielrichtung entspricht die strenge Skalarprodukt-Schwelle einem halben Winkel von $\\arccos(0.55)\\approx56.6^\\circ$, also einem Kegel von etwa $113.3^\\circ$. Genau an der Grenze schlägt der strenge Vergleich fehl. Ist das gewählte Ziel tot, gibt der Code stattdessen einen ungesehenen Punkt in 400 px Entfernung zurück; lebende Verbündete in der Nähe können weiterhin zuerst ausgewählt werden.
 
@@ -4828,7 +4828,7 @@ Schließlich wendet \`biomeAt(x, y)\` eine Mehrheitsentscheidung über $3 \\time
 
 $B(x, y) = \\arg\\max_{b} \\sum_{dy=-1}^{1} \\sum_{dx=-1}^{1} \\mathbb{I}(\\text{rawBiome}(x+dx, \\; y+dy) == b)$
 
-Der Code setzt zunächst das ursprüngliche Biom der Kachel als Gewinner ein und bevorzugt dieses Biom bei Gleichstand mit dem führenden Ergebnis. Das angegebene $\\arg\\max$ steht somit verkürzt für eine Abstimmung mit einer besonderen Gleichstandsregel. Der Filter entfernt viele vereinzelte Ausreißer von einer Kachel Größe, macht die Klassifikation aber nicht kontinuierlich: Küsten- und Klimaschwellen erzeugen weiterhin scharfe Grenzen.
+Der Code setzt zunächst das ursprüngliche Biom der Kachel als Gewinner ein und bevorzugt dieses Biom bei Gleichstand mit dem führenden Ergebnis. Das angegebene $\\arg\\max$ steht somit verkürzt für eine Abstimmung mit einer besonderen Gleichstandsregel. Der Filter entfernt viele vereinzelte Ausreißer aus nur einer Kachel, macht die Klassifikation aber nicht kontinuierlich: Küsten- und Klimaschwellen erzeugen weiterhin scharfe Grenzen.
 
 #### Einordnung der geografischen Untersuchung mit 100.000 Kacheln
 
@@ -4872,7 +4872,7 @@ Die Grundschicht wird deckend gezeichnet; die Induktion beginnt daher mit $F_0=c
 
 #### Senkrechte Schichtung im Untergrund (\`Under.cpp\`)
 
-Die Spiel-Engine beschreibt die Tiefe der Welt durch drei getrennte senkrechte Ebenen:
+Das Spielsystem beschreibt die Tiefe der Welt durch drei getrennte senkrechte Ebenen:
 
 $\\text{Ebene} \\in \\{\\text{Oberfläche}, \\; \\text{Höhlen}, \\; \\text{Tiefe}\\}$
 
@@ -4914,11 +4914,11 @@ Die senkrechte Verknüpfung zwischen Oberflächenklima und Höhlenerzeugung scha
 
 ### 9. Prozedurales Rauschen: Hash ohne Zwischenspeicher und gedrehte fraktale Brownsche Bewegung
 
-Für kontinuierliche räumliche Unterschiede verwendet \`src/level/Noise.c\` einen Koordinaten-Hash statt einer Permutationstabelle, eine feste Tabelle mit 16 Gradienten, Interpolation fünften Grades und gedrehte fraktale Oktaven. Der Hash hängt von ganzzahligen Gitterkoordinaten, einem vom Aufrufer übergebenen Startwert und dem Welt-Salt ab; ein anderer Salt verändert das erzeugte Muster.
+Für kontinuierliche räumliche Unterschiede verwendet \`src/level/Noise.c\` einen Koordinaten-Hash statt einer Permutationstabelle, eine feste Tabelle mit 16 Gradienten, Interpolation fünften Grades und gedrehte fraktale Oktaven. Der Hash hängt von ganzzahligen Gitterkoordinaten, einem vom Aufrufer übergebenen Startwert und einem zusätzlichen Weltwert ab; ein anderer Weltwert verändert das erzeugte Muster.
 
 #### Analytischer Hash ohne Zwischenspeicher (\`noise_hash\`)
 
-Aus zweidimensionalen ganzzahligen Gitterkoordinaten $(ix, iy) \\in \\mathbb{Z}^2$, einem regionalen Startwert $S$ und einem Welt-Salt $\\sigma$ mischt \`noise_hash\` alle 32 Bits mithilfe großer Primzahl-Multiplikatoren und Bitverschiebungen nach dem Murmur-Verfahren:
+Aus zweidimensionalen ganzzahligen Gitterkoordinaten $(ix, iy) \\in \\mathbb{Z}^2$, einem regionalen Startwert $S$ und einem zusätzlichen Weltwert $\\sigma$ mischt \`noise_hash\` alle 32 Bits mithilfe großer Primzahl-Multiplikatoren und Bitverschiebungen nach dem Murmur-Verfahren:
 
 $$h_0 = (ix \\cdot K_x) \\oplus (iy \\cdot K_y) \\oplus (S \\cdot K_s) \\oplus (\\sigma \\cdot K_\\phi)$$
 
@@ -4983,7 +4983,7 @@ Wichtige mathematische Eigenschaften:
    $$N_{\\text{fBm}}(\\mathbf{x}) = \\frac{\\sum_{i=0}^{m-1} 0.5^i \\cdot \\text{Perlin}(\\mathbf{x}_i, S_i)}{\\sum_{i=0}^{m-1} 0.5^i}$$
    Dies ist ein gewichtetes Mittel der Oktavenproben. Sein Wertebereich hängt vom tatsächlichen Wertebereich von \`noise_perlin()\` ab; allein die Division durch die Amplitudensumme beweist keine genaue Schranke von $[-1,1]$.
 
-#### Anwendungen in anderen Systemen der Spiel-Engine
+#### Anwendungen in anderen Spielsystemen
 
 1. **Kontinuierliche Verzerrung des Klimas (\`src/level/biome/Biome.cpp\`):**
    Regionale Klimatupel $\\mathbf{C} = (T, M, \\eta, W)$ werden an verzerrten Koordinaten abgetastet:
@@ -4998,7 +4998,7 @@ Wichtige mathematische Eigenschaften:
 
 ### 10. Partikelbewegung: zuerst die Zeiteinheit bestimmen
 
-\`Spark\` und \`Drift\` speichern waagerechte Geschwindigkeiten in Pixeln pro Sekunde und multiplizieren die Verschiebung mit $\\Delta t$. \`Debris\` speichert Geschwindigkeiten und Schwerkraft dagegen in Pixeln pro Simulationsschritt. Dieselben Membernamen \`xa\`, \`ya\` und \`za\` haben in diesen beiden Gruppen somit unterschiedliche Einheiten. Vor einem Vergleich ihrer Parameterwerte muss die jeweilige Aktualisierungsgleichung gelesen werden.
+\`Spark\` und \`Drift\` speichern waagerechte Geschwindigkeiten in Pixeln pro Sekunde und multiplizieren die Verschiebung mit $\\Delta t$. \`Debris\` speichert Geschwindigkeiten und Schwerkraft dagegen in Pixeln pro Simulationsschritt. Dieselben Namen der Mitgliedsvariablen \`xa\`, \`ya\` und \`za\` haben in diesen beiden Gruppen somit unterschiedliche Einheiten. Vor einem Vergleich ihrer Parameterwerte muss die jeweilige Aktualisierungsgleichung gelesen werden.
 
 #### Dämpfung eines Funkens im Einzelnen
 
@@ -5040,7 +5040,7 @@ Die Verhältnisse $d/R$ und $d/48$ sind dimensionslos, wenn beide Entfernungen i
 
 ### Diskussion: Gemeinsamkeiten der Modelle
 
-In allen vier Teilen erscheint derselbe Entwurfsgedanke in unterschiedlicher Form. Die Spiel-Engine bildet einen großen Möglichkeitsraum auf eine kleinere Darstellung ab und gestaltet die Aktualisierung so, dass eine nützliche Eigenschaft erhalten bleibt. Die zeitliche Begrenzung der Zielvorhersage begrenzt den Einfluss entfernter Bewegung. Geordnete Seltenheitsprüfungen machen aus drei bedingten Chancen einander ausschließende Ergebnisse. Präfixsummen machen aus Zellanzahlen nicht überlappende Speicherbereiche. Stabile Sortierdurchläufe bewahren die Zeichenreihenfolge, wenn die berücksichtigten Schlüsselbits gleich sind. Die Normierung der Bodenmischung erhält das Gesamtgewicht, nachdem viele mögliche Biome auf drei reduziert wurden. Verzögerte Änderungen des Feuerzustands begrenzen die Ausbreitung in einem gewöhnlichen Durchlauf. Diese Algorithmen unterscheiden sich, lassen sich aber alle danach beurteilen, welche Information sie verwerfen und welche Invariante erhalten bleibt.
+In allen vier Teilen erscheint derselbe Entwurfsgedanke in unterschiedlicher Form. Das Spielsystem bildet einen großen Möglichkeitsraum auf eine kleinere Darstellung ab und gestaltet die Aktualisierung so, dass eine nützliche Eigenschaft erhalten bleibt. Die zeitliche Begrenzung der Zielvorhersage begrenzt den Einfluss entfernter Bewegung. Geordnete Seltenheitsprüfungen machen aus drei bedingten Chancen einander ausschließende Ergebnisse. Präfixsummen machen aus Zellanzahlen nicht überlappende Speicherbereiche. Stabile Sortierdurchläufe bewahren die Zeichenreihenfolge, wenn die berücksichtigten Schlüsselbits gleich sind. Die Normierung der Bodenmischung erhält das Gesamtgewicht, nachdem viele mögliche Biome auf drei reduziert wurden. Verzögerte Änderungen des Feuerzustands begrenzen die Ausbreitung in einem gewöhnlichen Durchlauf. Diese Algorithmen unterscheiden sich, lassen sich aber alle danach beurteilen, welche Information sie verwerfen und welche Invariante erhalten bleibt.
 
 Die Beweise zeigen außerdem einen wiederkehrenden Unterschied zwischen **lokaler Korrektheit** und **Gesamtverhalten**. Die Zerlegung durch Präfixsummen beschreibt, wo Kandidaten gespeichert sind, aber nicht, ob jeder Kandidat im Suchkreis liegt. Der Beweis zur Mischung erklärt, wie gewichtete Farben zusammengesetzt werden, garantiert jedoch keine stetige Klassifikation an jeder Grenze. Ein Weg mit der geringsten Kantenzahl muss in Pixeln nicht der kürzeste sein. Das Quadrat beim Widerstand beschreibt eine einzelne Anwendung von Schaden über Zeit, nicht erneute Anwendung, Immunität oder Tod. Werden solche Grenzen als Teil des Modells betrachtet, wird aus einer lokal korrekten Herleitung keine zu weitgehende Behauptung.
 

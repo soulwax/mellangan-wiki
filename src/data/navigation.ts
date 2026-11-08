@@ -198,7 +198,7 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "engine-mathematics",
-        shortTitle: "Game Math, Invariants & Proofs",
+        shortTitle: "Spielmathematik, Invarianten und Beweise",
       },
     ],
   },
@@ -264,8 +264,8 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
     topics: [
       {
         id: "engine-mathematics",
-        title: "Game Math & Invariants",
-        subtitle: "Geometry, probability & navigation",
+        title: "Spielmathematik und Invarianten",
+        subtitle: "Geometrie, Wahrscheinlichkeit und Wegfindung",
         icon: Calculator,
       },
       {

@@ -394,15 +394,15 @@ export const App: React.FC = () => {
               <span>Contribute</span>
             </a>
 
-            {/* Direct Quick Link 2: Game Math */}
+            {/* Direkter Schnellzugriff 2: Spielmathematik */}
             <a
               href="/engine-mathematics"
               onClick={(e) => selectChapter("engine-mathematics", e)}
               className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
-              title="Game Mathematics, Invariants &amp; Proofs"
+              title="Spielmathematik, Invarianten und Beweise"
             >
               <Calculator className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Game Math</span>
+              <span>Spielmathematik</span>
             </a>
 
             {/* Unified Topics & Labs Dropdown Menu */}
