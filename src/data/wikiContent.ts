@@ -5502,4 +5502,88 @@ For a first engine-facing extension, a **local structure layout** is the closest
 There is an important limit to this exercise: the **running world does not currently load this text file as a tilemap**. \`world::groundTile()\` builds its answer from water, dirt, biome, and structure rules. Dropping \`manual_map.txt\` into the game assets will not change terrain. A real contribution that uses the file in-game must choose when to load it, how it fits a structure's footprint, how water and props participate in world queries, and how the map is packaged. Keep the standalone loader and its error checks as a starting point; then add one engine integration at a time and compare it with the existing structure callbacks.
 `,
   },
+  {
+    id: "enemy-mind-model",
+    title: "41. Enemy Minds: Goal Plans and Champion Powers",
+    category: "gameplay",
+    summary: "How ordinary enemy goals steer movement, while champion mind mutations run on a separate timer, affect nearby foes, and may pass to a Changeling.",
+    sourceFiles: [
+      "src/entity/enemy/Enemy.hpp",
+      "src/entity/enemy/Enemy.cpp",
+      "src/entity/enemy/ai/Goal.hpp",
+      "src/entity/enemy/ai/Plans.cpp",
+      "src/level/Level.cpp",
+      "src/level/Level.hpp",
+      "src/level/Spawner.cpp",
+      "src/hero/Mutation.hpp",
+      "src/hero/Mutation.cpp",
+      "src/entity/ability/Strikes.cpp",
+      "src/entity/enemy/EnemyDeath.cpp",
+      "src/level/Whispers.cpp",
+      "src/test/CampaignTest.cpp",
+    ],
+    content: `
+### What “mind” means here
+
+An enemy has a **normal decision loop** and may also have a **champion mind mutation**. The decision loop chooses a target, runs a small sequence of goals, and asks for movement. A champion mind adds one of four timed powers. It does not replace the goal plan, learn from the player, or use a machine-learning model. In code, \`Enemy::goals\` holds the current goal queue; \`Enemy::mind\` is an index into the mutation table, and \`mindTime\` is its countdown. The separate \`mutant\` field marks a mutation that can be offered to a Changeling when that enemy dies.
+
+### The normal decision loop
+
+\`Level::tick()\` gathers enemies and runs \`Enemy::think()\` in the worker phase. Each thinking enemy first calls \`sense()\`. Its \`quarry()\` normally selects the player, but a nearby ally can draw its attention; an ally with a lure weighs more strongly. \`sense()\` takes the target's current position and velocity, adds a short prediction of where it may move, and records distance and direction. Its \`seen\` flag means the **target is facing toward the enemy** within the code's angle and distance test. It is not a general line-of-sight raycast.
+
+The enemy's \`Plan\` lists up to six goal steps and two possible interrupts. A \`Goal\` can initialize local state in \`start()\`, set desired movement in \`tick()\`, and return \`Running\` or \`Done\`. An urgent interrupt can move to the front of the eight-slot \`GoalQueue\`. \`Enemy::think()\` processes at most four completed goal steps in one call, then writes \`xWant\` and \`yWant\`. Later worker passes move the enemy and resolve crowd separation. Main-thread \`Enemy::tick()\` performs actions that may change the level. The existing GoalQueue and steering chapters describe individual goal types and their worker-thread rules in more detail.
+
+### How a champion receives a mind
+
+\`Spawner::champion()\` selects a suitable species from the local biome, spawns and crowns it, and gives it champion equipment. If \`RunRules::mutate\` is enabled, it calls \`mutation::endow()\`. Endowment rejects Synod enemies. For any other eligible champion, \`roll % 4\` picks one entry from the fixed list \`Kindle, Stillness, Stormcall, Fold\`. The chosen mutation is stored in **both** \`e.mind\` and \`e.mutant\`; its initial timer is \`MUTATIONS[mind].every * FOE_MIND\`, with \`FOE_MIND = 1.5\`. The game logs a “WIELDS” notice using the champion's title and mind name. The separate \`mutation::mutate()\` path gives some enemies body-themed traits; it is not the four-power champion mind selection.
+
+| Mind | Base \`every\` | Champion interval | What a cast attempts |
+| --- | ---: | ---: | --- |
+| Kindle | 6 s | 9 s | Burn the nearest target and, when matter is enabled, its surrounding ground. |
+| Stillness | 8 s | 12 s | Chill nearby opposing mobs and react a small disc of ground around the champion. |
+| Stormcall | 7 s | 10.5 s | Chain lightning through up to three opposing targets. |
+| Fold | 9 s | 13.5 s | Blink in the champion's aim direction with damage at departure and arrival. |
+
+These intervals are **countdowns between attempts**, not guarantees that every attempt affects someone. The timer is set when the mind is assigned, so the power does not fire immediately on spawn.
+
+### One cast, in order
+
+After status damage and ground tread, \`Enemy::tick()\` calls \`mutation::cast(*this)\` when \`mind >= 0\`. This happens in the main-thread entity pass, before the enemy's ordinary \`act()\`, trait tick, and weapon tick. \`cast()\` subtracts the fixed \`DT\` from \`mindTime\`. If time remains, it returns. When the timer expires, it resets the timer to the full champion interval **before** looking for a target.
+
+The target gate asks \`Level::nearestFoes(e, e.x, e.y, 200, 1)\` for one opposing mob within 200 pixels. Because the champion is hostile, this search considers the player and live allied mobs, sorted by distance. If it finds none, the cast ends and the already-reset timer keeps running. The goal queue and its \`aware\` state do not control this gate. A champion can therefore keep following its ordinary plan while its mind independently counts down; a nearby valid foe is what allows an expired mind to act.
+
+The four branches then use the target differently:
+
+* **Kindle** uses the nearest target directly. It writes a 3 × 3 patch of Burning ground for 3 seconds when matter rules are on, reports a Burn interaction, applies a 2-second Burn with power \`4 * e.damageMul\`, and emits sparks. The Burn status is still attempted when matter rules are off.
+* **Stillness** is centered on the champion after the 200-pixel gate succeeds. It gives opposing mobs within 70 pixels a 2-second Chill of power 0.5. It also sends Chill reactions to nearby ground tiles in a small disc and emits sparks. The target that passed the gate may be farther than the 70-pixel chill radius.
+* **Stormcall** calls \`ability::chain(e, 3, 160, 6)\`. That ability makes its own target list within 160 pixels, then links up to three foes and applies damage and Shock interactions. A foe between 160 and 200 pixels can pass the outer gate while leaving the chain with no target.
+* **Fold** calls \`ability::blink(e, 70, 4, RIME)\`. Blink uses the caster's aim, deals its burst damage, moves up to 70 pixels, resolves collision, and draws the travel effect. It is not a teleport to the target's coordinates; a blocked path can change the final position.
+
+### What happens when the champion dies
+
+\`Enemy::die()\` checks \`mutant\` and calls \`Level::inherit()\` with that mutation. For a mind-endowed champion, \`mutant\` holds the same choice as \`mind\`. The player receives an **offer**, not an immediate grant: inheritance requires mutation rules, a Changeling player, no current offer, and a mind the player does not already own. The tier-one offer lasts 12 seconds and is anchored to the player's position. The normal offer logic can dismiss it when time runs out or the player walks more than 160 pixels away. Accepting it grants the mutation. Thus a death does not always transfer the champion's power.
+
+### Reading and checking this code
+
+Follow the lifecycle in this order: \`Spawner::champion()\` → \`mutation::endow()\` → \`Level::tick()\` and \`Enemy::think()\` → \`Enemy::tick()\` and \`mutation::cast()\` → \`Enemy::die()\` and \`Level::inherit()\`. This shows where the plan and mind run, and why a worker goal should not perform the mind's level-changing effects.
+
+\`testChampionMinds()\` in \`CampaignTest.cpp\` checks that the four selection rolls give four distinct minds, Synod endowment fails, a spawned champion gets a mind, Kindle burns the player and ground, Fold moves closer in its test setup, and death opens the expected Changeling offer. When changing a mind, keep the selection table, timer, target behavior, death offer, and these checks in sync.
+`,
+    mermaidCharts: [{
+      title: "Ordinary enemy decisions and optional champion mind",
+      chart: `
+flowchart LR
+    Spawn[Champion spawn] --> Endow[Optional mind endowment]
+    Think[Worker: sense and goal queue] --> Move[Worker: move and settle]
+    Endow --> Think
+    Move --> Tick[Main thread: enemy tick]
+    Tick --> Timer[Mind timer and target gate]
+    Timer -->|Valid target| Power[Kindle Stillness Stormcall Fold]
+    Timer -->|No target| Wait[Wait for next interval]
+    Power --> Death[Enemy death]
+    Wait --> Death
+    Death --> Offer[Conditional Changeling offer]
+`,
+    }],
+  },
 ];

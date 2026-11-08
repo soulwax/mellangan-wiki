@@ -90,6 +90,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         shortTitle: "GoalQueue Ringbuffer, Sense & Steering",
       },
       {
+        id: "enemy-mind-model",
+        shortTitle: "Enemy Minds & Champion Powers",
+      },
+      {
         id: "goal-steering-catalog",
         shortTitle: "16 AI Goals, Gaits & Plans[] Catalog",
       },
