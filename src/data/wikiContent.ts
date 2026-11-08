@@ -4617,9 +4617,9 @@ flowchart TD
   },
   {
     id: "engine-mathematics",
-    title: "32. The Mathematics of Mellangan: Models, Derivations & Limits",
+    title: "32. The Mathematics of Mellangan: A Study of Models and Invariants",
     category: "core",
-    summary: "A source-based study of the engine's mathematical models, their derivations, invariants, examples, and limits.",
+    summary: "A dissertation-style analysis of the engine's approximations, proofs, units, boundary conditions, and source-level evidence.",
     sourceFiles: [
       "src/Math.hpp",
       "src/entity/enemy/Enemy.cpp",
@@ -4646,13 +4646,32 @@ flowchart TD
     content: `
 ### Abstract
 
-This chapter studies how Mellangan turns mathematical models into finite, testable game rules. Its central claim is that the engine repeatedly replaces an unbounded or continuous problem with a bounded discrete one: a short lead instead of exact interception, capped resistance instead of an unlimited multiplier, grid buckets instead of all-pairs searches, and fixed-step recurrences instead of continuous motion. The quality of each approximation depends on its units, boundary conditions, and order of operations. The chapter derives representative formulas from the named source paths, works small examples, and states where those formulas stop describing the implementation.
+This study asks how a real-time game turns continuous geometry, uncertain outcomes, and large spatial searches into rules that can be evaluated within a fixed update budget. Its thesis is that Mellangan's mathematical design depends less on any single formula than on a recurring three-part construction: **choose a finite representation, preserve an invariant, and state the domain in which the representation is valid**. A target lead is capped in time; resistance is capped and acts twice; a rarity roll is an ordered decision process; spatial searches use cells and prefix sums; terrain is classified at sites and blended at boundaries; motion advances through discrete recurrences. Each construction gains speed or predictability by giving up some generality.
 
-### Scope, notation, and method
+The evidence is the current source code named above. The chapter reconstructs the relevant equations, derives selected invariants, and uses numerical examples to expose units and edge cases. It distinguishes an exact algebraic consequence of a code path from a useful approximation to its full runtime behavior. No claim here is a benchmark of frame time or a proof of global gameplay balance. The result is a method for contributors: formulate a change in mathematical terms, identify its assumptions, and test the point where those assumptions cease to hold.
 
-Let $x,y$ denote position in **world pixels** unless a section explicitly says **tiles**. A tile is 16 pixels wide. Let $n$ be a simulation tick and $\\Delta t=1/60\\text{ s}$ its duration. Bold symbols are two-dimensional vectors; $\\|\\mathbf v\\|$ is Euclidean length. Probabilities refer to the stated random check, not necessarily to a final item or encounter. A half-open interval $[a,b)$ contains $a$ but excludes $b$.
+### Research question and analytical framework
 
-The method is source-to-equation reconstruction: identify the inputs and their units, preserve the code's order of operations, derive the resulting expression, then test it with a numerical case or invariant. The formulas describe specific code paths. They are not claims that every system with the same name follows the same model. The source files above are the primary evidence; the numerical examples are calculations from those paths.
+**Research question.** What properties must a simplified mathematical model preserve to remain useful inside Mellangan's fixed-step simulation and rendering pipeline? The answer is examined through four families: decision rules (targeting, status, loot), data transforms (spatial buckets, depth ordering, route fields), spatial synthesis (biomes, noise, ground blending), and time evolution (particles, matter, light). These families are related by their treatment of bounds, ordering, and units.
+
+An **invariant** is a property expected to remain true after a valid operation, such as a normalized blend summing to one or disjoint grid ranges covering every binned enemy. An **assumption** restricts when a derivation applies, such as constant damage rate or finite non-NaN depth. A **boundary condition** describes what happens at an edge of the domain, such as a distance threshold, a zero timer, or the edge of a grid cell. These terms matter because a correct formula with an omitted assumption can still make a false prediction about the game.
+
+| Model family | Finite representation | Property examined below | Principal limitation |
+| --- | --- | --- | --- |
+| Targeting and status | Capped lead; bounded resistance | Maximum lead; effect of two reductions | Moving quarry; reapplication and caps |
+| Loot and indexing | Ordered rolls; prefix-sum buckets | Probability partition; disjoint ranges | Later item rules; broad-phase candidates |
+| Rendering and routes | Integer sort keys; grid field | Stable depth order; minimum edge count | NaNs and key width; unequal step lengths |
+| Terrain and motion | Sampled biomes; fixed ticks | Blend normalization; recurrence behavior | Classification boundaries; update order |
+
+### Sources, notation, and method
+
+The source files listed for this chapter are the primary corpus. For each model, the analysis identifies the exact function, records its inputs and units, translates its operations in their executed order, derives a consequence, and then checks that consequence with a numerical example or an invariant. This is a study of implementation semantics. It does not infer design intent from a formula alone, nor treat a historical measurement as a mathematical guarantee.
+
+Let $x,y$ denote position in **world pixels** unless a section explicitly says **tiles**. One tile spans 16 pixels. Let $n$ be a simulation tick and $\\Delta t=1/60\\text{ s}$ its duration. Bold symbols are two-dimensional vectors; $\\|\\mathbf v\\|$ is Euclidean length. Probabilities refer to the stated random check, not necessarily to a final item or encounter. A half-open interval $[a,b)$ contains $a$ but excludes $b$. All derivatives below refer to the idealized real-valued formula; the program evaluates finite-precision numbers and may clamp them.
+
+The four parts below move from local decisions to data structures, then to generated space and time-dependent effects. Every result should be read with its stated assumptions. The dedicated chapters on AI, terrain, particles, and matter provide wider system context.
+
+## Part I. Decision rules under bounds
 
 ### 1. Target prediction and the sight test
 
@@ -4660,7 +4679,11 @@ The method is source-to-equation reconstruction: identify the inputs and their u
 
 $\\tau=0.6\\min\\left(0.7,\\frac{\\|\\mathbf{r}\\|}{\\max(20,s)}\\right),\\qquad \\mathbf{q}=\\mathbf{r}+\\tau\\mathbf{v}$
 
-The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. An exact constant-velocity interception would instead solve $\\|\\mathbf r+t\\mathbf v\\|=st$ for a nonnegative $t$ when a solution exists. This code uses a capped heuristic and type speed rather than the enemy's current velocity. The comparison identifies what the approximation omits; it does not imply that exact interception would improve play.
+The prediction time is at most $0.42$ seconds. For a quarry 100 px away, enemy speed 50 px/s, and quarry velocity perpendicular to the line of sight at 20 px/s, the unbounded distance-over-speed estimate is 2 s. The clamp gives $\\tau=0.42$ s, so the predicted point is offset 8.4 px sideways. To see what the heuristic omits, assume constant velocities and solve the hypothetical interception equation $\\|\\mathbf r+t\\mathbf v\\|=st$. Squaring both sides yields
+
+$$ (\\mathbf v\\cdot\\mathbf v-s^2)t^2+2(\\mathbf r\\cdot\\mathbf v)t+\\mathbf r\\cdot\\mathbf r=0. $$
+
+An exact intercept would require a real, nonnegative root and would depend on the direction of $\\mathbf v$. \`Enemy::sense()\` does not solve this quadratic. Its capped expression is a short perceptual lead that remains finite even when exact interception is impossible. The comparison identifies the approximation's domain; it does not claim that exact interception would improve play.
 
 For a living quarry, the code normalizes $\\mathbf{q}$ to $\\hat{\\mathbf{q}}$ when its length exceeds 0.001. The \`seen\` flag tests:
 
@@ -4678,7 +4701,7 @@ At 50% resistance, an effect of 40 damage per second for 4 seconds becomes 20 da
 
 The tick implementation applies damage in 0.5-second intervals and pays out any remaining fractional interval on expiry. If $T_r=1.3$ s, the portions are $0.5+0.5+0.3=1.3$ s. This explains why the integral above is useful even when duration does not divide evenly into ticks.
 
-**Derivation.** For constant damage rate $P_r$, total damage is its time integral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Substituting the two resistance reductions gives $PT(1-r)^2$. The square follows because resistance changes **both** rate and exposure time. It would be wrong to square $1-r$ for a one-time hit or an effect with fixed duration.
+**Derivation.** For constant damage rate $P_r$, total damage is its time integral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Substituting the two resistance reductions gives $PT(1-r)^2$. The square follows because resistance changes **both** rate and exposure time. In the uncapped interval, $\\partial D_r/\\partial r=-2PT(1-r)$, so additional resistance reduces damage but its absolute marginal effect becomes smaller as $r$ rises. This derivative stops describing the code once resistance itself reaches the 0.75 clamp or another cap applies. A one-time hit or an effect with fixed duration would have a different dependence on $r$.
 
 **Boundary of the model.** Power has a per-status cap, duration is capped at 60 seconds, and reapplication may retain a stronger or longer existing effect. Bleed stacks power and deals $1.6\\times$ while the target is moving. Death or removal can end the sequence early. These cases require following the state update rather than applying the isolated-effect formula.
 
@@ -4688,7 +4711,7 @@ The tick implementation applies damage in 0.5-second intervals and pays out any 
 
 $f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$
 
-For nonnegative magic find $m$, each extra point adds less effective magic find than the previous one. Unique and rare checks use different constants: $k=250$ and $k=600$ respectively. The magic check uses raw magic find. Each check is capped at 1:
+For nonnegative magic find $m$, $f_k'(m)>0$ while $f_k''(m)=-2k^2/(m+k)^3<0$. Thus more magic find always raises the transformed value, but each extra point contributes less than the previous point. The transform approaches $k$ as $m$ grows without bound. Unique and rare checks use different constants, $k=250$ and $k=600$ respectively; the magic check uses raw magic find. Each check is capped at 1:
 
 $u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$
 $r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$
@@ -4697,7 +4720,11 @@ These are **conditional checks**, not three final probabilities that can simply 
 
 $P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$
 
+The remaining probability is $P(O)=(1-u)(1-r)(1-g)$, where $O$ means the rarity roll reaches the later superior-or-normal choice. These four outcomes partition the initial roll: $u+(1-u)[r+(1-r)(g+1-g)]=1$. This identity is a useful check on an edited probability table. It also shows why the order matters: if rare were checked first, the final unique probability would become $(1-r)u$ rather than $u$.
+
 At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, while the rare check is 2.222%. The actual probability of reaching and passing the rare check is about $0.997143\\times0.022222=2.216\\%$. Item generation can subsequently impose a rarity floor or handle a unique result specially, so these equations describe the initial rarity roll, not every final drop outcome.
+
+## Part II. Data structures as mathematical transformations
 
 ### 4. Prefix sums: turning a crowd into contiguous buckets
 
@@ -4705,7 +4732,9 @@ At item level 40 and zero magic find, $S=2$: the unique check is about 0.286%, w
 
 $[0,\\;2,\\;2,\\;5,\\;6]$
 
-Formally, if $c_i$ is the count in cell $i$, define $s_0=0$ and $s_{i+1}=s_i+c_i$. Then $s_i=\\sum_{j<i}c_j$ and $s_C=N$, the total number of binned enemies. Cell $i$ occupies the half-open interval $[s_i,s_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3, and 4. These intervals cannot overlap and together cover exactly $[0,N)$, provided the scatter step writes each counted enemy once. Building the index takes $O(N+C)$ work for $N$ enemies and $C$ cells, plus storage for the arrays.
+Formally, if $c_i$ is the count in cell $i$, define $s_0=0$ and $s_{i+1}=s_i+c_i$. Then $s_i=\\sum_{j<i}c_j$ and $s_C=N$, the total number of binned enemies. Cell $i$ occupies the half-open interval $[s_i,s_{i+1})$. Cell 1 is empty because its two offsets are equal; cell 2 occupies indices 2, 3, and 4.
+
+**Proposition: the cell ranges form a partition.** If all $c_i$ are nonnegative and the scatter writes exactly $c_i$ enemies into cell $i$, the ranges are disjoint and their union is $[0,N)$. The proof follows from $s_{i+1}=s_i+c_i$: the next range begins where the previous range ends, and the final end is $N$. This is stronger than merely observing that the total count is correct; it rules out overlap and gaps. Building the index takes $O(N+C)$ work for $N$ enemies and $C$ cells, plus storage for the arrays.
 
 \`gather()\` visits the query's own cell first, then other cells touched by the query bounding square. It skips removed enemies and stops at the caller's maximum. This is a **broad-phase candidate collection**: cell membership alone does not prove a candidate lies within the requested circular radius. Buried enemies are placed in a separate \`loose\` list during grid construction.
 
@@ -4720,7 +4749,7 @@ Formally, if $c_i$ is the count in cell $i$, define $s_0=0$ and $s_{i+1}=s_i+c_i
 | $+0$ | \`00000000\` | \`80000000\` |
 | $+10$ | \`41200000\` | \`C1200000\` |
 
-The two zeros compare equal numerically but get adjacent, distinct keys. NaNs do not have a normal numerical ordering, so the transformation should not be interpreted as a mathematical ordering of NaN values.
+**Proposition: the transform preserves finite depth order.** Among nonnegative finite IEEE-754 values, unsigned bit patterns increase with numeric value; flipping the sign bit moves that entire range above the negative range. Among negative finite values, the raw unsigned patterns run in reverse numeric order; complementing all bits reverses them again. The two transformed ranges meet around zero. The two zeros compare equal numerically but get adjacent, distinct keys. NaNs do not have a normal numerical ordering, so the proposition excludes them. It also assumes the 32-bit float representation used by this source path.
 
 The packed key places layer at bit 56 and above, ordered depth in bits 24–55, and the draw index in the low 24 bits. Three stable 12-bit counting passes at shifts 24, 36, and 48 sort bits 24–59. Thus the sort covers the depth and only the low four layer bits; current layer values fit there. They do **not** sort the low index bits, so stability preserves insertion order for equal layer and depth. Each pass scans the keys and 4096 buckets, giving $O(3(N+4096))$ work. The packed representation also assumes the draw index fits in 24 bits.
 
@@ -4728,10 +4757,14 @@ The packed key places layer at bit 56 and above, ordered depth in bits 24–55, 
 
 \`bastion::raise()\` treats traversable cells as graph vertices and up to eight neighboring cells as edges. It seeds a FIFO queue with the gate opening, then floods outward. Each newly discovered cell stores the direction back toward the cell that discovered it. Diagonal expansion is rejected when either adjacent orthogonal cell is a wall, preventing a route through a blocked corner.
 
-Because every edge is assigned one queue step, breadth-first search minimizes the **number of grid moves**, not exact Euclidean travel distance. The invariant is that the first time a vertex leaves the FIFO frontier, no shorter edge-count path to it remains undiscovered. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. For example, moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally. A weighted shortest-path method would answer a different distance question.
+**Proposition: the stored direction follows a minimum-hop route to an opening.** Every gate opening enters the queue at distance zero. A discovered neighbor receives one more edge than the cell that discovered it. FIFO order processes all distance-$d$ cells before any distance-$(d+1)$ cell, so a later discovery cannot produce a shorter edge-count route. The direction stored at a cell points back along that first route. This proof assumes every accepted edge has unit cost and the wall and corner checks define a fixed graph during construction.
+
+The result minimizes the **number of grid moves**, not exact Euclidean travel distance. A diagonal and an orthogonal step each count as one edge even though their geometric lengths differ. Moving one cell diagonally has physical length $16\\sqrt{2}$ px, compared with 16 px orthogonally. A weighted shortest-path method would answer a different distance question.
 
 The field is shared: when the player and a moving entity are on opposite sides of a bastion and the entity is already heading toward the player, \`route()\` can replace its desired velocity with the stored normalized direction times speed. This is a local routing rule, not a general shortest-path solution for every obstacle or every moving target.
 
+
+## Part III. Space, classification, and generated texture
 
 ### 7. Biome classification: continuous climate and discrete sites
 
