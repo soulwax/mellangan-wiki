@@ -4994,6 +4994,8 @@ Key mathematical properties:
 3. **Parallax Cloud Strata (\`src/level/Sky.cpp\`):**
    Cloud cover combines slow parallax wind displacement $(o_x, o_y)$ with high-frequency horizon turbulence to simulate atmospheric depth.
 
+## Part IV. Time evolution and visible effects
+
 ### 10. Particle motion: identify the time unit first
 
 \`Spark\` and \`Drift\` store horizontal velocities in pixels per second and multiply displacement by $\\Delta t$. \`Debris\` stores velocities and gravity in pixels per simulation tick. The same member names \`xa\`, \`ya\`, and \`za\` therefore have different units in these two families. Read the update equation before comparing their parameter values.
@@ -5004,7 +5006,11 @@ For a spark, one update first multiplies velocity by $k=e^{-5\\Delta t}$, then m
 
 $$\\mathbf v_{n+1}=e^{-5\\Delta t}\\mathbf v_n,\\qquad\\mathbf x_{n+1}=\\mathbf x_n+\\Delta t\\,\\mathbf v_{n+1}.$$
 
-At 60 Hz, $k=e^{-5/60}\\approx0.9200$. After 30 ticks, or half a second, the speed ratio is $k^{30}=e^{-2.5}\\approx0.0821$. The speed half-life is $\\ln 2/5\\approx0.139$ seconds. This is velocity damping; it does not imply a spark has gravity or collides with walls. Its visible lifetime is independently chosen at spawn.
+At 60 Hz, $k=e^{-5/60}\\approx0.9200$. After 30 ticks, or half a second, the speed ratio is $k^{30}=e^{-2.5}\\approx0.0821$. The speed half-life is $\\ln 2/5\\approx0.139$ seconds. Because movement uses the **new**, damped velocity, repeated substitution yields
+
+$$\\mathbf x_n-\\mathbf x_0=\\Delta t\\sum_{j=1}^{n}k^j\\mathbf v_0=\\Delta t\\,\\mathbf v_0\\frac{k(1-k^n)}{1-k}.$$
+
+The infinite-time displacement factor at 60 Hz is about $0.192$ s times the initial speed, compared with $0.2$ s for the continuous differential equation $d\\mathbf v/dt=-5\\mathbf v$. This small difference comes from discrete update order, not from a different drag constant. The spark's finite lifetime shortens the actual path further. Damping alone does not imply gravity or wall collision; those behaviors belong to other effect types.
 
 \`Drift\` adds gravity after damping: $v_{y,n+1}=kv_{y,n}+g\\Delta t$, where $k=e^{-d\\Delta t}$ and $d$ is its drag coefficient. For constant $g$ and $d>0$, this discrete recurrence approaches $v_{y,\\infty}=g\\Delta t/(1-e^{-d\\Delta t})$. Sway is a separate oscillating term in horizontal displacement, while spin changes image rotation.
 
@@ -5018,7 +5024,9 @@ For airborne debris, the base update is $v_{x,n+1}=d v_{x,n}$, $v_{y,n+1}=d v_{y
 
 For example, a Wet tile chilled at $t=0$ becomes Frozen for 12 seconds. On expiry it becomes Wet for another 6 seconds; then it becomes None. That is a sequence of state transitions, $\\text{Wet}\\xrightarrow{\\text{Chill}}\\text{Frozen}\\xrightarrow{12s}\\text{Wet}\\xrightarrow{6s}\\text{None}$, not one continuous temperature equation.
 
-Fire spreads every tenth matter step, approximately once per second. It tests four cardinal neighbors and requires both an empty stored state and a burnable prop. The scan queues changes and applies them afterward. Consequently a newly lit tile cannot light the next tile in the same spread pass. Along an uninterrupted one-tile-wide fuel strip, the leading edge advances at most one tile, or 16 world pixels, per spread pass. Oil ignition is a separate immediate eight-neighbor burst and does not follow this bound.
+Fire spreads every tenth matter step, approximately once per second. It tests four cardinal neighbors and requires both an empty stored state and a burnable prop. The scan queues changes and applies them afterward.
+
+**Proposition: one spread pass cannot carry ordinary fire through two previously unlit tiles in a line.** Every source examined during the pass was already Burning when the scan began; newly scheduled changes become Burning only after the scan. Therefore the second unlit tile cannot use the first newly lit tile as a source until a later pass. Along an uninterrupted one-tile-wide fuel strip, the leading edge advances at most one tile, or 16 world pixels, per spread pass. The proof assumes this ordinary spread path; oil ignition is a separate immediate eight-neighbor burst and does not follow the bound. Expiry, missing fuel, and competing states may slow or stop the front.
 
 ### 12. Light-cast shadow geometry
 
@@ -5026,7 +5034,9 @@ For each registered light caster within its reach, \`LightField::cast()\` measur
 
 $$f=1-\\frac{d}{R},\\qquad\\ell=H\\operatorname{clamp}\\left(\\frac{d}{48},0.35,2.2\\right),\\qquad a=\\operatorname{clamp}(1.5Sf,0,1),$$
 
-where $H$ is object height, $S$ is light strength, $\\ell$ controls shadow length, and $a$ is shadow alpha. With $d=48$, $R=120$, and $S=0.5$, the falloff is $0.6$, length is $H$, and alpha is $0.45$. The angle is $\\operatorname{atan2}(y-y_c,x-x_c)$, pointing away from the caster. This is a visual contact-shadow model with capped length and opacity, not ray-traced occlusion or an inverse-square light law.
+where $H$ is object height, $S$ is light strength, $\\ell$ controls shadow length, and $a$ is shadow alpha. With $d=48$, $R=120$, and $S=0.5$, the falloff is $0.6$, length is $H$, and alpha is $0.45$. The angle is $\\operatorname{atan2}(y-y_c,x-x_c)$, pointing away from the caster.
+
+The ratios $d/R$ and $d/48$ are dimensionless when both distances are in pixels. Consequently $f$ and $a$ are dimensionless, while $\\ell$ retains the length unit of $H$. This unit check catches a common mistake: supplying $d$ in tiles to a formula whose constants 6, 48, and $R$ are pixel distances would change both eligibility and shadow length by a factor tied to tile size. This is a visual contact-shadow model with capped length and opacity, not ray-traced occlusion or an inverse-square light law.
 
 ### Synthesis and limits
 
