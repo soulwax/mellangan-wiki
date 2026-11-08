@@ -4642,17 +4642,21 @@ flowchart TD
       "src/particle/Drift.cpp",
       "src/particle/debris/Debris.cpp",
       "src/level/Matter.cpp",
+      "src/Game.cpp",
+      "src/campaign/CampaignChronicle.cpp",
+      "src/hero/Synergy.cpp",
+      "src/level/Feuds.cpp",
     ],
     content: `
 ### Zusammenfassung
 
 Diese Untersuchung fragt, wie ein Echtzeitspiel kontinuierliche Geometrie, ungewisse Ergebnisse und umfangreiche räumliche Suchen in Regeln überführt, die sich innerhalb eines festen Zeitbudgets auswerten lassen. Ihre These lautet, dass Mellangans mathematischer Entwurf weniger von einer einzelnen Formel als von einem wiederkehrenden Dreischritt abhängt: **eine endliche Darstellung wählen, eine Invariante bewahren und den Gültigkeitsbereich der Darstellung angeben**. Die Vorhersage einer Zielposition ist zeitlich begrenzt; Widerstand ist gedeckelt und wirkt zweifach; die Seltenheit wird durch eine geordnete Abfolge von Entscheidungen bestimmt; räumliche Suchen nutzen Zellen und Präfixsummen; Gelände wird an Stützpunkten klassifiziert und an Grenzen gemischt; Bewegung schreitet in diskreten Rekursionen fort. Jede dieser Konstruktionen gewinnt Geschwindigkeit oder Vorhersagbarkeit, indem sie auf einen Teil der Allgemeingültigkeit verzichtet.
 
-Als Beleg dient der oben genannte aktuelle Quellcode. Das Kapitel rekonstruiert die maßgeblichen Gleichungen, leitet ausgewählte Invarianten her und verdeutlicht Einheiten und Grenzfälle anhand von Zahlenbeispielen. Es unterscheidet exakte algebraische Folgen eines Codepfads von brauchbaren Näherungen für dessen vollständiges Laufzeitverhalten. Weder die Laufzeit eines Einzelbildes noch die allgemeine Spielbalance werden hier gemessen oder bewiesen. Daraus ergibt sich ein Vorgehen für Mitwirkende: Änderungen mathematisch formulieren, ihre Voraussetzungen benennen und die Stellen prüfen, an denen diese Voraussetzungen nicht mehr gelten.
+Als Beleg dient der oben genannte aktuelle Quellcode. Das Kapitel rekonstruiert die maßgeblichen Gleichungen, leitet ausgewählte Invarianten her und verdeutlicht Einheiten und Grenzfälle anhand von Zahlenbeispielen. Es unterscheidet exakte algebraische Folgen eines Codepfads von brauchbaren Näherungen für dessen vollständiges Laufzeitverhalten. Weder die Laufzeit eines Einzelbildes noch die allgemeine Spielbalance werden hier gemessen oder bewiesen. Ein fünfter Teil überträgt dieselbe Methode auf Systeme der lebendigen Welt: Eine Kachelmarke verhindert das Pendeln zwischen Ebenen, Grüfte und Tafeln erhalten eine Präfix-Invariante der Chronik, Synergien bilden eine Produktmenge, und die Wahrscheinlichkeit einer Fehde lässt sich trotz Restverzerrung des Hashes exakt angeben. Daraus ergibt sich ein Vorgehen für Mitwirkende: Änderungen mathematisch formulieren, ihre Voraussetzungen benennen und die Stellen prüfen, an denen diese Voraussetzungen nicht mehr gelten.
 
 ### Forschungsfrage und analytischer Rahmen
 
-**Forschungsfrage.** Welche Eigenschaften muss ein vereinfachtes mathematisches Modell bewahren, damit es in Mellangans Simulation mit festen Zeitschritten und seiner Darstellung nützlich bleibt? Die Antwort wird anhand von vier Gruppen untersucht: Entscheidungsregeln (Zielerfassung, Zustände, Beute), Datenumformungen (räumliche Zellen, Tiefensortierung, Richtungsfelder), räumliche Erzeugung (Biome, Rauschen, Bodenübergänge) und zeitliche Entwicklung (Partikel, Materie, Licht). Diese Gruppen verbindet der Umgang mit Grenzen, Reihenfolgen und Einheiten.
+**Forschungsfrage.** Welche Eigenschaften muss ein vereinfachtes mathematisches Modell bewahren, damit es in Mellangans Simulation mit festen Zeitschritten und seiner Darstellung nützlich bleibt? Die Antwort wird anhand von vier Gruppen und einem abschließenden fünften Teil untersucht: Entscheidungsregeln (Zielerfassung, Zustände, Beute), Datenumformungen (räumliche Zellen, Tiefensortierung, Richtungsfelder), räumliche Erzeugung (Biome, Rauschen, Bodenübergänge) und zeitliche Entwicklung (Partikel, Materie, Licht). Diese Gruppen verbindet der Umgang mit Grenzen, Reihenfolgen und Einheiten.
 
 Eine **Invariante** ist eine Eigenschaft, die nach einer gültigen Operation erhalten bleiben soll, etwa eine normierte Mischung mit der Summe eins oder disjunkte Zellbereiche, die alle zugeordneten Gegner enthalten. Eine **Voraussetzung** beschränkt den Gültigkeitsbereich einer Herleitung, etwa eine konstante Schadensrate oder eine endliche Tiefe ohne NaN-Wert. Eine **Randbedingung** beschreibt das Verhalten an einer Grenze des Bereichs, etwa an einer Entfernungsschwelle, bei einem Zählerstand von null oder am Rand einer Rasterzelle. Diese Begriffe sind wichtig: Auch eine korrekte Formel kann zu einer falschen Vorhersage über das Spiel führen, wenn ihre Voraussetzungen fehlen.
 
@@ -4662,6 +4666,7 @@ Eine **Invariante** ist eine Eigenschaft, die nach einer gültigen Operation erh
 | Beute und Indizierung | Geordnete Würfe; Zellen mit Präfixsummen | Aufteilung der Wahrscheinlichkeiten; disjunkte Bereiche | Nachgelagerte Gegenstandsregeln; Kandidaten der Grobsuche |
 | Darstellung und Wege | Ganzzahlige Sortierschlüssel; Rasterfeld | Stabile Tiefenreihenfolge; minimale Schrittzahl | NaN-Werte und Schlüsselbreite; unterschiedliche Schrittlängen |
 | Gelände und Bewegung | Abgetastete Biome; feste Zeitschritte | Normierung der Mischung; Verhalten der Rekursion | Klassifikationsgrenzen; Reihenfolge der Aktualisierung |
+| Ebenen, Chronik und Kombinatorik | Kachelmarke; Kennungsmengen; Bitmasken; Hash-Reste | Kein Pendeln; Präfix der Fragmente; Produktformel; exakte Wahrscheinlichkeit | Stürze außerhalb der Durchgänge; bearbeitete Spielstände; Annahme gleichverteilter Hashes |
 
 ### Quellen, Notation und Methode
 
@@ -4685,6 +4690,14 @@ $$ (\\mathbf v\\cdot\\mathbf v-s^2)t^2+2(\\mathbf r\\cdot\\mathbf v)t+\\mathbf r
 
 Ein exakter Abfangpunkt erfordert eine reelle, nichtnegative Lösung und hängt von der Richtung von $\\mathbf v$ ab. \`Enemy::sense()\` löst diese quadratische Gleichung nicht. Der begrenzte Ausdruck liefert einen kleinen Vorhalt für die Wahrnehmung und bleibt selbst dann endlich, wenn ein exaktes Abfangen unmöglich ist. Der Vergleich zeigt den Gültigkeitsbereich der Näherung; daraus folgt nicht, dass ein exaktes Abfangen das Spiel verbessern würde.
 
+**Satz 1 (beschränkter Vorhalt).** Für endliche Eingaben, $s\\ge0$ und $R=\\|\\mathbf r\\|\\ge0$ gilt $0\\le\\tau\\le0.42\\,\\mathrm{s}$ und
+$$\\|\\mathbf q-\\mathbf r\\|=\\tau\\|\\mathbf v\\|\\le0.42\\,\\mathrm{s}\\,\\|\\mathbf v\\|.$$
+*Beweis.* Der Nenner $\\max(20,s)$ ist positiv, daher ist $R/\\max(20,s)\\ge0$. Das Minimum mit $0.7\\,\\mathrm{s}$ liegt in $[0,0.7\\,\\mathrm{s}]$; Multiplikation mit $0.6$ liefert die erste Schranke. Aus $\\mathbf q-\\mathbf r=\\tau\\mathbf v$ folgt die zweite durch Homogenität der euklidischen Norm. Die Aussage begrenzt den **Zusatz zum aktuellen Zielvektor**, nicht die Entfernung des Gegners zum Ziel oder die spätere Bewegung des Gegners.
+
+Unter der zusätzlichen Modellannahme, dass die tatsächliche Zielbeschleunigung während $[0,\\tau]$ höchstens $A$ Pixel pro Quadratsekunde beträgt und $\\mathbf v$ die Anfangsgeschwindigkeit ist, lässt sich auch der Vorhersagefehler begrenzen. Zweimaliges Integrieren von $\\mathbf a(t)$ ergibt $\\mathbf r_{\\mathrm{wahr}}(\\tau)-\\mathbf q=\\int_0^\\tau(\\tau-u)\\mathbf a(u)\\,du$. Die Dreiecksungleichung liefert
+$$\\|\\mathbf r_{\\mathrm{wahr}}(\\tau)-\\mathbf q\\|\\le\\int_0^\\tau(\\tau-u)A\\,du=\\tfrac12A\\tau^2\\le0.0882A.$$
+Dies ist ein **bedingter Fehlerbeweis** für das Modell konstanter Anfangsgeschwindigkeit. Abrupte Richtungswechsel, Teleportation oder eine nicht beschränkte Beschleunigung verletzen seine Voraussetzung.
+
 Bei einem lebenden Ziel normiert der Code $\\mathbf{q}$ zu $\\hat{\\mathbf{q}}$, sofern seine Länge größer als 0.001 ist. Das Kennzeichen \`seen\` prüft:
 
 $\\|\\mathbf{q}\\|<300\\quad\\text{und}\\quad -\\mathbf{a}\\cdot\\hat{\\mathbf{q}}>0.55$
@@ -4700,6 +4713,8 @@ $P_r=P(1-r),\\qquad T_r=T(1-r),\\qquad D_r=PT(1-r)^2$
 Bei 50 % Widerstand werden aus 40 Schadenspunkten pro Sekunde über 4 Sekunden 20 Schadenspunkte pro Sekunde über 2 Sekunden: 40 statt 160 Schadenspunkte. Bei der Obergrenze von 75 % beträgt das idealisierte Ergebnis $160(0.25)^2=10$.
 
 Die Implementierung fügt Schaden in Abständen von 0.5 Sekunden zu und rechnet beim Ablauf einen verbleibenden Teilabschnitt ab. Bei $T_r=1.3$ s ergeben sich die Abschnitte $0.5+0.5+0.3=1.3$ s. Deshalb ist das obige Integral auch dann nützlich, wenn sich die Dauer nicht gleichmäßig auf die Zeitschritte verteilt.
+
+**Lemma 2 (Erhaltung der wirksamen Zeit durch die Taktung).** Wird ein einzelner Zustand ohne erneute Anwendung bis zum Ablauf fortgeschrieben, bleibt seine Stärke konstant und akzeptiert der Schadensaufruf jeden Treffer, dann ist die Summe aller berechneten Zeitanteile im idealisierten Modell genau $T_r$. Schreibe $T_r=0.5n+\\rho$ mit $n=\\lfloor T_r/0.5\\rfloor$ und $0\\le\\rho<0.5$. Jeder vollständige Halbsekundentakt trägt $0.5P_r$ Schaden bei; beim Ablauf trägt der Rest $\\rho P_r$ bei. Somit ist $D=n(0.5P_r)+\\rho P_r=P_rT_r$. Die Zerlegung hängt nicht davon ab, auf welche Simulationsschritte die Halbsekundengrenzen fallen. Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod während eines Schadensaufrufs und die weiter unten genannten Obergrenzen die exakte Gleichheit verändern.
 
 **Herleitung.** Bei konstanter Schadensrate $P_r$ ist der Gesamtschaden ihr Zeitintegral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Einsetzen der beiden Abschwächungen durch den Widerstand ergibt $PT(1-r)^2$. Das Quadrat entsteht, weil der Widerstand **sowohl** die Rate als auch die Einwirkzeit verändert. Im unbegrenzten Bereich gilt $\\partial D_r/\\partial r=-2PT(1-r)$: Zusätzlicher Widerstand verringert den Schaden, doch sein absoluter Grenznutzen sinkt mit steigendem $r$. Sobald der Widerstand die Grenze 0.75 erreicht oder eine andere Obergrenze greift, beschreibt diese Ableitung den Code nicht mehr. Ein einmaliger Treffer oder ein Effekt mit fester Dauer wäre anders von $r$ abhängig.
 
@@ -4736,6 +4751,8 @@ Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dan
 
 **Behauptung: Die Zellbereiche bilden eine Zerlegung.** Sind alle $c_i$ nichtnegativ und schreibt die Verteilung genau $c_i$ Gegner in Zelle $i$, dann überschneiden sich die Bereiche nicht und ihre Vereinigung ist $[0,N)$. Der Beweis folgt aus $s_{i+1}=s_i+c_i$: Jeder Bereich beginnt genau dort, wo der vorige endet, und der letzte endet bei $N$. Das ist stärker als die bloße Feststellung, dass die Gesamtzahl stimmt; auch Überschneidungen und Lücken sind ausgeschlossen. Der Aufbau des Index benötigt $O(N+C)$ Arbeit für $N$ Gegner und $C$ Zellen sowie Speicher für die Felder.
 
+**Induktionsbeweis für das Schreiben.** Zu Beginn erhält der Schreibzeiger jeder Zelle den Wert $p_i=s_i$. Nach $j$ Schreibvorgängen in Zelle $i$ gilt als Schleifeninvariante $p_i=s_i+j$, und genau die Plätze $[s_i,s_i+j)$ dieser Zelle sind belegt. Für $j=0$ ist das Intervall leer. Ein weiterer Vorgang schreibt an $p_i$ und erhöht ihn um eins; damit gilt die Invariante für $j+1$. Wegen $j<c_i$ liegt jeder dieser Indizes vor $s_i+c_i=s_{i+1}$, also innerhalb des reservierten Bereichs. Nach $c_i$ Vorgängen ist $p_i=s_{i+1}$. Zusammen mit der disjunkten Zerlegung beweist dies, dass der Verteiler bei gültigen Zählungen weder eine Zelle überschreibt noch einen zugeordneten Gegner auslässt. Es beweist keine Sicherheit, wenn ein Gegner zwischen Zählen und Verteilen seine Zellnummer änderte; der Code sammelt deshalb Zellnummer und Zeiger gemeinsam in \`binned\`.
+
 \`gather()\` besucht zuerst die Zelle der Abfrage und danach weitere Zellen, die deren umschließendes Quadrat berührt. Die Funktion überspringt entfernte Gegner und endet beim vom Aufrufer vorgegebenen Höchstwert. Dies ist eine **grobe Kandidatensuche**: Die Zugehörigkeit zu einer Zelle beweist noch nicht, dass ein Kandidat innerhalb des angefragten Kreisradius liegt. Vergrabene Gegner werden beim Aufbau des Rasters in einer eigenen Liste \`loose\` abgelegt.
 
 ### 5. Gleitkomma-Tiefen mit Ganzzahlen sortieren
@@ -4752,6 +4769,8 @@ Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dan
 **Behauptung: Die Umwandlung bewahrt die Reihenfolge endlicher Tiefenwerte.** Bei nichtnegativen endlichen IEEE-754-Werten wachsen die vorzeichenlos interpretierten Bitmuster mit dem Zahlenwert; das Umkehren des Vorzeichenbits verschiebt den gesamten Bereich über die negativen Werte. Bei negativen endlichen Werten verlaufen die ursprünglichen vorzeichenlosen Bitmuster entgegen der numerischen Reihenfolge; die Umkehrung aller Bits dreht sie erneut um. Die beiden umgewandelten Bereiche treffen um null aufeinander. Beide Nullen sind numerisch gleich, erhalten aber benachbarte, verschiedene Schlüssel. NaN-Werte haben keine gewöhnliche numerische Ordnung und sind daher von der Behauptung ausgenommen. Vorausgesetzt wird außerdem die hier verwendete 32-Bit-Gleitkommadarstellung.
 
 Der gepackte Schlüssel enthält die Ebene ab Bit 56, die geordnete Tiefe in den Bits 24–55 und den Zeichenindex in den untersten 24 Bits. Drei stabile Zählsortierdurchläufe mit je 12 Bits und Verschiebungen um 24, 36 und 48 sortieren die Bits 24–59. Damit erfasst die Sortierung die Tiefe und nur die unteren vier Bits der Ebene; die aktuellen Ebenenwerte passen dort hinein. Die unteren Indexbits werden **nicht** sortiert: Bei gleicher Ebene und Tiefe bleibt aufgrund der Stabilität die Einfügereihenfolge erhalten. Jeder Durchlauf verarbeitet die Schlüssel und 4096 Zellen; der Aufwand beträgt $O(3(N+4096))$. Die gepackte Darstellung setzt außerdem voraus, dass der Zeichenindex in 24 Bits passt.
+
+**Satz 3 (Ordnung der drei Durchläufe).** Angenommen, jeder verwendete Ebenenwert liegt in $[0,15]$, jeder Zeichenindex in $[0,2^{24})$, die Tiefen sind endliche IEEE-754-Binary32-Werte und die Plattform verschiebt negative 32-Bit-Ganzzahlen arithmetisch nach rechts. Dann stehen die gezeichneten Objekte nach den drei Durchläufen in aufsteigender lexikografischer Reihenfolge von Ebene und geordneter Tiefe; bei gleichem **kodierten** Tiefenwert bleibt ihre Einfügereihenfolge erhalten. *Beweis.* Der erste stabile Durchlauf ordnet die Bits 24–35. Der zweite ordnet die Bits 36–47 und lässt bei gleichem zweiten Block die Ordnung des ersten Blocks bestehen. Der dritte ordnet die Bits 48–59 und bewahrt entsprechend beide niedrigeren Blöcke. Nach Induktion über die Durchläufe sind also alle 36 sortierten Bits geordnet. Die Bits 24–55 enthalten die gesamte Tiefenkodierung, die Bits 56–59 den ganzen Ebenenwert unter der genannten Schranke. Die unteren 24 Indexbits wurden nie verglichen; Stabilität erhält dort die ursprüngliche Reihenfolge. Größere Ebenenwerte könnten trotz dieser drei Durchläufe falsch einsortiert werden; NaN hat schon vor der Sortierung keine numerische Tiefenordnung. Die beiden numerisch gleichen Nullen besitzen verschiedene Bitmuster und gehören deshalb nicht zum Gleichheitsfall.
 
 ### 6. Ein Tor-Richtungsfeld als Graphenproblem
 
@@ -4858,6 +4877,8 @@ $S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
 
 Die Mischgewichte der vier Ecken der $2 \\times 2$-Zelle werden mit $S_x$ und $S_y$ bilinear interpoliert und anschließend erneut auf die drei vorherrschenden Biome reduziert. Vor dieser letzten Kürzung sind die vier bilinearen Koeffizienten nichtnegativ und ergeben zusammen eins. Auch jede Eckmischung ergibt eins; ihre gewichtete Mischung hat deshalb ebenfalls die Summe eins. \`compactBlend()\` verwirft alle bis auf die drei stärksten Anteile und normiert diese erneut. Die Normierung bleibt somit erhalten, während der genaue Beitrag eines verworfenen vierten Bioms bewusst verloren geht. Wechselt das Biom auf Rang drei, kann dennoch ein sichtbarer Übergang entstehen.
 
+**Satz 4 (Wahrscheinlichkeitsvektor nach beiden Kürzungen).** Sind die Eingangsgewichte endlich und nichtnegativ und ist mindestens eines positiv, liefert \`compactBlend()\` höchstens drei verschiedene Biome mit nichtnegativen Gewichten und Summe eins, abgesehen von Rundungsfehlern. *Beweis.* Die Auswahl nimmt einen bislang unbenutzten Index mit maximalem positiven Gewicht; deshalb kann kein Index zweimal erscheinen. Sei $A$ die Menge der ausgewählten Indizes und $W=\\sum_bv_b>0$. Vor dem letzten Normieren stehen dort $v_b/W$, deren Summe $S=\\sum_{b\\in A}v_b/W>0$ ist. Nach Division durch $S$ ist jedes Endgewicht $v_b/\\sum_{a\\in A}v_a$, also nichtnegativ und insgesamt eins. Für die Interpolation haben die vier Eckkoeffizienten $(1-S_x)(1-S_y)$, $S_x(1-S_y)$, $(1-S_x)S_y$ und $S_xS_y$ dieselben Eigenschaften, weil $S_x,S_y\\in[0,1]$. Ihre Mischung normierter Eckvektoren erfüllt daher wieder die Voraussetzungen des Satzes. Die Auswahl der jeweils drei größten Anteile ist dagegen eine diskrete Operation; Normierung allein beweist keine Stetigkeit der **gekürzten** Gewichte.
+
 ##### 3. Rekursive Zusammensetzung mit Alphawerten
 \`FloorPainter::blend()\` zeichnet bis zu drei Bodenoberflächen nacheinander. Das maßgebliche Biom der örtlichen Kachel (\`own\`) steht an Index 0, gefolgt von fremden Biomen. Die Deckkraft $\\alpha_i$ für Schicht $i$ lautet:
 
@@ -4963,6 +4984,8 @@ $$f'(0) = f'(1) = 0, \\qquad f''(0) = f''(1) = 0$$
 
 An ganzzahligen Grenzen verschwinden sowohl die erste als auch die zweite Ableitung der Glättungskurve. Zusammen mit den gemeinsamen Eckgradienten gehen der interpolierte Wert und seine ersten beiden Ableitungen im idealen mathematischen Modell an Zellrändern glatt ineinander über; die Berechnung mit Gleitkommazahlen bleibt eine Näherung.
 
+**Satz 5 ($C^2$-Anschluss an einer Gitterkante).** Fixiere eine waagerechte Teilzelle und betrachte die beiden benachbarten Zellen links und rechts der Grenze $x=m$. In jeder Zelle ist der entlang $x$ interpolierte Ausdruck $L(x)=(1-f(t))A(x)+f(t)B(x)$ mit lokalem $t\\in[0,1]$; $A$ und $B$ sind nach der Interpolation in $y$ weiterhin affine Funktionen von $x$. Am rechten Rand der linken Zelle ist $t=1$, am linken Rand der rechten $t=0$. Wegen $f(1)=1$, $f(0)=0$ und $f'(0)=f'(1)=f''(0)=f''(1)=0$ haben beide Seiten dort den Wert, die erste $x$-Ableitung und die zweite $x$-Ableitung der **gemeinsamen** Kantengradienten. Die Ableitungen nach $y$ stimmen ebenfalls überein, weil an der Kante dieselben zwei Gradienten und dieselbe $y$-Interpolation verwendet werden; Ableiten dieser gemeinsamen Randfunktion erhält auch die gemischten Ableitungen. Damit ist das ideale Gradientenrauschen an Gitterkanten $C^2$. Dieser Beweis setzt identische Hash-Ergebnisse für dieselbe Ecke und reelle Arithmetik voraus; endliche Gleitkommapräzision garantiert keine bitgenaue Ableitungsstetigkeit.
+
 #### Gedrehte fraktale Brownsche Bewegung (\`noise_fbm\`)
 
 Werden Oktaven von unverändertem Perlin-Rauschen entlang der Hauptachsen addiert, entstehen sichtbare Ausrichtungsartefakte, weil die Gitterlinien jeder Oktave mit den Achsen zusammenfallen. Um diese wiederkehrende Ausrichtung zu vermeiden, multipliziert Mellangan den Koordinatenvektor bei jeder Oktave mit einer pythagoreischen Rotationsmatrix:
@@ -5010,6 +5033,12 @@ Bei 60 Hz gilt $k=e^{-5/60}\\approx0.9200$. Nach 30 Schritten oder einer halben 
 
 $$\\mathbf x_n-\\mathbf x_0=\\Delta t\\sum_{j=1}^{n}k^j\\mathbf v_0=\\Delta t\\,\\mathbf v_0\\frac{k(1-k^n)}{1-k}.$$
 
+**Satz 6 (Grenzwert und Zeitschrittfehler ohne Lebensdauerbegrenzung).** Für $a=5\\,\\mathrm{s}^{-1}$ und $\\Delta t>0$ ist $k=e^{-a\\Delta t}\\in(0,1)$. Die geometrische Reihe konvergiert; ihr unendlicher Verschiebungsfaktor ist
+$$F_{\\Delta t}=\\Delta t\\frac{k}{1-k}=\\frac{\\Delta t}{e^{a\\Delta t}-1}.$$
+Da $e^z>1+z$ für $z>0$, folgt $0<F_{\\Delta t}<1/a$. Mit $z=a\\Delta t$ und der Entwicklung $e^z-1=z+z^2/2+O(z^3)$ ergibt sich
+$$F_{\\Delta t}=\\frac1a-\\frac{\\Delta t}{2}+O(\\Delta t^2),\\qquad\\lim_{\\Delta t\\to0}F_{\\Delta t}=\\frac1a.$$
+Der diskrete Gesamtweg liegt also in Richtung der Anfangsgeschwindigkeit unter dem kontinuierlichen Grenzwert und nähert sich ihm bei kleineren Zeitschritten an. Die Aussage betrifft die reine Dämpfungsrekursion ohne Ende der Partikellebensdauer, Kollision oder weitere Kraft. Für einen Vektor bedeutet „unter“ hier den kleineren **Faktor**, nicht eine Ordnung zwischen Vektoren.
+
 Der Verschiebungsfaktor für unendlich lange Zeit beträgt bei 60 Hz ungefähr $0.192$ s mal Anfangsgeschwindigkeit, gegenüber $0.2$ s für die kontinuierliche Differentialgleichung $d\\mathbf v/dt=-5\\mathbf v$. Der kleine Unterschied entsteht durch die Reihenfolge der diskreten Aktualisierung und nicht durch eine andere Bremskonstante. Die endliche Lebensdauer des Funkens verkürzt den tatsächlichen Weg weiter. Aus der Dämpfung allein folgen weder Schwerkraft noch Kollisionen mit Wänden; diese Verhaltensweisen gehören zu anderen Effekten.
 
 \`Drift\` fügt nach der Dämpfung die Schwerkraft hinzu: $v_{y,n+1}=kv_{y,n}+g\\Delta t$, wobei $k=e^{-d\\Delta t}$ und $d$ der Bremskoeffizient ist. Bei konstantem $g$ und $d>0$ nähert sich diese diskrete Rekursion $v_{y,\\infty}=g\\Delta t/(1-e^{-d\\Delta t})$. Das Schwanken ist ein eigener schwingender Anteil der waagerechten Verschiebung; die Drehung verändert die Ausrichtung des Bildes.
@@ -5038,9 +5067,89 @@ wobei $H$ die Objekthöhe und $S$ die Lichtstärke bezeichnet. $\\ell$ bestimmt 
 
 Die Verhältnisse $d/R$ und $d/48$ sind dimensionslos, wenn beide Entfernungen in Pixeln angegeben sind. Daher sind $f$ und $a$ dimensionslos, während $\\ell$ die Längeneinheit von $H$ behält. Diese Einheitenprüfung deckt einen häufigen Fehler auf: Würde $d$ in Kacheln an eine Formel übergeben, deren Konstanten 6, 48 und $R$ Pixelabstände sind, änderten sich sowohl die Auswahl der Objekte als auch die Schattenlänge um einen von der Kachelgröße abhängigen Faktor. Dies ist ein Modell für sichtbare Kontaktschatten mit begrenzter Länge und Deckkraft, keine Strahlverfolgung und kein Abstandsquadratgesetz für Licht.
 
+## Teil V. Ebenenwechsel, Erinnerung und Kombinatorik der lebendigen Welt
+
+### 13. Ebenenwechsel ohne Pendeln: eine Kachelmarke als Hysterese
+
+Seit dem Umbau der Höhleneingänge genügt es, die Mitte eines Eingangs zu betreten. \`Game::step()\` läuft in jedem Simulationsschritt von \`Game::play()\` genau einmal, nach den Tastenwegen \`crack()\`, \`gather()\` und \`stairs()\` und vor dem Sturz in eine Kluft. Sei $\\Pi_\\ell$ die Menge der Durchgangskacheln der Ebene $\\ell$, also der Kacheln, für die \`world::passageAt()\` wahr liefert. Die **Fußkachel** des Helden im Schritt $n$ ist
+
+$u_n=\\left(\\left\\lfloor x_n/16\\right\\rfloor,\\ \\left\\lfloor (y_n-4)/16\\right\\rfloor\\right),$
+
+dieselbe Abbildung, die auch \`passageNear()\` verwendet. \`Level::landed\` speichert ein Bit $L_n\\in\\{0,1\\}$. Jede neu gebaute Ebene beginnt mit $L=1$; dazu gehören Reisen im Feldzug, das Laden eines Spielstands und ein neuer Lauf. Nach \`Level::shift()\` im Morgenlauf setzt \`Game::through()\` das Bit ausdrücklich. Die Aktualisierung lautet:
+
+- **Fall 1:** $u_n\\notin\\Pi_\\ell$. Dann setzt \`step()\` $L\\leftarrow0$.
+- **Fall 2:** $u_n\\in\\Pi_\\ell$ und $L=0$, der Held lebt und kein Gewölbe ist aktiv. Dann wechselt \`through()\` die Ebene, danach gilt $L=1$.
+- **Fall 3:** $u_n\\in\\Pi_\\ell$ und $L=1$. Dann geschieht nichts.
+
+**Satz 7 (kein sofortiger Rückweg).** Zwischen einer Ankunft durch einen Durchgang und dem nächsten selbsttätigen Durchschreiten liegt mindestens ein Prüfzeitpunkt, an dem die Fußkachel nicht in $\\Pi_\\ell$ liegt. Außerdem findet in einem Simulationsschritt höchstens ein Ebenenwechsel durch Durchgänge statt. *Beweis.* Nach jeder Ankunft gilt $L=1$, entweder durch den Standardwert der neuen Ebene oder durch die Zuweisung in \`through()\`. Ein selbsttätiger Wechsel verlangt $L=0$. Den Wert null schreibt nur Fall 1, und dieser verlangt $u\\notin\\Pi_\\ell$. Für die zweite Aussage: Hat der Tastenweg in diesem Schritt bereits gewechselt, liest \`step()\` die neue Ebene mit $L=1$; die drei Fälle schließen einander aus, und \`step()\` ruft \`through()\` höchstens einmal auf. $\\square$
+
+**Folgerung (Mindestweg für eine Rückkehr).** Die Ankunft setzt den Helden auf $(16w_x+8,\\ 16w_y+12)$. Dann ist $u=(w_x,w_y)$, denn $\\lfloor(16w_y+8)/16\\rfloor=w_y$. Liegt am Zielort selbst ein Durchgang, wie bei einem Höhlenmund und seinem Tageslicht unten oder bei beiden Enden einer Treppe, muss der Held zuerst die Kachel verlassen. Waagerecht trennen ihn $8$ Pixel von jedem Rand. Senkrecht liegt $y-4=16w_y+8$ ebenfalls $8$ Pixel von beiden Rändern entfernt. Eine Rückkehr verlangt also mindestens $8$ Pixel Weg hinaus und einen Schritt zurück. Die Marke wirkt wie eine Hysterese der Breite einer halben Kachel. Dieselbe Überlegung zeigt, dass ein geladener Spielstand auf einem Höhlenmund keinen Wechsel auslöst.
+
+*Grenzen.* Der Sturz in eine Kluft ist eine eigene Regel in \`Game::fall()\` und gehört nicht zu $\\Pi$. Satz 7 schließt daher nicht aus, dass im selben Schritt nach einem Durchgang ein Sturz folgt, falls ein Ziel auf einer Kluftkachel läge.
+
+### 14. Höhlenmünder an Klippen: Verschiebung mit beschränktem Abstand
+
+An der Oberfläche wählt \`mouthProp()\` das Bild eines Höhlenmunds aus dem Gelände. Mit der Höhe $h$ heißt eine Kachel **Klippenfuß**, wenn
+
+$C(x,y)\\iff h(x,y-1)>h(x,y)\\ \\wedge\\ \\neg\\,\\mathrm{Rampe}(x,y-1).$
+
+Dort erscheint ein Bogen in der Klippenwand, sonst entscheidet das Bit $\\mathrm{hash2}(41x+7,\\,43y-1)\\bmod 2$ zwischen Grube und Bau. Ohne gezielte Platzierung lagen bei Saat $0$ über $32\\times32$ Zellen nur $3$ von $718$ Mündern an einem Klippenfuß. Deshalb verschiebt \`place()\` beim Zellaufbau jeden gewählten Platz $s$ um einen Versatz $\\delta\\in\\{-3,\\dots,3\\}^2$ mit kleinstem $\\|\\delta\\|^2$. Der neue Platz muss Klippenfuß sein, oberirdisch trocken liegen und einen offenen $3\\times3$-Block in der Höhle besitzen. Gleichstände entscheidet die Durchlaufreihenfolge, weil nur ein echt kleinerer Abstand ersetzt. Gibt es keinen solchen Platz, bleibt $s$.
+
+**Satz 8 (Lage und Abstand nach der Verschiebung).** (a) Jeder Mund liegt mit lokalen Koordinaten $1\\le i,j\\le 62$ in seiner Zelle und hat einen offenen $3\\times3$-Block. (b) Für zwei Münder $m_a,m_b$ derselben Zelle gilt
+
+$\\|m_a-m_b\\|\\ \\ge\\ 12-3\\sqrt2\\ \\approx\\ 7{,}757\\ \\text{Kacheln}.$
+
+*Beweis.* (a) Unverschobene Plätze stammen aus dem Raster $i,j\\in\\{1,4,\\dots,61\\}$ mit geprüftem $3\\times3$-Block. Ein verschobener Platz muss denselben Block bestehen. Die Hilfsfunktion \`openAt\` liefert außerhalb von $[0,64)$ falsch, also gilt $0\\le i-1$ und $i+1\\le63$, ebenso für $j$. (b) Sei $m_b$ nach $m_a$ entstanden. Beide Auswahlschleifen vergleichen den Kandidaten $s$ mit den bereits **verschobenen** Mündern und verwerfen $\\|s-m_a\\|^2<144$. Also gilt $\\|s-m_a\\|\\ge12$. Die Verschiebung erfüllt $\\|m_b-s\\|=\\|\\delta\\|\\le3\\sqrt2$, weil jede Komponente höchstens $3$ beträgt. Die Dreiecksungleichung liefert $\\|m_a-m_b\\|\\ge\\|s-m_a\\|-\\|m_b-s\\|\\ge12-3\\sqrt2$. Der Notfallzweig ohne Abstandsprüfung setzt nur den ersten Mund einer Zelle. $\\square$
+
+Vor der Änderung galt die Schranke $12$; die Verschiebung kostet also höchstens $3\\sqrt2\\approx4{,}24$ Kacheln Abstand. Für Münder verschiedener Zellen machte schon die alte Regel keine Aussage. *Beobachtung, kein Beweis.* Mit derselben Saat sind nun $63$ von $718$ Mündern Bögen ($8{,}8\\,\\%$). Unter den übrigen $655$ fallen $337$ auf Gruben und $318$ auf Baue. Unter der Annahme eines fairen Paritätsbits erwartet man $327{,}5$ Gruben mit Standardabweichung $\\sqrt{655}/2\\approx12{,}8$. Die Abweichung beträgt also etwa $0{,}74$ Standardabweichungen.
+
+### 15. Grabinschriften und die Präfix-Invariante der Chronik
+
+Die Chronik eines Feldzugs hat $F\\le8$ Gründer. Jeder Gründer $f$ besitzt $M=2$ Fragmente mit den Kennungen $r=4f+k$, $k<M$. Gespeichert wird die Menge $\\mathcal F$ der gelesenen Kennungen, und \`found(f)\` zählt $|\\{k<M:\\ 4f+k\\in\\mathcal F\\}|$. Fragmente liegen an der Oberfläche als Tafeln. Seit dieser Fassung liegt außerdem im Herzen jeder Zelle der Verlorenen Hallen im Sundark eine Gruft auf der Kachel $(h_x,\\ h_y-2)$, und ihre Inschrift zählt ebenfalls als Fragment.
+
+**Satz 9 (Präfix-Invariante).** Für jeden Zustand, der aus $\\mathcal F=\\emptyset$ nur durch Aufrufe von \`Campaign::read()\` entsteht, gilt für jeden Gründer
+
+$\\mathcal F\\cap\\{4f,\\,4f+1\\}=\\{4f+k:\\ k<\\mathrm{found}(f)\\}.$
+
+*Beweis* durch Induktion über die Leseaufrufe. Für $\\mathcal F=\\emptyset$ ist beides leer. \`read()\` fügt genau den Wert von \`readable()\` ein. Beide Zweige von \`readable()\` liefern $4f+\\mathrm{found}(f)$ und nur für $\\mathrm{found}(f)<M$: an der Oberfläche die Tafel mit Index $k=\\mathrm{found}(f)$, unten die Gruft mit demselben Index. Nach Induktionsvoraussetzung ist $4f+\\mathrm{found}(f)$ das kleinste fehlende Element; das Einfügen verlängert das Präfix um eins. $\\square$
+
+Daraus folgt: Die Reihenfolge der Fragmente bleibt erhalten, gleich ob der Held eine Tafel oder eine Gruft liest. Die Meldung, dass ein Grab erwacht, erscheint für jeden Gründer genau einmal, nämlich beim Übergang von $\\mathrm{found}=1$ zu $2$. Kein Gründer erhält mehr als $M$ Fragmente. *Grenze.* \`Campaign::load()\` nimmt jede Zeile \`fragment r\` mit $0\\le r<64$ an; ein von Hand bearbeiteter Spielstand liegt außerhalb der Voraussetzung.
+
+**Satz 10 (Zuordnung und Einmaligkeit der Grüfte).** Eine Gruft auf der Kachel $t$ gehört dem Gründer
+
+$\\mathrm{buried}(t)=\\arg\\min_f\\ \\|\\mathbf c_f-16\\,t\\|^2,$
+
+mit $\\mathbf c_f$ als Mittelpunkt seines Sitzes in Weltpixeln; bei Gleichstand gewinnt der kleinste Index. Die Grüfte zerlegen sich damit in Voronoi-Zellen der Sitze. Jede Gruft liefert über den ganzen Feldzug höchstens ein Fragment, und alle Grüfte zusammen liefern höchstens $MF\\le16$ Fragmente. *Beweis.* Die Zuordnung ist ein linearer Durchlauf mit echtem Vergleich $d<\\text{near}$, daher die Regel für Gleichstände. \`read()\` legt in der Tiefe den Zellschlüssel $(c_x,c_y)$ in \`epitaphs\` ab, und \`readable()\` liefert $-1$, sobald der Schlüssel vorhanden ist. Der Schlüssel wird als Zeile \`epitaph cx cy\` gespeichert. Jede Gruft trägt also höchstens einmal bei, und nach Satz 9 trägt jeder Gründer höchstens $M$ Fragmente, unabhängig von der Zahl der Hallen. $\\square$
+
+**Lemma (Unabhängigkeit von der Ebene).** \`Campaign::history()\` liefert dieselben Gründer, gleich auf welcher Ebene sie zum ersten Mal ausgewertet wird. *Beweis.* \`chronicle::write()\` liest Bauwerke über \`world::structureIn()\`, und diese Abfrage hängt nur von der aktiven Ebene ab. \`history()\` schreibt die Chronik innerhalb eines \`world::Surfaced\`, das die Oberfläche aktiviert und beim Verlassen die vorige Ebene wiederherstellt. $\\square$ Vor dieser Fassung hätte eine erste Auswertung unter der Erde keine Bauwerke gefunden. Dann wäre eine leere Chronik entstanden und durch das Merkbit \`chronicled\` für die ganze Sitzung festgeschrieben worden.
+
+### 16. Synergien als Produktmenge und Fehden als Bernoulli-Prozess
+
+\`synergy::marksOf()\` fasst die Merkmale eines Helden zu einer 64-Bit-Maske $M$ zusammen: Mutationen ab Bit $0$, Leiden ab Bit $32$, Werkstoffe der Ausrüstung ab Bit $40$. Sechzehn Auslöser besitzen die Merkmale $a_0,\\dots,a_{15}$, sechzehn Wirkungen die Merkmale $b_0,\\dots,b_{15}$. Mit $A=\\{a_t\\}$ und $B=\\{b_p\\}$ sind alle $32$ Merkmale verschieden, insbesondere $A\\cap B=\\emptyset$; der Test \`testSynergies\` prüft das. \`synergy::of()\` berechnet
+
+$\\mathrm{of}(M)=\\{16t+p:\\ a_t\\in M,\\ b_p\\in M\\}.$
+
+**Satz 11 (Produktformel).** Die Abbildung $\\sigma(t,p)=16t+p$ ist eine Bijektion von $\\{0,\\dots,15\\}^2$ auf $\\{0,\\dots,255\\}$, und
+
+$|\\mathrm{of}(M)|=|A\\cap M|\\cdot|B\\cap M|.$
+
+Ein einzelnes Merkmal weckt keine Synergie, und $M\\subseteq M'$ impliziert $\\mathrm{of}(M)\\subseteq\\mathrm{of}(M')$. *Beweis.* Division mit Rest liefert die Umkehrung $t=\\lfloor s/16\\rfloor$, $p=s\\bmod16$, wie in \`triggerOf\` und \`payloadOf\`. Die Bedingungen an $t$ und $p$ sind unabhängig, die Menge ist also das Bild des Produkts $\\{t:a_t\\in M\\}\\times\\{p:b_p\\in M\\}$ unter einer injektiven Abbildung. Für $M=\\{x\\}$ liegt $x$ wegen $A\\cap B=\\emptyset$ höchstens in einer der beiden Mengen, ein Faktor ist also null. Die Monotonie folgt, weil beide Bedingungen nur Mitgliedschaften verlangen. $\\square$ Beispiel: Ein Hale-Held mit fünf Leiden und dem Werkstoff Stein als Auslösern sowie sechs Werkstoffen der Ausrüstung als Wirkungen erreicht $6\\cdot6=36$ Synergien. Alle $256$ verlangen sämtliche $32$ Merkmale.
+
+Eine **Fehde** flammt in einem berechtigten Augenblick, der alle $15$ Sekunden geprüft wird, genau dann auf, wenn
+
+$\\mathrm{hash2}\\bigl(\\mathrm{hash2}(31r_x+7n,\\ 17r_y-13s),\\ \\text{salt}\\bigr)\\bmod1000<90.$
+
+Dabei sind $(r_x,r_y)$ die Region, $n$ die Nacht und $s$ das Zeitfenster. Außerhalb berechtigter Augenblicke setzt \`Level::feuds()\` den Zeitgeber zurück, nämlich nahe sicheren Zonen, während einer Belagerung und in den ersten Nächten.
+
+**Satz 12 (Wahrscheinlichkeit trotz Restverzerrung).** Ist der äußere Hash gleichverteilt auf $\\{0,\\dots,2^{32}-1\\}$, so gilt für eine einzelne Prüfung
+
+$P=\\frac{90\\cdot4\\,294\\,968}{2^{32}}=\\frac{386\\,547\\,120}{4\\,294\\,967\\,296}\\approx0{,}0900000017.$
+
+*Beweis.* $2^{32}=1000\\cdot4\\,294\\,967+296$. Die Reste $0,\\dots,295$ haben je $4\\,294\\,968$ Urbilder, alle übrigen $4\\,294\\,967$. Die geforderten Reste $0,\\dots,89$ gehören sämtlich zur ersten Gruppe. $\\square$ Die Verzerrung durch den Rest beträgt also weniger als $2\\cdot10^{-9}$. Bei unabhängigen Prüfungen ist die Zahl der Prüfungen bis zur ersten Fehde geometrisch verteilt mit Erwartungswert $1/P\\approx11{,}1$, also etwa $167$ Sekunden **berechtigter** Spielzeit. Die Wahrscheinlichkeit, zehn Prüfungen lang keine Fehde zu erleben, ist $(1-P)^{10}\\approx0{,}389$. Ein Aufflammen ist noch kein Kampf, denn \`ignite()\` braucht zwei verfeindete Rudel in Reichweite. *Beobachtung.* Der Test \`testFeuds\` zählt $193$ Aufflammen in $2000$ Fenstern. Erwartet sind $180$ mit Standardabweichung $\\sqrt{2000\\cdot0{,}09\\cdot0{,}91}\\approx12{,}8$, also eine Abweichung von etwa $1{,}0$ Standardabweichungen. Die Gleichverteilung von \`hash2\` ist hier Annahme, nicht Ergebnis; bewiesen ist dagegen der Determinismus, denn dieselben Eingaben liefern dieselbe Entscheidung.
+
 ### Diskussion: Gemeinsamkeiten der Modelle
 
-In allen vier Teilen erscheint derselbe Entwurfsgedanke in unterschiedlicher Form. Das Spielsystem bildet einen großen Möglichkeitsraum auf eine kleinere Darstellung ab und gestaltet die Aktualisierung so, dass eine nützliche Eigenschaft erhalten bleibt. Die zeitliche Begrenzung der Zielvorhersage begrenzt den Einfluss entfernter Bewegung. Geordnete Seltenheitsprüfungen machen aus drei bedingten Chancen einander ausschließende Ergebnisse. Präfixsummen machen aus Zellanzahlen nicht überlappende Speicherbereiche. Stabile Sortierdurchläufe bewahren die Zeichenreihenfolge, wenn die berücksichtigten Schlüsselbits gleich sind. Die Normierung der Bodenmischung erhält das Gesamtgewicht, nachdem viele mögliche Biome auf drei reduziert wurden. Verzögerte Änderungen des Feuerzustands begrenzen die Ausbreitung in einem gewöhnlichen Durchlauf. Diese Algorithmen unterscheiden sich, lassen sich aber alle danach beurteilen, welche Information sie verwerfen und welche Invariante erhalten bleibt.
+In allen fünf Teilen erscheint derselbe Entwurfsgedanke in unterschiedlicher Form. Das Spielsystem bildet einen großen Möglichkeitsraum auf eine kleinere Darstellung ab und gestaltet die Aktualisierung so, dass eine nützliche Eigenschaft erhalten bleibt. Die zeitliche Begrenzung der Zielvorhersage begrenzt den Einfluss entfernter Bewegung. Geordnete Seltenheitsprüfungen machen aus drei bedingten Chancen einander ausschließende Ergebnisse. Präfixsummen machen aus Zellanzahlen nicht überlappende Speicherbereiche. Stabile Sortierdurchläufe bewahren die Zeichenreihenfolge, wenn die berücksichtigten Schlüsselbits gleich sind. Die Normierung der Bodenmischung erhält das Gesamtgewicht, nachdem viele mögliche Biome auf drei reduziert wurden. Verzögerte Änderungen des Feuerzustands begrenzen die Ausbreitung in einem gewöhnlichen Durchlauf. Eine einzelne Marke trennt Ankunft und Aufbruch an Ebenenübergängen, und eine Menge gelesener Kennungen bleibt ein Präfix, gleich über welchen Weg ein Fragment gelesen wird. Diese Algorithmen unterscheiden sich, lassen sich aber alle danach beurteilen, welche Information sie verwerfen und welche Invariante erhalten bleibt.
 
 Die Beweise zeigen außerdem einen wiederkehrenden Unterschied zwischen **lokaler Korrektheit** und **Gesamtverhalten**. Die Zerlegung durch Präfixsummen beschreibt, wo Kandidaten gespeichert sind, aber nicht, ob jeder Kandidat im Suchkreis liegt. Der Beweis zur Mischung erklärt, wie gewichtete Farben zusammengesetzt werden, garantiert jedoch keine stetige Klassifikation an jeder Grenze. Ein Weg mit der geringsten Kantenzahl muss in Pixeln nicht der kürzeste sein. Das Quadrat beim Widerstand beschreibt eine einzelne Anwendung von Schaden über Zeit, nicht erneute Anwendung, Immunität oder Tod. Werden solche Grenzen als Teil des Modells betrachtet, wird aus einer lokal korrekten Herleitung keine zu weitgehende Behauptung.
 
@@ -5050,7 +5159,7 @@ Drei Grenzen bestimmen die Schlussfolgerungen. **Entwicklung des Quellcodes:** D
 
 ### Nachvollziehen und Schlussfolgerung
 
-Die kleinen Ergebnisse lassen sich ohne Start des vollständigen Spiels nachvollziehen: Mit $P=40$, $T=4$ und $r=0.5$ ergibt sich $D_r=40$; aus $[2,0,3,1]$ entsteht die Präfixsumme $[0,2,2,5,6]$; $e^{-5(30/60)}$ liefert das Geschwindigkeitsverhältnis eines Funkens nach einer halben Sekunde; und die Ausdrücke für die Seltenheitsergebnisse summieren sich zu eins. Danach kann jede Rechnung mit der genannten Funktion verglichen und nach einer Codeänderung der passende Test ohne grafische Oberfläche ausgeführt werden. Bei Änderungen an Gelände oder Darstellung sollten zusätzlich zur Zahlenprüfung typische Grenzen und Fälle mit gleichen Schlüsseln betrachtet werden.
+Die kleinen Ergebnisse lassen sich ohne Start des vollständigen Spiels nachvollziehen: Mit $P=40$, $T=4$ und $r=0.5$ ergibt sich $D_r=40$; aus $[2,0,3,1]$ entsteht die Präfixsumme $[0,2,2,5,6]$; $e^{-5(30/60)}$ liefert das Geschwindigkeitsverhältnis eines Funkens nach einer halben Sekunde; und die Ausdrücke für die Seltenheitsergebnisse summieren sich zu eins. Für den fünften Teil gilt $12-3\\sqrt2\\approx7{,}757$, $90\\cdot4\\,294\\,968=386\\,547\\,120$ und $0{,}91^{10}\\approx0{,}389$; die Tests \`testCaveEntry\`, \`testEpitaphs\`, \`testSynergies\` und \`testFeuds\` prüfen die zugehörigen Codepfade ohne grafische Oberfläche. Danach kann jede Rechnung mit der genannten Funktion verglichen und nach einer Codeänderung der passende Test ohne grafische Oberfläche ausgeführt werden. Bei Änderungen an Gelände oder Darstellung sollten zusätzlich zur Zahlenprüfung typische Grenzen und Fälle mit gleichen Schlüsseln betrachtet werden.
 
 Die Antwort der Untersuchung auf ihre Forschungsfrage gilt somit unter Bedingungen: Ein vereinfachtes Modell bleibt nützlich, wenn seine Darstellung klar benannt, die erhaltene Eigenschaft prüfbar und sein Gültigkeitsbereich angegeben ist. Vor der Änderung einer Konstante sollten ihre Einheiten bestimmt, eine Aktualisierung oder Entscheidung in der tatsächlichen Reihenfolge des Codes hergeleitet und die Grenze geprüft werden, an der eine Obergrenze, ein Gleichstand oder ein anderer Zweig greift. Erst zusammen mit diesen Bedingungen wird eine Formel zu einem Werkzeug für die Entwicklung.
 `,
@@ -5214,6 +5323,8 @@ flowchart LR
       "src/level/CaveRules.cpp",
       "src/level/World.hpp",
       "src/campaign/CampaignSave.cpp",
+      "src/campaign/CampaignChronicle.cpp",
+      "src/Game.cpp",
     ],
     content: `
 ### Three layers at the same coordinates
@@ -5222,13 +5333,15 @@ flowchart LR
 
 \`world::passageNear()\` searches the tiles around the hero for a passage. Cave mouths connect surface and caves. Stairs connect caves and deep cells. Deep exits may instead be roots, chimneys, or sinkholes; a sinkhole leads to the surface. A chasm is different from an interaction passage: it occupies a small open area in a descent cave. Non-floating, non-boss foes that enter it are removed from the current layer. Check the passage's \`to\` layer before assuming every underground exit returns to the cave above.
 
+Walking onto a passage tile travels without a key: \`Game::step()\` reads the hero's foot tile through \`world::passageAt()\` once per step, and \`Level::landed\` keeps the hero from bouncing straight back. The flag is set on every arrival and on every new level, and clears once the foot leaves a passage tile. E beside a passage still works. On the surface, \`mouthProp()\` draws a mouth as a cliff arch when the tile above is higher, otherwise as a pit or a burrow; the cave builder nudges each mouth up to three tiles toward a cliff foot. Below, a mouth is a pool of daylight with a beam. Chapter 32, section 13 proves the no-bounce property, and section 14 proves the spacing bound after the nudge.
+
 \`Level::shift()\` changes layers without changing the run clock. It removes current foes, draws gems toward the hero, transfers the current chart into its layer slot, updates sky and cave lighting, places the hero and allies at the destination, and moves loose non-gem pickups along. The first visit to a chamber center creates a chest, tracked by a key containing the cell coordinates and layer. The separate chart for each layer prevents explored surface tiles from revealing cave walls.
 
 ### Regional rules and rewards
 
 \`CaveBiome\` contains eight shallow regions followed by eight deep regions. Each \`CaveDef\` supplies floor and wall art, tint, props, foes, pool type, light grade, and optional guardian. \`Level::caveRules()\` selects a timed rule from the hero's current cave biome. Root hollows can put brambles ahead of travel; warrens drop rock; spore halls release poison; vents and magma halls erupt; catacombs and ossuaries raise skeletons; the mere stirs water creatures; the hive hatches spiders. Geodes and the cathedral can heal near crystals, rune stones in the halls frighten nearby non-boss foes, and the abyss pushes the hero with gusts. Some rules require a nearby matching prop or pool, so a timer firing does not guarantee an event.
 
-Deep lairs wake when the hero approaches their center. \`Level::guard()\` records active guardians by cell, avoids waking one twice, and marks it felled when its entity disappears. Felled deep guardians remain recorded in campaign saves. A guardian's death also calls \`surgeFrom()\`, which may offer a Changeling a region-specific mutation. The Lost Halls have no guardian and instead host the deep sanctuary.
+Deep lairs wake when the hero approaches their center. \`Level::guard()\` records active guardians by cell, avoids waking one twice, and marks it felled when its entity disappears. Felled deep guardians remain recorded in campaign saves. A guardian's death also calls \`surgeFrom()\`, which may offer a Changeling a region-specific mutation. The Lost Halls have no guardian and instead host the deep sanctuary. Two tiles north of each Halls heart stands a founder's tomb (\`world::tombAt()\`). In a campaign, \`Campaign::buried()\` assigns it to the founder whose seat lies nearest, and reading its epitaph counts as that founder's next Chronicle fragment, once per tomb (\`epitaph cx cy\` in the save). Chapter 32, section 15 proves that fragments stay in order on either path.
 
 ### Dread in a campaign
 
