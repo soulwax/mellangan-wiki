@@ -4795,16 +4795,16 @@ $$n(x,y)=F(0.0006x+5.3,\\;0.0006y-8.9;617)+0.7h^2(3-2h).$$
 
 The scale is $q=6$ when $n<-0.12$, $q=3$ when $-0.12\\le n<0.1$, and $q=1$ otherwise. Consequently the cell width is $c=112q$ tiles, or 672, 336, or 112 tiles. The source calls these wider regimes vast and province scales. They make a single fixed Voronoi cell size an incorrect description of the current algorithm.
 
-With $f=0.018/q$, the warped point used for site selection is
+With frequency $\\phi=0.018/q$, the warped point used for site selection is
 
-$f_x=x+30q\\,\\text{fBm}_2(fx+3.7,\\;fy-1.3;611)+3\\,\\text{Perlin}(0.09x,\\;0.09y+5.1;612)$
-$f_y=y+30q\\,\\text{fBm}_2(fx-8.1,\\;fy+6.4;613)+3\\,\\text{Perlin}(0.09x+2.3,\\;0.09y;614)$
+$f_x=x+30q\\,\\text{fBm}_2(\\phi x+3.7,\\;\\phi y-1.3;611)+3\\,\\text{Perlin}(0.09x,\\;0.09y+5.1;612)$
+$f_y=y+30q\\,\\text{fBm}_2(\\phi x-8.1,\\;\\phi y+6.4;613)+3\\,\\text{Perlin}(0.09x+2.3,\\;0.09y;614)$
 
-Here the $f$ immediately inside each noise call is the **frequency** $0.018/q$; $f_x,f_y$ are the resulting warped coordinates. Their similar names should not be confused. For cell index $(c_x,c_y)=(\\lfloor f_x/c\\rfloor,\\lfloor f_y/c\\rfloor)$, the generator checks that cell and its eight neighbors. A candidate site in cell $(i,j)$ is
+For cell index $(c_x,c_y)=(\\lfloor f_x/c\\rfloor,\\lfloor f_y/c\\rfloor)$, the generator checks that cell and its eight neighbors. A candidate site in cell $(i,j)$ is
 
 $$P_{i,j}=c\\left(i+0.15+0.70\\frac{h_x}{255},\\quad j+0.15+0.70\\frac{h_y}{255}\\right),$$
 
-where $h=\\text{hash2}(73i+\\text{noise\\_salt}+\\text{salt},151j-\\text{noise\\_salt}-\\text{salt})$, $h_x=h\\mathbin{\\&}255$, $h_y=(h\\gg8)\\mathbin{\\&}255$, and $\\text{salt}=0$ for $q=1$ or $977q$ otherwise. The chosen site minimizes $\\|\\mathbf f-P_{i,j}\\|^2$ among the nine candidates. This is a local nearest-site search in warped coordinates, with a scale selected before the search.
+where $h=\\text{hash2}(73i+\\text{noise\\_salt}+\\text{salt},151j-\\text{noise\\_salt}-\\text{salt})$, $h_x=h\\mathbin{\\&}255$, $h_y=(h\\gg8)\\mathbin{\\&}255$, and $\\text{salt}=0$ for $q=1$ or $977q$ otherwise. The chosen site minimizes $\\|\\mathbf f-P_{i,j}\\|^2$ among the nine candidates. This is a local nearest-site search in warped coordinates. Because $q$ depends on the query location, the construction is not a single global Voronoi diagram with one uniform site set. Scale transitions are an additional source of biome boundaries.
 
 #### Radial Origin Leash (Cubic Hermite Attenuation)
 
@@ -4840,7 +4840,7 @@ Mellangan implements biome layering across two distinct spatial dimensions: hori
 
 #### Horizontal Barycentric Ground Blending (\`groundBlend\`)
 
-To eliminate sharp tile transitions, \`world::groundBlend(x, y)\` blends up to 3 neighboring biomes. To avoid evaluating 25 noise octaves per rendered pixel, blend weights are computed on a coarse $2 \\times 2$ tile lattice.
+To soften sharp tile transitions, \`world::groundBlend(x, y)\` blends up to three neighboring biomes. A lattice node uses a $5\\times5$ stencil of biome samples. The results are memoized on a two-tile lattice and interpolated for intervening tiles, so the stencil need not be recomputed for every drawn tile.
 
 ##### 1. Binomial Stencil Smoothing
 At lattice coordinates $(x_0, y_0) = (2 \\lfloor x/2 \\rfloor, \\; 2 \\lfloor y/2 \\rfloor)$, a $5 \\times 5$ neighborhood is evaluated using separable binomial weights $K = [1, 2, 3, 2, 1]$:
@@ -4856,7 +4856,7 @@ Sub-tile fractions $f_x = (x - x_0)/2$ and $f_y = (y - y_0)/2$ are warped via cu
 
 $S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
 
-The blend weights from the four corners of the $2 \\times 2$ cell are bilinearly interpolated using $S_x$ and $S_y$, then re-compacted to the 3 dominant biomes.
+The blend weights from the four corners of the $2 \\times 2$ cell are bilinearly interpolated using $S_x$ and $S_y$, then re-compacted to the three dominant biomes. Before that final truncation, the four bilinear coefficients are nonnegative and sum to one. Each corner blend also sums to one, so their weighted mixture sums to one. \`compactBlend()\` discards all but the top three and renormalizes those survivors. Thus normalization is preserved, while exact contribution from a discarded fourth biome is deliberately lost. A change in which biome ranks third may still produce a visible transition.
 
 ##### 3. Recursive Alpha Compositing Recurrence
 \`FloorPainter::blend()\` draws up to 3 ground surfaces in order. The local tile's authoritative biome (\`own\`) is sorted to index 0, followed by foreign biomes. The layer opacity $\\alpha_i$ for layer $i$ is:
