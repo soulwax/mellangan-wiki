@@ -64,6 +64,38 @@ function formatInlineMarkdown(text: string): string {
   });
 }
 
+function tableCells(line: string): string[] | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|")) return null;
+  const cells: string[] = [];
+  let start = 1;
+  let inCode = false;
+  for (let i = 1; i < trimmed.length; i++) {
+    if (trimmed[i] === "`" && trimmed[i - 1] !== "\\") inCode = !inCode;
+    if (trimmed[i] !== "|" || inCode) continue;
+    let escapes = 0;
+    for (let j = i - 1; j >= 0 && trimmed[j] === "\\"; j--) escapes++;
+    if (escapes % 2) continue;
+    cells.push(trimmed.slice(start, i).trim().replace(/\\\|/g, "|"));
+    start = i + 1;
+  }
+  if (start < trimmed.length) cells.push(trimmed.slice(start).trim().replace(/\\\|/g, "|"));
+  return cells;
+}
+
+function tableAlignments(line: string, columns: number): string[] | null {
+  const cells = tableCells(line);
+  if (!cells || cells.length !== columns) return null;
+  if (!cells.every((cell) => /^:?-{3,}:?$/.test(cell))) return null;
+  return cells.map((cell) =>
+    cell.startsWith(":") && cell.endsWith(":")
+      ? "center"
+      : cell.endsWith(":")
+        ? "right"
+        : "left",
+  );
+}
+
 export function renderMarkdownToHtml(markdown: string): string {
   const codeBlocks: string[] = [];
   const withPlaceholders = markdown.replace(
@@ -136,7 +168,8 @@ export function renderMarkdownToHtml(markdown: string): string {
     }
   };
 
-  for (const rawLine of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const rawLine = lines[lineIndex];
     const line = rawLine.trim();
 
     if (!line) {
@@ -170,6 +203,30 @@ export function renderMarkdownToHtml(markdown: string): string {
       flushParagraph();
       closeLists();
       out.push('<hr class="border-dark-800/90 my-7" />');
+      continue;
+    }
+
+    const headers = tableCells(line);
+    const alignments = headers && tableAlignments(lines[lineIndex + 1] || "", headers.length);
+    if (headers && headers.length > 1 && alignments) {
+      flushParagraph();
+      closeLists();
+      const table: string[] = [
+        '<div class="wiki-table-scroll"><table><thead><tr>',
+        ...headers.map((cell, i) => `<th scope="col" class="align-${alignments[i]}">${formatInlineMarkdown(cell)}</th>`),
+        "</tr></thead><tbody>",
+      ];
+      lineIndex++;
+      while (lineIndex + 1 < lines.length) {
+        const cells = tableCells(lines[lineIndex + 1]);
+        if (!cells || cells.length !== headers.length) break;
+        table.push("<tr>");
+        cells.forEach((cell, i) => table.push(`<td class="align-${alignments[i]}">${formatInlineMarkdown(cell)}</td>`));
+        table.push("</tr>");
+        lineIndex++;
+      }
+      table.push("</tbody></table></div>");
+      out.push(table.join(""));
       continue;
     }
 

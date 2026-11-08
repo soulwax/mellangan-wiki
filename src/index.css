@@ -99,6 +99,46 @@
   font-weight: 600;
 }
 
+.wiki-table-scroll {
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  border: 1px solid #342f4c;
+  border-radius: 0.75rem;
+}
+
+.wiki-prose table {
+  width: 100%;
+  min-width: 38rem;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.wiki-prose th,
+.wiki-prose td {
+  padding: 0.7rem 0.9rem;
+  vertical-align: top;
+  border-bottom: 1px solid #342f4c;
+}
+
+.wiki-prose th {
+  background: #1b1728;
+  color: #f6c324;
+  font-weight: 600;
+}
+
+.wiki-prose tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wiki-prose tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.wiki-prose .align-left { text-align: left; }
+.wiki-prose .align-center { text-align: center; }
+.wiki-prose .align-right { text-align: right; }
+
 /* C++20 / Slang / INI Syntax Highlighting Tokens */
 .code-line {
   display: flex;
