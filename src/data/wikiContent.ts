@@ -199,16 +199,16 @@ sequenceDiagram
   },
   {
     id: "gallery",
-    title: "Mellangan Gallery",
+    title: "Mellangan: A Tale in Eighteen Frames",
     category: "graphics",
-    summary: "A visual journey through changing light, distinct biomes, encounters, landmarks, and the world beneath the surface.",
+    summary: "A Mage takes the road through bright fields, darkening woods, hard-won spoils, and the halls below.",
     sourceFiles: ["src/test/view/Gallery.cpp"],
     content: `
-### A world in motion
+### Once, the road was green
 
-These images are fresh captures from the running game at a fixed world seed. Browse the full collection or focus on a phase, biome, battle, or place. Open any image for a closer look; use the arrow keys to move through the current selection.
+The shrine was cold, the daylight generous, and the traveler had yet to learn what followed her. Then the woods grew quiet. The pictures tell what came next: the creatures, the glitter they left behind, and the road that went down into the earth.
 
-The gallery capture can be regenerated from the repository root with \`build/bin/Debug/MellanganApp.exe --capture-gallery\`. It writes the images directly to \`extern/wiki/public/gallery/\`.
+Follow the frames in order, or choose a thread above. Open a frame for a closer look; the arrow keys turn the pages.
 `,
   },
   {

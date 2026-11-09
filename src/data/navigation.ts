@@ -22,7 +22,7 @@ export const NAV_TREE: NavTreeGroup[] = [
     icon: Sparkles,
     color: "text-gold-400",
     badgeColor: "bg-gold-500/15 text-gold-300 border-gold-500/30",
-    items: [{ id: "gallery", shortTitle: "Gallery: Phases, Biomes & Battles" }],
+    items: [{ id: "gallery", shortTitle: "Gallery: Menus, World & Battles" }],
   },
   {
     key: "getting-started",

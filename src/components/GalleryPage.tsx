@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Expand, X } from "lucide-react";
 
-type GalleryFilter = "All" | "Phases" | "Biomes" | "Battles" | "Places";
+type GalleryFilter = "All" | "Phases" | "Biomes" | "Battles" | "Places" | "Menus" | "Loot" | "Skills";
 
 interface GalleryImage {
   file: string;
@@ -11,20 +11,27 @@ interface GalleryImage {
 }
 
 const images: GalleryImage[] = [
-  { file: "01-meadow-day.png", title: "First light", caption: "The meadow at the start of a journey.", categories: ["Phases", "Biomes"] },
-  { file: "02-forest-dusk.png", title: "Forest at dusk", caption: "The tree line as daylight fades.", categories: ["Phases", "Biomes"] },
-  { file: "03-snowfields.png", title: "Snowfields", caption: "A cold stretch of the overworld.", categories: ["Biomes"] },
-  { file: "04-desert.png", title: "Desert", caption: "Warm sand and sparse cover.", categories: ["Biomes"] },
-  { file: "05-mire.png", title: "Mire", caption: "Wet ground under a dim sky.", categories: ["Biomes"] },
-  { file: "06-ashlands.png", title: "Ashlands by night", caption: "A hostile landscape after dark.", categories: ["Phases", "Biomes"] },
-  { file: "07-shrine.png", title: "Wayside shrine", caption: "One of the landmarks that draws a run across the map.", categories: ["Places"] },
-  { file: "08-forest-battle.png", title: "Forest skirmish", caption: "A ring of enemies closes in beneath the trees.", categories: ["Battles"] },
-  { file: "09-desert-battle.png", title: "Desert encounter", caption: "Demons and scavengers converge across open sand.", categories: ["Battles"] },
-  { file: "10-cave.png", title: "Below the surface", caption: "The first descent into the caves.", categories: ["Places"] },
-  { file: "11-deep-halls.png", title: "Deep halls", caption: "A hall far below the open world.", categories: ["Places"] },
+  { file: "12-title.png", title: "Main menu", caption: "Every tale begins with a choice. This one asks for a world.", categories: ["Menus", "Phases"] },
+  { file: "13-class-selection.png", title: "Choose a class", caption: "The Mage takes up the old art.", categories: ["Menus", "Phases", "Skills"] },
+  { file: "14-options.png", title: "Options", caption: "Before the road, the traveler makes ready.", categories: ["Menus"] },
+  { file: "01-meadow-day.png", title: "First light", caption: "The meadow is kind while the sun can see it.", categories: ["Phases", "Biomes"] },
+  { file: "02-forest-dusk.png", title: "Forest at dusk", caption: "At the tree line, daylight keeps its distance.", categories: ["Phases", "Biomes"] },
+  { file: "03-snowfields.png", title: "Snowfields", caption: "Snow covers the road; every track looks alike.", categories: ["Biomes"] },
+  { file: "04-desert.png", title: "Desert", caption: "The sand offers no shade.", categories: ["Biomes"] },
+  { file: "05-mire.png", title: "Mire", caption: "The mire remembers every step.", categories: ["Biomes"] },
+  { file: "06-ashlands.png", title: "Ashlands by night", caption: "Fire on the horizon, ash beneath the feet.", categories: ["Phases", "Biomes"] },
+  { file: "07-shrine.png", title: "Wayside shrine", caption: "A cold shrine waits for a hand to wake it.", categories: ["Places"] },
+  { file: "08-forest-battle.png", title: "Forest skirmish", caption: "The woods give back more than an echo.", categories: ["Battles"] },
+  { file: "09-desert-battle.png", title: "Desert encounter", caption: "Across the sand, the hungry find her.", categories: ["Battles"] },
+  { file: "16-loot.png", title: "After the drop", caption: "What falls may glitter like a promise.", categories: ["Loot"] },
+  { file: "15-inventory.png", title: "Inventory and equipment", caption: "The bag grows heavy; each gift has its price.", categories: ["Menus", "Loot"] },
+  { file: "17-skills.png", title: "Choose an upgrade", caption: "Three gifts are offered. Only one may be taken.", categories: ["Menus", "Skills", "Phases"] },
+  { file: "18-skills-action.png", title: "Arcane onslaught", caption: "The spell blooms. The swarm keeps coming.", categories: ["Battles", "Skills"] },
+  { file: "10-cave.png", title: "Below the surface", caption: "Beneath the world, the torch finds stone and shadow.", categories: ["Places"] },
+  { file: "11-deep-halls.png", title: "Deep halls", caption: "The deep halls keep what daylight has forgotten.", categories: ["Places"] },
 ];
 
-const filters: GalleryFilter[] = ["All", "Phases", "Biomes", "Battles", "Places"];
+const filters: GalleryFilter[] = ["All", "Phases", "Biomes", "Battles", "Places", "Menus", "Loot", "Skills"];
 
 export function GalleryPage() {
   const [filter, setFilter] = useState<GalleryFilter>("All");
