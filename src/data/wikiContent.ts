@@ -4762,7 +4762,19 @@ Die Aufteilung auf Simulationsschritte ändert diese Summe nicht. $\\square$
 
 Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod während eines Schadensaufrufs und die weiter unten genannten Obergrenzen die exakte Gleichheit verändern.
 
-**Herleitung.** Bei konstanter Schadensrate $P_r$ ist der Gesamtschaden ihr Zeitintegral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Einsetzen der beiden Abschwächungen durch den Widerstand ergibt $PT(1-r)^2$. Das Quadrat entsteht, weil der Widerstand **sowohl** die Rate als auch die Einwirkzeit verändert. Im unbegrenzten Bereich gilt $\\partial D_r/\\partial r=-2PT(1-r)$: Zusätzlicher Widerstand verringert den Schaden, doch sein absoluter Grenznutzen sinkt mit steigendem $r$. Sobald der Widerstand die Grenze 0.75 erreicht oder eine andere Obergrenze greift, beschreibt diese Ableitung den Code nicht mehr. Ein einmaliger Treffer oder ein Effekt mit fester Dauer wäre anders von $r$ abhängig.
+**Herleitung der Widerstandswirkung.** Bei konstanter Schadensrate $P_r$ ist der Gesamtschaden das Zeitintegral
+
+$$D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r.$$
+
+Stärke und Dauer werden jeweils mit $1-r$ multipliziert. Einsetzen zeigt, woher das Quadrat kommt:
+
+$$D_r=[P(1-r)]\\,[T(1-r)]=PT(1-r)^2.$$
+
+Im unbegrenzten Bereich ist die Ableitung nach dem Widerstand
+
+$$\\frac{\\partial D_r}{\\partial r}=-2PT(1-r).$$
+
+Für $P,T>0$ und $0\\le r<0.75$ ist sie negativ. Zusätzlicher Widerstand verringert also den Schaden; der Betrag der Ableitung wird mit wachsendem $r$ kleiner. Sobald eine Obergrenze für Widerstand, Stärke oder Dauer greift, beschreibt diese Ableitung den betroffenen Codepfad nicht mehr. Ein einmaliger Treffer oder ein Effekt mit fester Dauer folgt ebenfalls einer anderen Formel.
 
 **Grenzen des Modells.** Die Stärke ist je Zustand begrenzt, die Dauer auf 60 Sekunden gedeckelt, und bei erneuter Anwendung kann ein bereits vorhandener stärkerer oder längerer Effekt erhalten bleiben. Blutung addiert Stärke und verursacht während der Bewegung des Ziels den $1.6\\times$-fachen Schaden. Tod oder Entfernung können die Abfolge vorzeitig beenden. In diesen Fällen muss die Zustandsaktualisierung verfolgt werden; die Formel für den einzelnen Effekt reicht nicht aus.
 
@@ -4770,9 +4782,14 @@ Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod 
 
 \`rarityOdds()\` verwendet $S=1+L/40$ mit der Gegenstandsstufe $L$ sowie die Sättigungsfunktion
 
-$f_k(m)=\\frac{mk}{m+k},\\qquad f_k'(m)=\\frac{k^2}{(m+k)^2}$
+$f_k(m)=\\frac{mk}{m+k}$
 
-Für einen nichtnegativen Bonus auf magische Funde $m$ gilt $f_k'(m)>0$, während $f_k''(m)=-2k^2/(m+k)^3<0$ ist. Ein höherer Bonus erhöht den umgerechneten Wert stets, doch jeder weitere Punkt trägt weniger bei als der vorherige. Für unbegrenzt wachsendes $m$ nähert sich der Wert $k$. Die Prüfungen auf einzigartige und seltene Gegenstände verwenden $k=250$ beziehungsweise $k=600$; die Prüfung auf magische Gegenstände nutzt den unveränderten Bonus. Jede Prüfungswahrscheinlichkeit ist auf 1 begrenzt:
+Für $m\\ge0$ und $k>0$ sind Nenner und Zähler definiert. Die beiden Ableitungen haben entgegengesetzte Vorzeichen:
+
+$$f_k'(m)=\\frac{k^2}{(m+k)^2}>0,\\qquad
+f_k''(m)=-\\frac{2k^2}{(m+k)^3}<0.$$
+
+Der umgerechnete Bonus steigt also, aber seine Steigung nimmt ab. Durch Division von Zähler und Nenner durch $m$ folgt außerdem $\\lim_{m\\to\\infty}f_k(m)=k$. Die Prüfungen auf einzigartige und seltene Gegenstände verwenden $k=250$ beziehungsweise $k=600$; die Prüfung auf magische Gegenstände nutzt den unveränderten Bonus. Jede Prüfungswahrscheinlichkeit ist auf 1 begrenzt:
 
 $u=\\min\\left(1,\\frac{S}{700}\\left(1+\\frac{f_{250}(m)}{100}\\right)\\right)$
 $r=\\min\\left(1,\\frac{S}{90}\\left(1+\\frac{f_{600}(m)}{100}\\right)\\right),\\qquad g=\\min\\left(1,\\frac{S}{7}\\left(1+\\frac{m}{100}\\right)\\right)$
@@ -4781,7 +4798,25 @@ Dies sind **bedingte Prüfungen**, keine drei endgültigen Wahrscheinlichkeiten,
 
 $P(U)=u,\\qquad P(R)=(1-u)r,\\qquad P(M)=(1-u)(1-r)g$
 
-Die verbleibende Wahrscheinlichkeit ist $P(O)=(1-u)(1-r)(1-g)$. Dabei bedeutet $O$, dass die Seltenheitsbestimmung die spätere Entscheidung zwischen verbessert und gewöhnlich erreicht. Diese vier Ergebnisse teilen den ursprünglichen Wurf vollständig auf: $u+(1-u)[r+(1-r)(g+1-g)]=1$. Diese Identität hilft bei der Prüfung einer geänderten Wahrscheinlichkeitstabelle. Sie zeigt auch, warum die Reihenfolge wichtig ist: Würde zuerst auf selten geprüft, betrüge die endgültige Wahrscheinlichkeit für einzigartig $(1-r)u$ statt $u$.
+Die Restwahrscheinlichkeit nach drei Fehlschlägen ist
+
+$$P(O)=(1-u)(1-r)(1-g).$$
+
+Die vier Zweige $U,R,M,O$ teilen den ursprünglichen Wurf vollständig auf. Einsetzen und Ausklammern zeigt dies ohne eine Annahme über gleiche Prüfungswahrscheinlichkeiten:
+
+$$\\begin{aligned}
+P(U)+P(R)+P(M)+P(O)
+&=u+(1-u)\\left[r+(1-r)\\bigl(g+(1-g)\\bigr)\\right]\\\\
+&=u+(1-u)[r+(1-r)]\\\\
+&=1.
+\\end{aligned}$$
+
+\`rollRarity()\` teilt den Restzweig $O$ anschließend durch einen gleichverteilten Ganzzahlwurf von 0 bis 7: Ein Wert liefert \`Superior\`, sieben Werte liefern \`Normal\`. Vor späteren Regeln der Gegenstandserzeugung gilt daher
+
+$$P(\\mathrm{Superior})=\\frac{P(O)}8,\\qquad
+P(\\mathrm{Normal})=\\frac{7P(O)}8.$$
+
+Die Reihenfolge der ersten drei Prüfungen ist wesentlich: Würde zuerst auf selten geprüft, betrüge die endgültige Wahrscheinlichkeit für einzigartig $(1-r)u$ statt $u$.
 
 Bei Gegenstandsstufe 40 und ohne Bonus auf magische Funde ist $S=2$: Die Prüfung auf einzigartig hat eine Wahrscheinlichkeit von etwa 0.286 %, die auf selten von 2.222 %. Die tatsächliche Wahrscheinlichkeit, die Prüfung auf selten zu erreichen und zu bestehen, beträgt etwa $0.997143\\times0.022222=2.216\\%$. Die Gegenstandserzeugung kann danach eine Mindestseltenheit festlegen oder ein einzigartiges Ergebnis gesondert behandeln. Die Gleichungen beschreiben daher die anfängliche Seltenheitsbestimmung und nicht jedes endgültige Beuteergebnis.
 
@@ -4795,11 +4830,19 @@ $[0,\\;2,\\;2,\\;5,\\;6]$
 
 Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dann gilt $s_i=\\sum_{j<i}c_j$ und $s_C=N$, wobei $N$ die Gesamtzahl der zugeordneten Gegner ist. Zelle $i$ belegt das halboffene Intervall $[s_i,s_{i+1})$. Zelle 1 ist leer, weil ihre beiden Anfangspositionen gleich sind; Zelle 2 belegt die Indizes 2, 3 und 4.
 
-**Behauptung: Die Zellbereiche bilden eine Zerlegung.** Sind alle $c_i$ nichtnegativ und schreibt die Verteilung genau $c_i$ Gegner in Zelle $i$, dann überschneiden sich die Bereiche nicht und ihre Vereinigung ist $[0,N)$. Der Beweis folgt aus $s_{i+1}=s_i+c_i$: Jeder Bereich beginnt genau dort, wo der vorige endet, und der letzte endet bei $N$. Das ist stärker als die bloße Feststellung, dass die Gesamtzahl stimmt; auch Überschneidungen und Lücken sind ausgeschlossen. Der Aufbau des Index benötigt $O(N+C)$ Arbeit für $N$ Gegner und $C$ Zellen sowie Speicher für die Felder.
+**Behauptung: Die Zellbereiche bilden eine Zerlegung.** Falls alle $c_i\\ge0$ sind und die Verteilung genau $c_i$ Gegner in Zelle $i$ schreibt, sind die Bereiche paarweise disjunkt und ihre Vereinigung ist $[0,N)$.
+
+*Beweis.* Die Präfixgleichung $s_{i+1}=s_i+c_i$ liefert zunächst $s_{i+1}\\ge s_i$. Damit ist jeder Bereich $[s_i,s_{i+1})$ gültig; bei $c_i=0$ ist er leer. Der Endpunkt eines Bereichs ist genau der Anfangspunkt des nächsten. Es gibt also weder eine Überschneidung noch eine Lücke. Aus $s_0=0$ und
+
+$$s_C=\\sum_{i=0}^{C-1}c_i=N$$
+
+folgt, dass die lückenlose Folge von Bereichen genau $[0,N)$ bedeckt. $\\square$
+
+Der Aufbau des Index benötigt $O(N+C)$ Arbeit für $N$ Gegner und $C$ Zellen sowie Speicher für die Felder.
 
 **Induktionsbeweis für das Schreiben.** Zu Beginn erhält der Schreibzeiger jeder Zelle den Wert $p_i=s_i$. Nach $j$ Schreibvorgängen in Zelle $i$ gilt als Schleifeninvariante $p_i=s_i+j$, und genau die Plätze $[s_i,s_i+j)$ dieser Zelle sind belegt. Für $j=0$ ist das Intervall leer. Ein weiterer Vorgang schreibt an $p_i$ und erhöht ihn um eins; damit gilt die Invariante für $j+1$. Wegen $j<c_i$ liegt jeder dieser Indizes vor $s_i+c_i=s_{i+1}$, also innerhalb des reservierten Bereichs. Nach $c_i$ Vorgängen ist $p_i=s_{i+1}$. Zusammen mit der disjunkten Zerlegung beweist dies, dass der Verteiler bei gültigen Zählungen weder eine Zelle überschreibt noch einen zugeordneten Gegner auslässt. Es beweist keine Sicherheit, wenn ein Gegner zwischen Zählen und Verteilen seine Zellnummer änderte; der Code sammelt deshalb Zellnummer und Zeiger gemeinsam in \`binned\`.
 
-\`gather()\` besucht zuerst die Zelle der Abfrage und danach weitere Zellen, die deren umschließendes Quadrat berührt. Die Funktion überspringt entfernte Gegner und endet beim vom Aufrufer vorgegebenen Höchstwert. Dies ist eine **grobe Kandidatensuche**: Die Zugehörigkeit zu einer Zelle beweist noch nicht, dass ein Kandidat innerhalb des angefragten Kreisradius liegt. Vergrabene Gegner werden beim Aufbau des Rasters in einer eigenen Liste \`loose\` abgelegt.
+\`gather()\` besucht zuerst die Zelle der Abfrage und danach die Zellen im umschließenden Rasterrechteck von $(x-r,y-r)$ bis $(x+r,y+r)$. Es überspringt als entfernt markierte Gegner und endet beim vom Aufrufer vorgegebenen Höchstwert. Die Funktion prüft keinen Kreisabstand $\\|\\mathbf p-\\mathbf e\\|<r$: Der Radius bestimmt nur die besuchten Zellen. Damit ist das Ergebnis eine **grobe Kandidatenmenge**, die auch Gegner außerhalb des Kreises enthalten kann. Vergrabene Gegner werden beim Rasteraufbau in der eigenen Liste \`loose\` abgelegt und erscheinen nicht in dieser Zellabfrage.
 
 ### 5. Gleitkomma-Tiefen mit Ganzzahlen sortieren
 
@@ -4836,7 +4879,11 @@ Größere Ebenenwerte könnten falsch einsortiert werden. NaN besitzt keine nume
 
 \`bastion::raise()\` behandelt begehbare Zellen als Knoten eines Graphen und Verbindungen zu bis zu acht Nachbarzellen als Kanten. Die Funktion legt die Toröffnung in eine Warteschlange nach dem Prinzip „zuerst hinein, zuerst heraus“ und breitet sich von dort aus. Jede neu entdeckte Zelle speichert die Richtung zurück zur Zelle, von der aus sie entdeckt wurde. Eine diagonale Ausbreitung wird verworfen, wenn eine der beiden angrenzenden Zellen in gerader Richtung eine Wand ist. So führt kein Weg durch eine blockierte Ecke.
 
-**Behauptung: Die gespeicherte Richtung folgt einem Weg mit minimaler Schrittzahl zu einer Öffnung.** Jede Toröffnung gelangt mit Abstand null in die Warteschlange. Ein entdeckter Nachbar liegt eine Kante weiter entfernt als die Zelle, von der aus er entdeckt wurde. Durch die Reihenfolge der Warteschlange werden alle Zellen mit Abstand $d$ vor den Zellen mit Abstand $d+1$ verarbeitet. Eine spätere Entdeckung kann deshalb keinen Weg mit weniger Kanten ergeben. Die gespeicherte Richtung weist auf diesem ersten Weg zurück. Der Beweis setzt voraus, dass jede zulässige Kante gleich viel kostet und dass die Wand- und Eckprüfungen beim Aufbau einen festen Graphen bilden.
+**Behauptung: Die gespeicherte Richtung folgt einem Weg mit minimaler Schrittzahl zu einer Öffnung.** Dies gilt für den beim Aufbau feststehenden Graphen, wenn jede zulässige Kante dieselben Kosten von einem Schritt hat.
+
+*Beweis.* Jede Toröffnung wird als Quelle mit Abstand null eingereiht. Werden alle Knoten mit Abstand $d$ verarbeitet, gelangt jeder noch unentdeckte Nachbar mit Abstand $d+1$ ans Ende der Warteschlange. Wegen der FIFO-Reihenfolge kann kein Knoten mit Abstand $d+1$ vor einem Knoten mit Abstand $d$ verarbeitet werden.
+
+Induktiv werden daher zuerst alle erreichbaren Knoten mit Abstand null, dann eins, dann zwei und so weiter entdeckt. Bei der ersten Entdeckung einer Zelle ist ein kürzerer Weg ausgeschlossen: Er hätte eine Vorgängerzelle mit kleinerem Abstand gehabt, die bereits verarbeitet worden wäre. Die gespeicherte Richtung zeigt auf diese Vorgängerzelle. Wiederholt man sie, sinkt der Abstand in jedem Schritt um eins, bis eine Toröffnung erreicht ist. $\\square$
 
 Das Ergebnis minimiert die **Anzahl der Rasterschritte**, nicht die genaue euklidische Weglänge. Ein diagonaler und ein gerader Schritt zählen jeweils als eine Kante, obwohl sie geometrisch unterschiedlich lang sind. Ein diagonaler Zellschritt ist $16\\sqrt{2}$ px lang, ein gerader dagegen 16 px. Ein Verfahren mit gewichteten Kanten würde eine andere Frage nach dem kürzesten Weg beantworten.
 
@@ -4892,7 +4939,13 @@ Um das Startgebiet eher ruhigen Biomen zuzuordnen, misst der Code den Abstand $d
 $u = \\text{clamp}\\left(\\frac{d - 260}{400}, \\; 0, \\; 1\\right), \\qquad \\beta(d) = u^2 (3 - 2u)$
 $E' = E \\cdot \\beta(d), \\qquad W' = -1 + (W + 1) \\cdot \\beta(d)$
 
-Für $d \\le 260$ Kacheln ist $\\beta(d)=0$; dadurch wird Unheimlichkeit auf null und Wildheit auf $-1$ gesetzt. Dort entfallen die Zweige für unheimliche und zusätzliche Biome, während die übrigen Temperatur- und Feuchtigkeitsregeln weiterhin verschiedene gewöhnliche Biome auswählen können. Ab $d \\ge660$ Kacheln gelten die ursprünglichen Klimawerte.
+Die Abschwächung lässt sich in drei Abstandsbereiche zerlegen:
+
+1. Bei $d\\le260$ Kacheln ist $u=0$ und $\\beta=0$. Daher werden $E'=0$ und $W'=-1$.
+2. Für $260<d<660$ liegt $u=(d-260)/400$ zwischen null und eins. Weil $\\frac{d}{du}[u^2(3-2u)]=6u(1-u)\\ge0$, steigt $\\beta$ dort ohne Rücksprung von null auf eins.
+3. Bei $d\\ge660$ ist $u=1$ und $\\beta=1$. Dann gelten wieder $E'=E$ und $W'=W$.
+
+In der Mitte bei $d=460$ ist $u=0.5$ und $\\beta=0.5$. Die beiden abgeschwächten Werte sind folglich $E'=E/2$ und $W'=(W-1)/2$. Der Anfangsbereich kann weiterhin verschiedene gewöhnliche Biome auswählen, weil Temperatur und Feuchtigkeit nicht auf einen festen Wert gesetzt werden. Die verschwindende Steigung $6u(1-u)$ an beiden Enden erklärt den glatten Anschluss der Abschwächung; sie macht die späteren Biomschwellen selbst nicht glatt.
 
 #### Klassifikation des Landesinneren und Vorrang der Küste (\`biomeOf\`)
 
@@ -5177,7 +5230,13 @@ Eine nasse Kachel, die bei $t=0$ abgekühlt wird, gefriert beispielsweise für 1
 
 Feuer breitet sich jeden zehnten Materieschritt aus, also ungefähr einmal pro Sekunde. Dabei prüft es die vier direkten Nachbarn und setzt sowohl einen leeren gespeicherten Zustand als auch ein brennbares Objekt voraus. Die Suche merkt Änderungen vor und wendet sie erst danach an.
 
-**Behauptung: Ein Ausbreitungsdurchlauf kann gewöhnliches Feuer nicht über zwei zuvor unbeleuchtete Kacheln in einer Reihe tragen.** Jede während des Durchlaufs untersuchte Quelle brannte bereits zu Beginn der Suche; neu vorgemerkte Änderungen werden erst danach brennend. Die zweite unbeleuchtete Kachel kann die erste neu entzündete Kachel deshalb erst in einem späteren Durchlauf als Quelle nutzen. Entlang eines durchgehenden, eine Kachel breiten Streifens aus Brennstoff rückt die Front pro Durchlauf höchstens um eine Kachel oder 16 Weltpixel vor. Der Beweis gilt für diese gewöhnliche Ausbreitung; die Entzündung von Öl ist ein eigener, sofortiger Ausbruch auf acht Nachbarn und folgt dieser Schranke nicht. Ablaufende Zustände, fehlender Brennstoff und konkurrierende Zustände können die Front verlangsamen oder anhalten.
+**Behauptung: Ein Ausbreitungsdurchlauf kann gewöhnliches Feuer nicht über zwei zuvor unbeleuchtete Kacheln in einer Reihe tragen.** Gemeint ist der gewöhnliche Viernachbar-Durchlauf von \`Matter::tick()\`.
+
+*Beweis.* Sei $B_n$ die Menge der Kacheln, die beim Beginn dieses Durchlaufs brennen. Die Suche prüft nur gespeicherte Zustände aus diesem Anfangsbild. Sie kann für eine Kachel außerhalb von $B_n$ eine Änderung vormerken, schreibt diese aber erst nach dem vollständigen Durchlauf. Eine neu vorgemerkte Kachel ist somit während derselben Suche keine Quelle.
+
+Jede neu entzündete Kachel muss direkt an eine Quelle aus $B_n$ grenzen. Entlang eines durchgehenden, eine Kachel breiten Brennstoffstreifens kann die Front daher pro Durchlauf höchstens einen Zellschritt, also 16 Weltpixel, vorrücken. Erst im folgenden Durchlauf darf die neue Kachel selbst eine weitere entzünden. $\\square$
+
+Die Entzündung von Öl ist ein eigener, sofortiger Ausbruch auf acht Nachbarn und folgt dieser Schranke nicht. Fehlender Brennstoff, Ablauf und konkurrierende Zustände können die gewöhnliche Front verlangsamen oder anhalten.
 
 ### 12. Geometrie der von Licht erzeugten Schatten
 
@@ -5185,7 +5244,15 @@ Für jede registrierte Lichtquelle in Reichweite misst \`LightField::cast()\` de
 
 $$f=1-\\frac{d}{R},\\qquad\\ell=H\\operatorname{clamp}\\left(\\frac{d}{48},0.35,2.2\\right),\\qquad a=\\operatorname{clamp}(1.5Sf,0,1),$$
 
-wobei $H$ die Objekthöhe und $S$ die Lichtstärke bezeichnet. $\\ell$ bestimmt die Schattenlänge und $a$ den Alphawert des Schattens. Bei $d=48$, $R=120$ und $S=0.5$ beträgt der Abfall $0.6$, die Länge $H$ und der Alphawert $0.45$. Der Winkel ist $\\operatorname{atan2}(y-y_c,x-x_c)$ und weist von der Lichtquelle weg.
+wobei $H$ die Objekthöhe und $S$ die Lichtstärke bezeichnet. $\\ell$ bestimmt die Schattenlänge und $a$ den Alphawert des Schattens. Die beiden Grenzen der Längenklammer liegen bei $0.35\\cdot48=16.8$ px und $2.2\\cdot48=105.6$ px. Damit gilt für ein berücksichtigtes Objekt
+
+$$\\ell=\\begin{cases}
+0.35H,& d\\le16.8,\\\\
+H d/48,& 16.8<d<105.6,\\\\
+2.2H,& d\\ge105.6.
+\\end{cases}$$
+
+Bei $d=48$, $R=120$ und $S=0.5$ ist $f=1-48/120=0.6$. Daher folgen $\\ell=H$ und $a=1.5\\cdot0.5\\cdot0.6=0.45$. Der Winkel $\\operatorname{atan2}(y-y_c,x-x_c)$ weist von der Lichtquelle weg. Objekte mit $d<6$ oder $d>R$ wurden bereits vor dieser Rechnung ausgeschlossen.
 
 Die Verhältnisse $d/R$ und $d/48$ sind dimensionslos, wenn beide Entfernungen in Pixeln angegeben sind. Daher sind $f$ und $a$ dimensionslos, während $\\ell$ die Längeneinheit von $H$ behält. Diese Einheitenprüfung deckt einen häufigen Fehler auf: Würde $d$ in Kacheln an eine Formel übergeben, deren Konstanten 6, 48 und $R$ Pixelabstände sind, änderten sich sowohl die Auswahl der Objekte als auch die Schattenlänge um einen von der Kachelgröße abhängigen Faktor. Dies ist ein Modell für sichtbare Kontaktschatten mit begrenzter Länge und Deckkraft, keine Strahlverfolgung und kein Abstandsquadratgesetz für Licht.
 
