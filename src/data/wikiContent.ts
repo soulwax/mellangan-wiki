@@ -198,6 +198,20 @@ sequenceDiagram
     interactiveComponent: "gameloop",
   },
   {
+    id: "gallery",
+    title: "Mellangan Gallery",
+    category: "graphics",
+    summary: "A visual journey through changing light, distinct biomes, encounters, landmarks, and the world beneath the surface.",
+    sourceFiles: ["src/test/view/Gallery.cpp"],
+    content: `
+### A world in motion
+
+These images are fresh captures from the running game at a fixed world seed. Browse the full collection or focus on a phase, biome, battle, or place. Open any image for a closer look; use the arrow keys to move through the current selection.
+
+The gallery capture can be regenerated from the repository root with \`build/bin/Debug/MellanganApp.exe --capture-gallery\`. It writes the images directly to \`extern/wiki/public/gallery/\`.
+`,
+  },
+  {
     id: "radix-rendering",
     title: "02. 64-Bit Radix Y-Sort, Planar Reflections & LightField",
     category: "graphics",

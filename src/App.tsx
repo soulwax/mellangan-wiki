@@ -5,6 +5,7 @@ import { extractHeadings } from "./utils/markdown";
 
 import { DiagramPanel } from "./components/DiagramPanel";
 import { ChapterArticle } from "./components/ChapterArticle";
+import { GalleryPage } from "./components/GalleryPage";
 import { SimulationPanel } from "./components/SimulationPanel";
 import {
   Layers,
@@ -339,9 +340,9 @@ export const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-display font-bold text-base tracking-normal text-slate-100">
-                    Mellangan Docs
+                    Mellangan <span className="hidden sm:inline">Docs</span>
                   </span>
-                  <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
+                  <span className="hidden sm:inline text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
                     v0.6.5+
                   </span>
                 </div>
@@ -417,9 +418,10 @@ export const App: React.FC = () => {
                 }`}
                 aria-expanded={isTopicsOpen}
                 aria-haspopup="true"
+                aria-label="Topics"
               >
                 <Layers className="w-3.5 h-3.5 text-gold-400" />
-                <span>Topics</span>
+                <span className="hidden sm:inline">Topics</span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px] font-semibold">
                   12 Labs
                 </span>
@@ -885,6 +887,7 @@ export const App: React.FC = () => {
             </div>
 
             <ChapterArticle content={activeSection.content} proseFont={proseFont} onAnchor={scrollToAnchor} />
+            {activeSection.id === "gallery" && <GalleryPage />}
             <SimulationPanel name={activeSection.interactiveComponent} sourceFiles={activeSection.sourceFiles} />
 
             <DiagramPanel sectionId={activeSection.id} diagrams={diagrams} activeDiagramTab={activeDiagramTab} setActiveDiagramTab={setActiveDiagramTab} />
