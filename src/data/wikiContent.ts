@@ -4704,9 +4704,24 @@ $$ (\\mathbf v\\cdot\\mathbf v-s^2)t^2+2(\\mathbf r\\cdot\\mathbf v)t+\\mathbf r
 
 Ein exakter Abfangpunkt erfordert eine reelle, nichtnegative Lösung und hängt von der Richtung von $\\mathbf v$ ab. \`Enemy::sense()\` löst diese quadratische Gleichung nicht. Der begrenzte Ausdruck liefert einen kleinen Vorhalt für die Wahrnehmung und bleibt selbst dann endlich, wenn ein exaktes Abfangen unmöglich ist. Der Vergleich zeigt den Gültigkeitsbereich der Näherung; daraus folgt nicht, dass ein exaktes Abfangen das Spiel verbessern würde.
 
-**Satz 1 (beschränkter Vorhalt).** Für endliche Eingaben, $s\\ge0$ und $R=\\|\\mathbf r\\|\\ge0$ gilt $0\\le\\tau\\le0.42\\,\\mathrm{s}$ und
+**Satz 1 (beschränkter Vorhalt).** Für endliche Eingaben, $s\\ge0$ und $R=\\|\\mathbf r\\|\\ge0$, gilt:
+
+1. Die Vorhersagezeit liegt zwischen null und $0.42\\,\\mathrm{s}$.
+2. Der vorhergesagte Punkt entfernt sich vom aktuellen Zielvektor um höchstens $0.42\\,\\mathrm{s}\\,\\|\\mathbf v\\|$.
+
+In Formeln:
+
+$$0\\le\\tau\\le0.42\\,\\mathrm{s},$$
 $$\\|\\mathbf q-\\mathbf r\\|=\\tau\\|\\mathbf v\\|\\le0.42\\,\\mathrm{s}\\,\\|\\mathbf v\\|.$$
-*Beweis.* Der Nenner $\\max(20,s)$ ist positiv, daher ist $R/\\max(20,s)\\ge0$. Das Minimum mit $0.7\\,\\mathrm{s}$ liegt in $[0,0.7\\,\\mathrm{s}]$; Multiplikation mit $0.6$ liefert die erste Schranke. Aus $\\mathbf q-\\mathbf r=\\tau\\mathbf v$ folgt die zweite durch Homogenität der euklidischen Norm. Die Aussage begrenzt den **Zusatz zum aktuellen Zielvektor**, nicht die Entfernung des Gegners zum Ziel oder die spätere Bewegung des Gegners.
+
+*Beweis.* Wegen $\\max(20,s)\\ge20>0$ ist $R/\\max(20,s)\\ge0$. Damit folgen nacheinander
+
+$$0\\le\\min\\left(0.7,\\frac{R}{\\max(20,s)}\\right)\\le0.7,$$
+$$0\\le\\tau=0.6\\min\\left(0.7,\\frac{R}{\\max(20,s)}\\right)\\le0.6\\cdot0.7=0.42.$$
+
+Außerdem ist $\\mathbf q-\\mathbf r=\\tau\\mathbf v$. Weil $\\tau\\ge0$, liefert die Homogenität der euklidischen Norm $\\|\\tau\\mathbf v\\|=\\tau\\|\\mathbf v\\|$. Einsetzen der ersten Schranke beweist die zweite. $\\square$
+
+Die Aussage begrenzt den **Zusatz zum aktuellen Zielvektor**, nicht die Entfernung des Gegners zum Ziel oder seine spätere Bewegung.
 
 Unter der zusätzlichen Modellannahme, dass die tatsächliche Zielbeschleunigung während $[0,\\tau]$ höchstens $A$ Pixel pro Quadratsekunde beträgt und $\\mathbf v$ die Anfangsgeschwindigkeit ist, lässt sich auch der Vorhersagefehler begrenzen. Zweimaliges Integrieren von $\\mathbf a(t)$ ergibt $\\mathbf r_{\\mathrm{wahr}}(\\tau)-\\mathbf q=\\int_0^\\tau(\\tau-u)\\mathbf a(u)\\,du$. Die Dreiecksungleichung liefert
 $$\\|\\mathbf r_{\\mathrm{wahr}}(\\tau)-\\mathbf q\\|\\le\\int_0^\\tau(\\tau-u)A\\,du=\\tfrac12A\\tau^2\\le0.0882A.$$
@@ -4728,7 +4743,24 @@ Bei 50 % Widerstand werden aus 40 Schadenspunkten pro Sekunde über 4 Sekunden 2
 
 Die Implementierung fügt Schaden in Abständen von 0.5 Sekunden zu und rechnet beim Ablauf einen verbleibenden Teilabschnitt ab. Bei $T_r=1.3$ s ergeben sich die Abschnitte $0.5+0.5+0.3=1.3$ s. Deshalb ist das obige Integral auch dann nützlich, wenn sich die Dauer nicht gleichmäßig auf die Zeitschritte verteilt.
 
-**Lemma 2 (Erhaltung der wirksamen Zeit durch die Taktung).** Wird ein einzelner Zustand ohne erneute Anwendung bis zum Ablauf fortgeschrieben, bleibt seine Stärke konstant und akzeptiert der Schadensaufruf jeden Treffer, dann ist die Summe aller berechneten Zeitanteile im idealisierten Modell genau $T_r$. Schreibe $T_r=0.5n+\\rho$ mit $n=\\lfloor T_r/0.5\\rfloor$ und $0\\le\\rho<0.5$. Jeder vollständige Halbsekundentakt trägt $0.5P_r$ Schaden bei; beim Ablauf trägt der Rest $\\rho P_r$ bei. Somit ist $D=n(0.5P_r)+\\rho P_r=P_rT_r$. Die Zerlegung hängt nicht davon ab, auf welche Simulationsschritte die Halbsekundengrenzen fallen. Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod während eines Schadensaufrufs und die weiter unten genannten Obergrenzen die exakte Gleichheit verändern.
+**Lemma 2 (Erhaltung der wirksamen Zeit durch die Taktung).** Betrachte einen einzelnen Zustand unter drei Voraussetzungen: Er wird nicht erneut angewendet, seine Stärke $P_r$ bleibt bis zum Ablauf konstant, und jeder Schadensaufruf wird angenommen. Dann summieren sich die berechneten Zeitanteile im idealisierten Modell auf genau $T_r$.
+
+*Beweis.* Teile die wirksame Dauer in vollständige Halbsekunden und einen Rest:
+
+$$n=\\left\\lfloor\\frac{T_r}{0.5}\\right\\rfloor,\\qquad
+\\rho=T_r-0.5n,\\qquad 0\\le\\rho<0.5.$$
+
+Jeder der $n$ vollständigen Abschnitte verursacht $0.5P_r$ Schaden. Der Ablauf rechnet den Rest mit $\\rho P_r$ ab. Daher gilt Schritt für Schritt
+
+$$\\begin{aligned}
+D&=n(0.5P_r)+\\rho P_r\\\\
+ &=P_r(0.5n+\\rho)\\\\
+ &=P_rT_r.
+\\end{aligned}$$
+
+Die Aufteilung auf Simulationsschritte ändert diese Summe nicht. $\\square$
+
+Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod während eines Schadensaufrufs und die weiter unten genannten Obergrenzen die exakte Gleichheit verändern.
 
 **Herleitung.** Bei konstanter Schadensrate $P_r$ ist der Gesamtschaden ihr Zeitintegral, $D_r=\\int_0^{T_r}P_r\\,dt=P_rT_r$. Einsetzen der beiden Abschwächungen durch den Widerstand ergibt $PT(1-r)^2$. Das Quadrat entsteht, weil der Widerstand **sowohl** die Rate als auch die Einwirkzeit verändert. Im unbegrenzten Bereich gilt $\\partial D_r/\\partial r=-2PT(1-r)$: Zusätzlicher Widerstand verringert den Schaden, doch sein absoluter Grenznutzen sinkt mit steigendem $r$. Sobald der Widerstand die Grenze 0.75 erreicht oder eine andere Obergrenze greift, beschreibt diese Ableitung den Code nicht mehr. Ein einmaliger Treffer oder ein Effekt mit fester Dauer wäre anders von $r$ abhängig.
 
@@ -4784,7 +4816,21 @@ Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dan
 
 Der gepackte Schlüssel enthält die Ebene ab Bit 56, die geordnete Tiefe in den Bits 24–55 und den Zeichenindex in den untersten 24 Bits. Drei stabile Zählsortierdurchläufe mit je 12 Bits und Verschiebungen um 24, 36 und 48 sortieren die Bits 24–59. Damit erfasst die Sortierung die Tiefe und nur die unteren vier Bits der Ebene; die aktuellen Ebenenwerte passen dort hinein. Die unteren Indexbits werden **nicht** sortiert: Bei gleicher Ebene und Tiefe bleibt aufgrund der Stabilität die Einfügereihenfolge erhalten. Jeder Durchlauf verarbeitet die Schlüssel und 4096 Zellen; der Aufwand beträgt $O(3(N+4096))$. Die gepackte Darstellung setzt außerdem voraus, dass der Zeichenindex in 24 Bits passt.
 
-**Satz 3 (Ordnung der drei Durchläufe).** Angenommen, jeder verwendete Ebenenwert liegt in $[0,15]$, jeder Zeichenindex in $[0,2^{24})$, die Tiefen sind endliche IEEE-754-Binary32-Werte und die Plattform verschiebt negative 32-Bit-Ganzzahlen arithmetisch nach rechts. Dann stehen die gezeichneten Objekte nach den drei Durchläufen in aufsteigender lexikografischer Reihenfolge von Ebene und geordneter Tiefe; bei gleichem **kodierten** Tiefenwert bleibt ihre Einfügereihenfolge erhalten. *Beweis.* Der erste stabile Durchlauf ordnet die Bits 24–35. Der zweite ordnet die Bits 36–47 und lässt bei gleichem zweiten Block die Ordnung des ersten Blocks bestehen. Der dritte ordnet die Bits 48–59 und bewahrt entsprechend beide niedrigeren Blöcke. Nach Induktion über die Durchläufe sind also alle 36 sortierten Bits geordnet. Die Bits 24–55 enthalten die gesamte Tiefenkodierung, die Bits 56–59 den ganzen Ebenenwert unter der genannten Schranke. Die unteren 24 Indexbits wurden nie verglichen; Stabilität erhält dort die ursprüngliche Reihenfolge. Größere Ebenenwerte könnten trotz dieser drei Durchläufe falsch einsortiert werden; NaN hat schon vor der Sortierung keine numerische Tiefenordnung. Die beiden numerisch gleichen Nullen besitzen verschiedene Bitmuster und gehören deshalb nicht zum Gleichheitsfall.
+**Satz 3 (Ordnung der drei Durchläufe).** Es gelten vier Voraussetzungen: Die Ebenenwerte liegen in $[0,15]$; jeder Zeichenindex liegt in $[0,2^{24})$; die Tiefen sind endliche IEEE-754-Binary32-Werte; und die Plattform verschiebt negative 32-Bit-Ganzzahlen arithmetisch nach rechts. Dann ist das Ergebnis lexikografisch nach Ebene und kodierter Tiefe geordnet. Bei gleicher kodierter Tiefe und Ebene bleibt die Einfügereihenfolge erhalten.
+
+*Beweis.* Zerlege den sortierten Teil des Schlüssels in drei Blöcke zu je zwölf Bits:
+
+| Durchlauf | Bits | Bereits geordneter Teil danach |
+|:---|:---|:---|
+| 1 | 24–35 | 24–35 |
+| 2 | 36–47 | 24–47 |
+| 3 | 48–59 | 24–59 |
+
+Der erste Durchlauf ordnet den niedrigsten Block. Der zweite ist stabil: Innerhalb gleicher Werte von Bit 36–47 bleibt die Ordnung des ersten Blocks erhalten. Dasselbe Argument gilt für den dritten Block. So ordnen die drei Durchläufe zusammen alle 36 Bits von 24 bis 59.
+
+Die Bits 24–55 enthalten die gesamte Tiefenkodierung. Unter der Schranke $0\\le\\text{Ebene}\\le15$ enthalten die Bits 56–59 den gesamten Ebenenwert. Da die Ebenenbits höher liegen, bestimmen sie zuerst die Ordnung, danach die Tiefenbits. Die unteren 24 Indexbits werden nicht verglichen; bei Gleichheit der sortierten Bits bewahrt die Stabilität die Einfügereihenfolge. $\\square$
+
+Größere Ebenenwerte könnten falsch einsortiert werden. NaN besitzt keine numerische Tiefenordnung. Die beiden numerisch gleichen Nullen haben verschiedene Schlüssel und fallen deshalb nicht unter die Aussage zur stabilen Gleichheit.
 
 ### 6. Ein Tor-Richtungsfeld als Graphenproblem
 
@@ -4891,7 +4937,31 @@ $S_x = f_x^2 (3 - 2f_x), \\qquad S_y = f_y^2 (3 - 2f_y)$
 
 Die Mischgewichte der vier Ecken der $2 \\times 2$-Zelle werden mit $S_x$ und $S_y$ bilinear interpoliert und anschließend erneut auf die drei vorherrschenden Biome reduziert. Vor dieser letzten Kürzung sind die vier bilinearen Koeffizienten nichtnegativ und ergeben zusammen eins. Auch jede Eckmischung ergibt eins; ihre gewichtete Mischung hat deshalb ebenfalls die Summe eins. \`compactBlend()\` verwirft alle bis auf die drei stärksten Anteile und normiert diese erneut. Die Normierung bleibt somit erhalten, während der genaue Beitrag eines verworfenen vierten Bioms bewusst verloren geht. Wechselt das Biom auf Rang drei, kann dennoch ein sichtbarer Übergang entstehen.
 
-**Satz 4 (Wahrscheinlichkeitsvektor nach beiden Kürzungen).** Sind die Eingangsgewichte endlich und nichtnegativ und ist mindestens eines positiv, liefert \`compactBlend()\` höchstens drei verschiedene Biome mit nichtnegativen Gewichten und Summe eins, abgesehen von Rundungsfehlern. *Beweis.* Die Auswahl nimmt einen bislang unbenutzten Index mit maximalem positiven Gewicht; deshalb kann kein Index zweimal erscheinen. Sei $A$ die Menge der ausgewählten Indizes und $W=\\sum_bv_b>0$. Vor dem letzten Normieren stehen dort $v_b/W$, deren Summe $S=\\sum_{b\\in A}v_b/W>0$ ist. Nach Division durch $S$ ist jedes Endgewicht $v_b/\\sum_{a\\in A}v_a$, also nichtnegativ und insgesamt eins. Für die Interpolation haben die vier Eckkoeffizienten $(1-S_x)(1-S_y)$, $S_x(1-S_y)$, $(1-S_x)S_y$ und $S_xS_y$ dieselben Eigenschaften, weil $S_x,S_y\\in[0,1]$. Ihre Mischung normierter Eckvektoren erfüllt daher wieder die Voraussetzungen des Satzes. Die Auswahl der jeweils drei größten Anteile ist dagegen eine diskrete Operation; Normierung allein beweist keine Stetigkeit der **gekürzten** Gewichte.
+**Satz 4 (Wahrscheinlichkeitsvektor nach beiden Kürzungen).** Sind die Eingangsgewichte endlich und nichtnegativ und ist mindestens eines positiv, liefert \`compactBlend()\` höchstens drei verschiedene Biome mit nichtnegativen Gewichten und Summe eins, abgesehen von Rundungsfehlern.
+
+*Beweis, erster Schritt: Auswahl und Normierung.* Die Auswahl nimmt jeweils einen bislang unbenutzten Index mit maximalem positivem Gewicht. Daher erscheint kein Biom zweimal. Sei $A$ die Menge der ausgewählten Indizes, $v_b$ das Eingangsgewicht von Biom $b$ und $W=\\sum_bv_b>0$. Die erste Normierung ergibt $v_b/W$ für $b\\in A$. Deren Summe ist
+
+$$\\begin{aligned}
+S&=\\sum_{b\\in A}\\frac{v_b}{W}\\\\
+ &=\\frac{\\sum_{b\\in A}v_b}{W}>0.
+\\end{aligned}$$
+
+Nach der zweiten Normierung hat jedes ausgewählte Biom das Gewicht
+
+$$\\begin{aligned}
+\\frac{v_b/W}{S}
+&=\\frac{v_b}{\\sum_{a\\in A}v_a}.
+\\end{aligned}$$
+
+Alle diese Gewichte sind nichtnegativ und summieren sich auf eins.
+
+*Zweiter Schritt: Interpolation.* Für $S_x,S_y\\in[0,1]$ sind die vier Eckkoeffizienten $(1-S_x)(1-S_y)$, $S_x(1-S_y)$, $(1-S_x)S_y$ und $S_xS_y$ nichtnegativ. Ihre Summe ist
+
+$$[(1-S_x)+S_x][(1-S_y)+S_y]=1.$$
+
+Ein solches gewichtetes Mittel normierter Eckvektoren ist wieder nichtnegativ und normiert. Die erneute Auswahl der drei größten Anteile erfüllt somit die Voraussetzungen des ersten Schritts. $\\square$
+
+Die Auswahl ist eine diskrete Operation. Aus der Normierung folgt keine Stetigkeit der **gekürzten** Gewichte, wenn das Biom auf Rang drei wechselt.
 
 ##### 3. Rekursive Zusammensetzung mit Alphawerten
 \`FloorPainter::blend()\` zeichnet bis zu drei Bodenoberflächen nacheinander. Das maßgebliche Biom der örtlichen Kachel (\`own\`) steht an Index 0, gefolgt von fremden Biomen. Die Deckkraft $\\alpha_i$ für Schicht $i$ lautet:
@@ -4901,9 +4971,20 @@ $\\alpha_0 = 1.0, \\qquad \\alpha_i = \\frac{w_i}{\\sum_{j=0}^{i} w_j} \\quad (i
 **Satz (Erhaltung der Gewichte beim Mischen in mehreren Durchläufen):**
 Nach dem Zeichnen bis einschließlich Schicht $i-1$ ist die dargestellte Farbe das gewichtete Mittel dieser Schichten mit dem Gesamtgewicht $C_{i-1} = \\sum_{j=0}^{i-1} w_j$. Wird Schicht $i$ mit der Deckkraft $\\alpha_i=w_i/(C_{i-1}+w_i)$ gezeichnet, entsteht das gewichtete Mittel bis einschließlich Schicht $i$.
 
-*Beweis:* Ist die bisherige Farbe $F_{i-1}=\\sum_{j<i}w_j c_j/C_{i-1}$, ergibt die gewöhnliche Überlagerung
-$$F_i=(1-\\alpha_i)F_{i-1}+\\alpha_i c_i=\\frac{C_{i-1}}{C_{i-1}+w_i}F_{i-1}+\\frac{w_i}{C_{i-1}+w_i}c_i=\\frac{\\sum_{j\\le i}w_jc_j}{\\sum_{j\\le i}w_j}.$$
-Die Grundschicht wird deckend gezeichnet; die Induktion beginnt daher mit $F_0=c_0$. Bei normierten Endgewichten gilt $\\sum_j w_j=1$, und die endgültige Farbe ist $\\sum_jw_jc_j$. Dies beschreibt die Alphagewichte vor Einfärbung, Texturdetails und späterer Beleuchtung.
+*Beweis durch Induktion über die Schichten.* Die Grundschicht wird deckend gezeichnet, also $F_0=c_0$ und $C_0=w_0$. Angenommen, nach Schicht $i-1$ gilt $F_{i-1}=\\sum_{j<i}w_jc_j/C_{i-1}$. Mit $\\alpha_i=w_i/(C_{i-1}+w_i)$ ist der Anteil der bisherigen Farbe
+
+$$1-\\alpha_i=\\frac{C_{i-1}}{C_{i-1}+w_i}.$$
+
+Die gewöhnliche Alphaüberlagerung wird damit
+
+$$\\begin{aligned}
+F_i&=(1-\\alpha_i)F_{i-1}+\\alpha_i c_i\\\\
+   &=\\frac{C_{i-1}F_{i-1}+w_ic_i}{C_{i-1}+w_i}\\\\
+   &=\\frac{\\sum_{j<i}w_jc_j+w_ic_i}{\\sum_{j<i}w_j+w_i}\\\\
+   &=\\frac{\\sum_{j\\le i}w_jc_j}{\\sum_{j\\le i}w_j}.
+\\end{aligned}$$
+
+Damit gilt die Behauptung auch für Schicht $i$. Bei normierten Endgewichten ist $\\sum_jw_j=1$, also lautet die endgültige Farbe $\\sum_jw_jc_j$. Dies beschreibt die Alphagewichte vor Einfärbung, Texturdetails und späterer Beleuchtung. $\\square$
 
 #### Senkrechte Schichtung im Untergrund (\`Under.cpp\`)
 
@@ -4998,7 +5079,21 @@ $$f'(0) = f'(1) = 0, \\qquad f''(0) = f''(1) = 0$$
 
 An ganzzahligen Grenzen verschwinden sowohl die erste als auch die zweite Ableitung der Glättungskurve. Zusammen mit den gemeinsamen Eckgradienten gehen der interpolierte Wert und seine ersten beiden Ableitungen im idealen mathematischen Modell an Zellrändern glatt ineinander über; die Berechnung mit Gleitkommazahlen bleibt eine Näherung.
 
-**Satz 5 ($C^2$-Anschluss an einer Gitterkante).** Fixiere eine waagerechte Teilzelle und betrachte die beiden benachbarten Zellen links und rechts der Grenze $x=m$. In jeder Zelle ist der entlang $x$ interpolierte Ausdruck $L(x)=(1-f(t))A(x)+f(t)B(x)$ mit lokalem $t\\in[0,1]$; $A$ und $B$ sind nach der Interpolation in $y$ weiterhin affine Funktionen von $x$. Am rechten Rand der linken Zelle ist $t=1$, am linken Rand der rechten $t=0$. Wegen $f(1)=1$, $f(0)=0$ und $f'(0)=f'(1)=f''(0)=f''(1)=0$ haben beide Seiten dort den Wert, die erste $x$-Ableitung und die zweite $x$-Ableitung der **gemeinsamen** Kantengradienten. Die Ableitungen nach $y$ stimmen ebenfalls überein, weil an der Kante dieselben zwei Gradienten und dieselbe $y$-Interpolation verwendet werden; Ableiten dieser gemeinsamen Randfunktion erhält auch die gemischten Ableitungen. Damit ist das ideale Gradientenrauschen an Gitterkanten $C^2$. Dieser Beweis setzt identische Hash-Ergebnisse für dieselbe Ecke und reelle Arithmetik voraus; endliche Gleitkommapräzision garantiert keine bitgenaue Ableitungsstetigkeit.
+**Satz 5 ($C^2$-Anschluss an einer Gitterkante).** Im idealen Modell mit reeller Arithmetik und gleichen Hash-Ergebnissen für dieselbe Ecke passen Wert, erste und zweite Ableitungen des Gradientenrauschens an einer Gitterkante zusammen.
+
+*Beweis.* Fixiere zunächst eine waagerechte Teilzelle und betrachte die Grenze $x=m$ zweier benachbarter Zellen. Die Interpolation in $x$ hat in jeder Zelle die Form
+
+$$L(x)=(1-f(t))A(x)+f(t)B(x),\\qquad t\\in[0,1].$$
+
+Nach der Interpolation in $y$ sind $A$ und $B$ weiterhin affin in $x$. Links der Grenze ist $t=1$, rechts ist $t=0$. Die gemeinsame Gitterkante liefert auf beiden Seiten dieselben Eckgradienten und somit dieselbe Randfunktion $G(y)$. Die Bedingungen $f(1)=1$ und $f(0)=0$ geben auf beiden Seiten den Wert $G(y)$.
+
+Beim ersten und zweiten Ableiten nach $x$ fallen alle Terme mit $f'$ und $f''$ an den Rändern weg, denn
+
+$$f'(0)=f'(1)=f''(0)=f''(1)=0.$$
+
+Übrig bleiben die entsprechenden Ableitungen der gemeinsamen affinen Kantendaten; die zweite reine $x$-Ableitung ist dort null. Da die Randfunktion $G(y)$ auf beiden Seiten dieselbe ist, stimmen auch ihre $y$-Ableitungen überein. Dasselbe gilt für gemischte Ableitungen, wenn man die übereinstimmenden Ausdrücke nach $y$ ableitet. Die waagerechten Gitterkanten folgen durch Vertauschen von $x$ und $y$. $\\square$
+
+Endliche Gleitkommapräzision garantiert keine bitgenaue Ableitungsstetigkeit.
 
 #### Gedrehte fraktale Brownsche Bewegung (\`noise_fbm\`)
 
@@ -5047,11 +5142,24 @@ Bei 60 Hz gilt $k=e^{-5/60}\\approx0.9200$. Nach 30 Schritten oder einer halben 
 
 $$\\mathbf x_n-\\mathbf x_0=\\Delta t\\sum_{j=1}^{n}k^j\\mathbf v_0=\\Delta t\\,\\mathbf v_0\\frac{k(1-k^n)}{1-k}.$$
 
-**Satz 6 (Grenzwert und Zeitschrittfehler ohne Lebensdauerbegrenzung).** Für $a=5\\,\\mathrm{s}^{-1}$ und $\\Delta t>0$ ist $k=e^{-a\\Delta t}\\in(0,1)$. Die geometrische Reihe konvergiert; ihr unendlicher Verschiebungsfaktor ist
+**Satz 6 (Grenzwert und Zeitschrittfehler ohne Lebensdauerbegrenzung).** Setze $a=5\\,\\mathrm{s}^{-1}$ und $\\Delta t>0$. Ohne Lebensdauerbegrenzung besitzt die diskrete Bewegung einen endlichen Gesamtweg. Dessen Verschiebungsfaktor nähert sich für $\\Delta t\\to0$ dem kontinuierlichen Faktor $1/a$ von unten.
+
+*Beweis, Konvergenz.* Aus $a\\Delta t>0$ folgt $0<k=e^{-a\\Delta t}<1$. Für $n\\to\\infty$ verschwindet $k^n$ in der obigen geometrischen Summe. Damit ist der Faktor
 $$F_{\\Delta t}=\\Delta t\\frac{k}{1-k}=\\frac{\\Delta t}{e^{a\\Delta t}-1}.$$
-Da $e^z>1+z$ für $z>0$, folgt $0<F_{\\Delta t}<1/a$. Mit $z=a\\Delta t$ und der Entwicklung $e^z-1=z+z^2/2+O(z^3)$ ergibt sich
+
+*Schranke.* Für $z=a\\Delta t>0$ gilt $e^z-1>z$. Deshalb
+
+$$\\begin{aligned}
+0<F_{\\Delta t}
+&=\\frac{\\Delta t}{e^z-1}\\\\
+&<\\frac{\\Delta t}{z}\\\\
+&=\\frac1a.
+\\end{aligned}$$
+
+*Grenzwert und Fehler.* Mit $e^z-1=z+z^2/2+O(z^3)$ und $z=a\\Delta t$ erhält man
 $$F_{\\Delta t}=\\frac1a-\\frac{\\Delta t}{2}+O(\\Delta t^2),\\qquad\\lim_{\\Delta t\\to0}F_{\\Delta t}=\\frac1a.$$
-Der diskrete Gesamtweg liegt also in Richtung der Anfangsgeschwindigkeit unter dem kontinuierlichen Grenzwert und nähert sich ihm bei kleineren Zeitschritten an. Die Aussage betrifft die reine Dämpfungsrekursion ohne Ende der Partikellebensdauer, Kollision oder weitere Kraft. Für einen Vektor bedeutet „unter“ hier den kleineren **Faktor**, nicht eine Ordnung zwischen Vektoren.
+
+Dies beweist den kleineren Faktor des diskreten Gesamtwegs in Richtung der Anfangsgeschwindigkeit. Für Vektoren bedeutet „unter“ keine Vektorordnung. Die Aussage betrifft nur die reine Dämpfungsrekursion ohne Ende der Partikellebensdauer, Kollision oder weitere Kraft.
 
 Der Verschiebungsfaktor für unendlich lange Zeit beträgt bei 60 Hz ungefähr $0.192$ s mal Anfangsgeschwindigkeit, gegenüber $0.2$ s für die kontinuierliche Differentialgleichung $d\\mathbf v/dt=-5\\mathbf v$. Der kleine Unterschied entsteht durch die Reihenfolge der diskreten Aktualisierung und nicht durch eine andere Bremskonstante. Die endliche Lebensdauer des Funkens verkürzt den tatsächlichen Weg weiter. Aus der Dämpfung allein folgen weder Schwerkraft noch Kollisionen mit Wänden; diese Verhaltensweisen gehören zu anderen Effekten.
 
@@ -5095,7 +5203,11 @@ dieselbe Abbildung, die auch \`passageNear()\` verwendet. \`Level::landed\` spei
 - **Fall 2:** $u_n\\in\\Pi_\\ell$ und $L=0$, der Held lebt und kein Gewölbe ist aktiv. Dann wechselt \`through()\` die Ebene, danach gilt $L=1$.
 - **Fall 3:** $u_n\\in\\Pi_\\ell$ und $L=1$. Dann geschieht nichts.
 
-**Satz 7 (kein sofortiger Rückweg).** Zwischen einer Ankunft durch einen Durchgang und dem nächsten selbsttätigen Durchschreiten liegt mindestens ein Prüfzeitpunkt, an dem die Fußkachel nicht in $\\Pi_\\ell$ liegt. Außerdem findet in einem Simulationsschritt höchstens ein Ebenenwechsel durch Durchgänge statt. *Beweis.* Nach jeder Ankunft gilt $L=1$, entweder durch den Standardwert der neuen Ebene oder durch die Zuweisung in \`through()\`. Ein selbsttätiger Wechsel verlangt $L=0$. Den Wert null schreibt nur Fall 1, und dieser verlangt $u\\notin\\Pi_\\ell$. Für die zweite Aussage: Hat der Tastenweg in diesem Schritt bereits gewechselt, liest \`step()\` die neue Ebene mit $L=1$; die drei Fälle schließen einander aus, und \`step()\` ruft \`through()\` höchstens einmal auf. $\\square$
+**Satz 7 (kein sofortiger Rückweg).** Nach einer Ankunft durch einen Durchgang kann der nächste selbsttätige Wechsel erst erfolgen, nachdem die Fußkachel bei einer Prüfung außerhalb von $\\Pi_\\ell$ lag. Außerdem gibt es pro Simulationsschritt höchstens einen Wechsel durch Durchgänge.
+
+*Beweis der ersten Aussage.* Nach der Ankunft gilt $L=1$: entweder durch den Standardwert der neuen Ebene oder durch die Zuweisung in \`through()\`. Fall 2, der einzige selbsttätige Wechsel, verlangt dagegen $L=0$. Nur Fall 1 setzt das Bit auf null, und sein Auslöser ist $u\\notin\\Pi_\\ell$. Eine Prüfung außerhalb der Durchgangskacheln muss also dazwischenliegen.
+
+*Beweis der zweiten Aussage.* Hat ein Tastenweg im laufenden Schritt bereits gewechselt, sieht \`step()\` die neue Ebene mit $L=1$. Die drei Fälle schließen einander aus; \`step()\` kann \`through()\` höchstens einmal aufrufen. $\\square$
 
 **Folgerung (Mindestweg für eine Rückkehr).** Die Ankunft setzt den Helden auf $(16w_x+8,\\ 16w_y+12)$. Dann ist $u=(w_x,w_y)$, denn $\\lfloor(16w_y+8)/16\\rfloor=w_y$. Liegt am Zielort selbst ein Durchgang, wie bei einem Höhlenmund und seinem Tageslicht unten oder bei beiden Enden einer Treppe, muss der Held zuerst die Kachel verlassen. Waagerecht trennen ihn $8$ Pixel von jedem Rand. Senkrecht liegt $y-4=16w_y+8$ ebenfalls $8$ Pixel von beiden Rändern entfernt. Eine Rückkehr verlangt also mindestens $8$ Pixel Weg hinaus und einen Schritt zurück. Die Marke wirkt wie eine Hysterese der Breite einer halben Kachel. Dieselbe Überlegung zeigt, dass ein geladener Spielstand auf einem Höhlenmund keinen Wechsel auslöst.
 
@@ -5109,11 +5221,30 @@ $C(x,y)\\iff h(x,y-1)>h(x,y)\\ \\wedge\\ \\neg\\,\\mathrm{Rampe}(x,y-1).$
 
 Dort erscheint ein Bogen in der Klippenwand, sonst entscheidet das Bit $\\mathrm{hash2}(41x+7,\\,43y-1)\\bmod 2$ zwischen Grube und Bau. Ohne gezielte Platzierung lagen bei Saat $0$ über $32\\times32$ Zellen nur $3$ von $718$ Mündern an einem Klippenfuß. Deshalb verschiebt \`place()\` beim Zellaufbau jeden gewählten Platz $s$ um einen Versatz $\\delta\\in\\{-3,\\dots,3\\}^2$ mit kleinstem $\\|\\delta\\|^2$. Der neue Platz muss Klippenfuß sein, oberirdisch trocken liegen und einen offenen $3\\times3$-Block in der Höhle besitzen. Gleichstände entscheidet die Durchlaufreihenfolge, weil nur ein echt kleinerer Abstand ersetzt. Gibt es keinen solchen Platz, bleibt $s$.
 
-**Satz 8 (Lage und Abstand nach der Verschiebung).** (a) Jeder Mund liegt mit lokalen Koordinaten $1\\le i,j\\le 62$ in seiner Zelle und hat einen offenen $3\\times3$-Block. (b) Für zwei Münder $m_a,m_b$ derselben Zelle gilt
+**Satz 8 (Lage und Abstand nach der Verschiebung).** Die Platzierung garantiert zwei Eigenschaften:
+
+1. Jeder Mund liegt mit lokalen Koordinaten $1\\le i,j\\le62$ in seiner Zelle und hat einen offenen $3\\times3$-Block.
+2. Für zwei Münder $m_a,m_b$ derselben Zelle gilt die Abstandsschranke
 
 $\\|m_a-m_b\\|\\ \\ge\\ 12-3\\sqrt2\\ \\approx\\ 7{,}757\\ \\text{Kacheln}.$
 
-*Beweis.* (a) Unverschobene Plätze stammen aus dem Raster $i,j\\in\\{1,4,\\dots,61\\}$ mit geprüftem $3\\times3$-Block. Ein verschobener Platz muss denselben Block bestehen. Die Hilfsfunktion \`openAt\` liefert außerhalb von $[0,64)$ falsch, also gilt $0\\le i-1$ und $i+1\\le63$, ebenso für $j$. (b) Sei $m_b$ nach $m_a$ entstanden. Beide Auswahlschleifen vergleichen den Kandidaten $s$ mit den bereits **verschobenen** Mündern und verwerfen $\\|s-m_a\\|^2<144$. Also gilt $\\|s-m_a\\|\\ge12$. Die Verschiebung erfüllt $\\|m_b-s\\|=\\|\\delta\\|\\le3\\sqrt2$, weil jede Komponente höchstens $3$ beträgt. Die Dreiecksungleichung liefert $\\|m_a-m_b\\|\\ge\\|s-m_a\\|-\\|m_b-s\\|\\ge12-3\\sqrt2$. Der Notfallzweig ohne Abstandsprüfung setzt nur den ersten Mund einer Zelle. $\\square$
+*Beweis der Lage.* Unverschobene Plätze stammen aus dem Raster $i,j\\in\\{1,4,\\dots,61\\}$ und bestehen die Prüfung des $3\\times3$-Blocks. Ein verschobener Platz muss dieselbe Prüfung bestehen. Außerhalb von $[0,64)$ liefert \`openAt\` falsch. Für den geprüften Block gilt daher $0\\le i-1$ und $i+1\\le63$, also $1\\le i\\le62$; für $j$ gilt dasselbe.
+
+*Beweis des Abstands.* Sei $m_b$ nach $m_a$ entstanden und $s$ sein ursprünglicher Kandidat. Beide Auswahlschleifen verwerfen $s$, wenn $\\|s-m_a\\|^2<144$. Für einen angenommenen Kandidaten gilt deshalb
+
+$$\\|s-m_a\\|\\ge\\sqrt{144}=12.$$
+
+Jede Komponente der Verschiebung $\\delta=m_b-s$ beträgt höchstens drei Kacheln. Somit
+
+$$\\|m_b-s\\|=\\|\\delta\\|
+\\le\\sqrt{3^2+3^2}=3\\sqrt2.$$
+
+Die umgekehrte Dreiecksungleichung kombiniert beide Grenzen:
+
+$$\\|m_a-m_b\\|\\ge\\|s-m_a\\|-\\|m_b-s\\|
+\\ge12-3\\sqrt2.$$
+
+Der Notfallzweig ohne Abstandsprüfung setzt nur den ersten Mund einer Zelle. $\\square$
 
 Vor der Änderung galt die Schranke $12$; die Verschiebung kostet also höchstens $3\\sqrt2\\approx4{,}24$ Kacheln Abstand. Für Münder verschiedener Zellen machte schon die alte Regel keine Aussage. *Beobachtung, kein Beweis.* Mit derselben Saat sind nun $63$ von $718$ Mündern Bögen ($8{,}8\\,\\%$). Unter den übrigen $655$ fallen $337$ auf Gruben und $318$ auf Baue. Unter der Annahme eines fairen Paritätsbits erwartet man $327{,}5$ Gruben mit Standardabweichung $\\sqrt{655}/2\\approx12{,}8$. Die Abweichung beträgt also etwa $0{,}74$ Standardabweichungen.
 
@@ -5121,11 +5252,15 @@ Vor der Änderung galt die Schranke $12$; die Verschiebung kostet also höchsten
 
 Die Chronik eines Feldzugs hat $F\\le8$ Gründer. Jeder Gründer $f$ besitzt $M=2$ Fragmente mit den Kennungen $r=4f+k$, $k<M$. Gespeichert wird die Menge $\\mathcal F$ der gelesenen Kennungen, und \`found(f)\` zählt $|\\{k<M:\\ 4f+k\\in\\mathcal F\\}|$. Fragmente liegen an der Oberfläche als Tafeln. Seit dieser Fassung liegt außerdem im Herzen jeder Zelle der Verlorenen Hallen im Sundark eine Gruft auf der Kachel $(h_x,\\ h_y-2)$, und ihre Inschrift zählt ebenfalls als Fragment.
 
-**Satz 9 (Präfix-Invariante).** Für jeden Zustand, der aus $\\mathcal F=\\emptyset$ nur durch Aufrufe von \`Campaign::read()\` entsteht, gilt für jeden Gründer
+**Satz 9 (Präfix-Invariante).** Beginnt die Fragmentmenge leer und wird nur durch \`Campaign::read()\` verändert, so enthält sie für jeden Gründer genau die ersten \`found(f)\` Fragmente:
 
 $\\mathcal F\\cap\\{4f,\\,4f+1\\}=\\{4f+k:\\ k<\\mathrm{found}(f)\\}.$
 
-*Beweis* durch Induktion über die Leseaufrufe. Für $\\mathcal F=\\emptyset$ ist beides leer. \`read()\` fügt genau den Wert von \`readable()\` ein. Beide Zweige von \`readable()\` liefern $4f+\\mathrm{found}(f)$ und nur für $\\mathrm{found}(f)<M$: an der Oberfläche die Tafel mit Index $k=\\mathrm{found}(f)$, unten die Gruft mit demselben Index. Nach Induktionsvoraussetzung ist $4f+\\mathrm{found}(f)$ das kleinste fehlende Element; das Einfügen verlängert das Präfix um eins. $\\square$
+*Beweis durch Induktion über die Leseaufrufe.* Im Anfangszustand sind $\\mathcal F$ und alle Präfixe leer. Angenommen, die Gleichung gilt vor dem nächsten erfolgreichen Lesen. \`read()\` fügt genau den Wert aus \`readable()\` ein. Sowohl die Tafel an der Oberfläche als auch die Gruft unten liefern bei $\\mathrm{found}(f)<M$ denselben nächsten Index:
+
+$$k=\\mathrm{found}(f),\\qquad r=4f+k.$$
+
+Nach Induktionsannahme sind $4f,\\dots,4f+k-1$ bereits vorhanden und $4f+k$ ist das kleinste fehlende Fragment dieses Gründers. Das Einfügen verlängert also sein Präfix um genau eins; die Präfixe aller anderen Gründer bleiben gleich. $\\square$
 
 Daraus folgt: Die Reihenfolge der Fragmente bleibt erhalten, gleich ob der Held eine Tafel oder eine Gruft liest. Die Meldung, dass ein Grab erwacht, erscheint für jeden Gründer genau einmal, nämlich beim Übergang von $\\mathrm{found}=1$ zu $2$. Kein Gründer erhält mehr als $M$ Fragmente. *Grenze.* \`Campaign::load()\` nimmt jede Zeile \`fragment r\` mit $0\\le r<64$ an; ein von Hand bearbeiteter Spielstand liegt außerhalb der Voraussetzung.
 
@@ -5133,9 +5268,17 @@ Daraus folgt: Die Reihenfolge der Fragmente bleibt erhalten, gleich ob der Held 
 
 $\\mathrm{buried}(t)=\\arg\\min_f\\ \\|\\mathbf c_f-16\\,t\\|^2,$
 
-mit $\\mathbf c_f$ als Mittelpunkt seines Sitzes in Weltpixeln; bei Gleichstand gewinnt der kleinste Index. Die Grüfte zerlegen sich damit in Voronoi-Zellen der Sitze. Jede Gruft liefert über den ganzen Feldzug höchstens ein Fragment, und alle Grüfte zusammen liefern höchstens $MF\\le16$ Fragmente. *Beweis.* Die Zuordnung ist ein linearer Durchlauf mit echtem Vergleich $d<\\text{near}$, daher die Regel für Gleichstände. \`read()\` legt in der Tiefe den Zellschlüssel $(c_x,c_y)$ in \`epitaphs\` ab, und \`readable()\` liefert $-1$, sobald der Schlüssel vorhanden ist. Der Schlüssel wird als Zeile \`epitaph cx cy\` gespeichert. Jede Gruft trägt also höchstens einmal bei, und nach Satz 9 trägt jeder Gründer höchstens $M$ Fragmente, unabhängig von der Zahl der Hallen. $\\square$
+Hier ist $\\mathbf c_f$ der Mittelpunkt des Sitzes von Gründer $f$ in Weltpixeln. Bei Gleichstand gewinnt der kleinste Index. Die Formel teilt die Grüfte in Voronoi-Zellen der Sitze ein. Jede Gruft liefert höchstens ein Fragment; alle Grüfte zusammen liefern höchstens $MF\\le16$.
 
-**Lemma (Unabhängigkeit von der Ebene).** \`Campaign::history()\` liefert dieselben Gründer, gleich auf welcher Ebene sie zum ersten Mal ausgewertet wird. *Beweis.* \`chronicle::write()\` liest Bauwerke über \`world::structureIn()\`, und diese Abfrage hängt nur von der aktiven Ebene ab. \`history()\` schreibt die Chronik innerhalb eines \`world::Surfaced\`, das die Oberfläche aktiviert und beim Verlassen die vorige Ebene wiederherstellt. $\\square$ Vor dieser Fassung hätte eine erste Auswertung unter der Erde keine Bauwerke gefunden. Dann wäre eine leere Chronik entstanden und durch das Merkbit \`chronicled\` für die ganze Sitzung festgeschrieben worden.
+*Beweis der Zuordnung.* Der lineare Durchlauf ersetzt den bisherigen Sieger nur bei einem echt kleineren Abstand $d<\\text{near}$. Bei gleichen Abständen bleibt daher der zuerst betrachtete, kleinere Index Sieger.
+
+*Beweis der Schranke.* Beim Lesen in der Tiefe speichert \`read()\` den Zellschlüssel $(c_x,c_y)$ in \`epitaphs\`. Danach liefert \`readable()\` für denselben Schlüssel $-1$. Der Schlüssel wird auch als Zeile \`epitaph cx cy\` gespeichert. Somit trägt jede Gruft höchstens einmal bei. Nach Satz 9 kann Gründer $f$ insgesamt höchstens $M$ Fragmente erhalten. Summiert über $F$ Gründer ergibt das höchstens $MF\\le2\\cdot8=16$, unabhängig von der Zahl der Hallen. $\\square$
+
+**Lemma (Unabhängigkeit von der Ebene).** \`Campaign::history()\` liefert dieselben Gründer, gleich auf welcher Ebene sie zum ersten Mal ausgewertet wird.
+
+*Beweis.* \`chronicle::write()\` liest Bauwerke über \`world::structureIn()\`; diese Abfrage hängt von der aktiven Ebene ab. \`history()\` ruft das Schreiben innerhalb eines \`world::Surfaced\` auf. Dieses Objekt aktiviert vor der Abfrage die Oberfläche und stellt beim Verlassen die vorige Ebene wieder her. Die Abfrage sieht daher unabhängig vom Ausgangsort dieselbe Oberflächenebene. $\\square$
+
+Vor dieser Fassung hätte eine erste Auswertung unter der Erde keine Bauwerke gefunden. Eine leere Chronik wäre dann durch das Merkbit \`chronicled\` für die ganze Sitzung festgeschrieben worden.
 
 ### 16. Synergien als Produktmenge und Fehden als Bernoulli-Prozess
 
@@ -5147,7 +5290,25 @@ $\\mathrm{of}(M)=\\{16t+p:\\ a_t\\in M,\\ b_p\\in M\\}.$
 
 $|\\mathrm{of}(M)|=|A\\cap M|\\cdot|B\\cap M|.$
 
-Ein einzelnes Merkmal weckt keine Synergie, und $M\\subseteq M'$ impliziert $\\mathrm{of}(M)\\subseteq\\mathrm{of}(M')$. *Beweis.* Division mit Rest liefert die Umkehrung $t=\\lfloor s/16\\rfloor$, $p=s\\bmod16$, wie in \`triggerOf\` und \`payloadOf\`. Die Bedingungen an $t$ und $p$ sind unabhängig, die Menge ist also das Bild des Produkts $\\{t:a_t\\in M\\}\\times\\{p:b_p\\in M\\}$ unter einer injektiven Abbildung. Für $M=\\{x\\}$ liegt $x$ wegen $A\\cap B=\\emptyset$ höchstens in einer der beiden Mengen, ein Faktor ist also null. Die Monotonie folgt, weil beide Bedingungen nur Mitgliedschaften verlangen. $\\square$ Beispiel: Ein Hale-Held mit fünf Leiden und dem Werkstoff Stein als Auslösern sowie sechs Werkstoffen der Ausrüstung als Wirkungen erreicht $6\\cdot6=36$ Synergien. Alle $256$ verlangen sämtliche $32$ Merkmale.
+Ein einzelnes Merkmal weckt keine Synergie. Außerdem gilt für $M\\subseteq M'$ stets $\\mathrm{of}(M)\\subseteq\\mathrm{of}(M')$.
+
+*Beweis der Bijektion.* Zu jeder Kennung $s\\in\\{0,\\dots,255\\}$ liefert die Division mit Rest eindeutig
+
+$$t=\\left\\lfloor\\frac{s}{16}\\right\\rfloor,\\qquad p=s\\bmod16,$$
+
+und damit $s=16t+p$. Das ist genau die Zerlegung in \`triggerOf\` und \`payloadOf\`.
+
+*Beweis der Anzahl.* Setze $T_M=\\{t:a_t\\in M\\}$ und $P_M=\\{p:b_p\\in M\\}$. Beide Bedingungen sind unabhängig; jede aktive Synergie entspricht genau einem Paar aus $T_M\\times P_M$. Daher
+
+$$\\begin{aligned}
+|\\mathrm{of}(M)|&=|T_M\\times P_M|\\\\
+ &=|T_M|\\,|P_M|\\\\
+ &=|A\\cap M|\\,|B\\cap M|.
+\\end{aligned}$$
+
+Für $M=\\{x\\}$ liegt $x$ wegen $A\\cap B=\\emptyset$ höchstens auf einer Seite; ein Faktor ist null. Aus $M\\subseteq M'$ folgen $T_M\\subseteq T_{M'}$ und $P_M\\subseteq P_{M'}$, also auch die behauptete Monotonie. $\\square$
+
+Beispiel: Ein Hale-Held mit fünf Leiden und dem Werkstoff Stein besitzt insgesamt sechs Auslöser. Mit sechs Werkstoffen der Ausrüstung als Wirkungen erreicht er $6\\cdot6=36$ Synergien. Für alle $256$ braucht er sämtliche $32$ Merkmale.
 
 Eine **Fehde** flammt in einem berechtigten Augenblick, der alle $15$ Sekunden geprüft wird, genau dann auf, wenn
 
@@ -5155,11 +5316,25 @@ $\\mathrm{hash2}\\bigl(\\mathrm{hash2}(31r_x+7n,\\ 17r_y-13s),\\ \\text{salt}\\b
 
 Dabei sind $(r_x,r_y)$ die Region, $n$ die Nacht und $s$ das Zeitfenster. Außerhalb berechtigter Augenblicke setzt \`Level::feuds()\` den Zeitgeber zurück, nämlich nahe sicheren Zonen, während einer Belagerung und in den ersten Nächten.
 
-**Satz 12 (Wahrscheinlichkeit trotz Restverzerrung).** Ist der äußere Hash gleichverteilt auf $\\{0,\\dots,2^{32}-1\\}$, so gilt für eine einzelne Prüfung
+**Satz 12 (Wahrscheinlichkeit trotz Restverzerrung).** Unter der Annahme, dass der äußere Hash auf $\\{0,\\dots,2^{32}-1\\}$ gleichverteilt ist, hat eine einzelne Prüfung die Wahrscheinlichkeit
 
 $P=\\frac{90\\cdot4\\,294\\,968}{2^{32}}=\\frac{386\\,547\\,120}{4\\,294\\,967\\,296}\\approx0{,}0900000017.$
 
-*Beweis.* $2^{32}=1000\\cdot4\\,294\\,967+296$. Die Reste $0,\\dots,295$ haben je $4\\,294\\,968$ Urbilder, alle übrigen $4\\,294\\,967$. Die geforderten Reste $0,\\dots,89$ gehören sämtlich zur ersten Gruppe. $\\square$ Die Verzerrung durch den Rest beträgt also weniger als $2\\cdot10^{-9}$. Bei unabhängigen Prüfungen ist die Zahl der Prüfungen bis zur ersten Fehde geometrisch verteilt mit Erwartungswert $1/P\\approx11{,}1$, also etwa $167$ Sekunden **berechtigter** Spielzeit. Die Wahrscheinlichkeit, zehn Prüfungen lang keine Fehde zu erleben, ist $(1-P)^{10}\\approx0{,}389$. Ein Aufflammen ist noch kein Kampf, denn \`ignite()\` braucht zwei verfeindete Rudel in Reichweite. *Beobachtung.* Der Test \`testFeuds\` zählt $193$ Aufflammen in $2000$ Fenstern. Erwartet sind $180$ mit Standardabweichung $\\sqrt{2000\\cdot0{,}09\\cdot0{,}91}\\approx12{,}8$, also eine Abweichung von etwa $1{,}0$ Standardabweichungen. Die Gleichverteilung von \`hash2\` ist hier Annahme, nicht Ergebnis; bewiesen ist dagegen der Determinismus, denn dieselben Eingaben liefern dieselbe Entscheidung.
+*Beweis.* Die Division des Hashraums in 1000 Restklassen ergibt
+
+$$2^{32}=1000\\cdot4\\,294\\,967+296.$$
+
+Die Reste $0,\\dots,295$ besitzen deshalb je $4\\,294\\,968$ Urbilder; alle anderen besitzen je $4\\,294\\,967$. Das Ereignis \`Rest < 90\` umfasst die 90 Reste $0,\\dots,89$, die sämtlich zur ersten Gruppe gehören. Seine Anzahl günstiger Hashwerte ist somit $90\\cdot4\\,294\\,968$. Division durch $2^{32}$ ergibt die Formel. $\\square$
+
+Die Abweichung von $0.09$ beträgt weniger als $2\\cdot10^{-9}$. **Nur wenn aufeinanderfolgende Prüfungen außerdem unabhängig sind**, ist die Zahl der Prüfungen bis zur ersten Fehde geometrisch verteilt. Dann gilt
+
+$$E[N]=\\frac1P\\approx11.1,\\qquad
+E[\\text{berechtigte Zeit}]\\approx15E[N]\\approx167\\,\\mathrm{s},$$
+$$P(\\text{zehn Prüfungen ohne Fehde})=(1-P)^{10}\\approx0.389.$$
+
+Ein Aufflammen ist noch kein Kampf: \`ignite()\` braucht zwei verfeindete Rudel in Reichweite.
+
+*Beobachtung.* \`testFeuds\` zählt $193$ Aufflammen in $2000$ Fenstern. Bei unabhängigen Prüfungen mit $P\\approx0.09$ wären $2000P\\approx180$ zu erwarten, mit Standardabweichung $\\sqrt{2000P(1-P)}\\approx12.8$. Die beobachtete Abweichung beträgt etwa eine Standardabweichung. Die Gleichverteilung und Unabhängigkeit von \`hash2\` sind Annahmen, keine Ergebnisse dieses Beweises. Deterministisch ist die Entscheidung dennoch: Dieselben Eingaben liefern denselben Hash und damit dasselbe Ergebnis.
 
 ### Diskussion: Gemeinsamkeiten der Modelle
 
