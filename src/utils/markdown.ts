@@ -10,7 +10,7 @@ function slugify(raw: string): string {
     .replace(/^-|-$/g, "");
 }
 
-interface PageHeading {
+export interface PageHeading {
   level: 3 | 4;
   text: string;
   slug: string;
