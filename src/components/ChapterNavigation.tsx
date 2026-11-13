@@ -226,7 +226,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         </div>
         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
           <div>
-            Pool: <span className="text-slate-200">32 Slabs</span>
+            Pool: <span className="text-slate-200">95 Size Classes</span>
           </div>
           <div>
             Grid: <span className="text-emerald-400">CSR Prefix</span>
@@ -235,7 +235,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
             Sort: <span className="text-sky-400">12b Radix×3</span>
           </div>
           <div>
-            Audio: <span className="text-amber-300">32-Voice LRU</span>
+            Audio: <span className="text-amber-300">32 Voices</span>
           </div>
         </div>
       </div>

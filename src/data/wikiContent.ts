@@ -66,24 +66,24 @@ export const WIKI_SECTIONS: WikiSection[] = [
 
 #### System Requirements & Hardware Baseline
 * **Vulkan 1.2 Core:** The engine targets a clean Vulkan 1.2 feature set (leveraging MoltenVK on macOS Apple Silicon). Shader pipelines are pre-compiled to SPIR-V at build time using LunarG \`slangc\`.
-* **Measured Reference Baseline:** Intel Iris Xe integrated graphics (8 logical cores, 16 GB RAM). In a 36-minute \`--soak\` stress run (550+ active entities on screen), the engine sustains 60 fps every minute with frame $p_{99}$ latency between 1.9 ms and 6.3 ms and total process memory stabilized at $\\sim 180\\text{ MB}$. \`--bench-gate\` holds 60 fps with a $p_{99}$ of $\\sim 8\\text{ ms}$ at 10,000 active enemies.
+* **Benchmarking:** \`--bench\` measures a range of enemy counts; \`--bench-gate\` checks 10,000 enemies against at least 55 fps and frame p99 no greater than 16.7 ms. Results depend on hardware and build configuration (\`src/Bench.cpp\`).
 * **Windows SEH Minidump Crash Reporter:** An unhandled exception or abort records the version, world seed, active hero, and module offset backtrace to \`mellangan.log\`, writing a full \`crash.dmp\` minidump beside the executable (or redirecting to the user save directory if running from read-only application folders).
 
 #### Core Engineering Invariants
 
-1. **Zero Heap Thrashing via Expanded 1,520-Byte Pool Slabs (\`src/entity/Pool.c\`):**
-   Every object inheriting from \`SpriteObject\` overrides \`operator new\` and sized \`operator delete(void *p, size_t size)\` to route directly into \`Pool.c\`, a 96-size-class, 16-byte-grained slab allocator backed by 64 KB contiguous memory blocks. Slab capacity extends to 1,520 bytes, guaranteeing zero-allocation instantiation for all 78 bestiary species. Compile-time assertions enforce that no monster class exceeds the 1,520-byte slab boundary.
+1. **Pooled SpriteObject Allocations (\`src/entity/Pool.c\`):**
+   \`SpriteObject\` routes allocation and sized deallocation through a synchronized pool. Requests through 1,520 bytes use 16-byte size classes backed by 64 KiB slab payloads; larger requests use \`malloc\`. The code also uses direct allocation when \`__SANITIZE_ADDRESS__\` is defined. An empty free list triggers a slab allocation, so pool use does not mean every request avoids the system allocator.
 
-2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
-   Equipment modifiers (44 float attributes) are decoupled from the base creature footprint. Regular monsters without inventory items share an immutable, zero-initialized static block via \`bonus()\`, reducing standard enemy memory from 1,000 bytes down to 832 bytes (a 16.8% cache footprint reduction across 10,000 mobs). Mutable gear instances are allocated on demand via \`kit()\` only when a mob or hero equips items.
+2. **On-Demand Gear Stats (\`src/entity/ItemStats.hpp\`):**
+   A mob without gear reads a shared, zero-initialized \`ItemStats\` through \`bonus()\`. \`kit()\` allocates a mutable instance when needed. Actual object sizes depend on the compiler, build and current fields.
 
 3. **Smooth High-Refresh Display Sub-Step Easing (120 Hz / 144 Hz+):**
    While game logic evaluates at a fixed 60 Hz step, visual rendering interpolates sprite positions, point light sources, and camera coordinates between simulation ticks using normalized fractional sub-step time $\\alpha \\in [0, 1)$:
    $x_{\\text{render}} = (1 - \\alpha) x_{\\text{prev}} + \\alpha x_{\\text{curr}}$
-   Spatial discontinuities (such as blinks, teleports, or respawns exceeding 3 tiles / 48 pixels) automatically bypass interpolation and snap instantaneously to prevent smear artifacts. At 60 Hz or lower, interpolation incurs zero latency and zero computational overhead.
+   A sprite displacement of 48 pixels or more bypasses interpolation. The game uses interpolation when its measured frame rate exceeds 70 fps; otherwise it uses the current simulation state.
 
 4. **Hardware Performance Counter Telemetry & F3 Profiler Graph (\`src/Prof.c\`):**
-   Every tick and render pass is bracketed by \`prof_begin(slot)\` and \`prof_end(slot)\` using high-resolution \`SDL_GetPerformanceCounter()\` timers across 8 hardware telemetry slots:
+   Selected simulation and rendering sections are bracketed by \`prof_begin(slot)\` and \`prof_end(slot)\` using SDL performance-counter timers across eight CPU timing slots:
    * \`PROF_THINK (0)\`: 4-barrier parallel enemy AI and soft-body crowd relaxation (\`Workers::run\`).
    * \`PROF_ENTITIES (1)\`: EnTT \`Owned\` iteration, status afflictions, and weapon cooldowns.
    * \`PROF_PARTICLES (2)\`: Particle kinematics and two-pointer in-place array compaction.
@@ -92,7 +92,7 @@ export const WIKI_SECTIONS: WikiSection[] = [
    * \`PROF_FLOOR (5)\`: 3-biome barycentric ground blending and 4-bit cardinal cliff auto-tiling.
    * \`PROF_SORT (6)\`: 64-bit sort key packing and 3-pass 12-bit LSD Radix Sort.
    * \`PROF_DRAW (7)\`: Planar water reflections, directional contact shadows, and sprite batching.
-   Pressing F3 overlays a 120-frame stacked bar graph: blue represents simulation tick time, stacked beneath GPU render time. Bars turn gold when frame time exceeds 8.3 ms, and red when exceeding the 16.7 ms target budget.
+   Pressing F3 overlays a 120-frame stacked bar graph: blue represents simulation tick time, stacked beneath CPU time spent in the render call (not GPU execution time). Bars turn gold when frame time exceeds 8.3 ms, and red when exceeding the 16.7 ms target budget.
 
 5. **Full Gamepad Support & Dynamic Control Glyphs (SDL3):**
    Full analog gamepad integration provides variable-velocity stick steering with circular deadzones and debounced menu navigation. All on-screen button prompts and tutorial hints dynamically switch between keyboard glyphs and controller buttons based on the most recently used input device.
@@ -130,8 +130,8 @@ flowchart TD
     end
 
     subgraph Memory_Concurrency ["Memory & Concurrency Core"]
-        Pool["Pool.c Slab Allocator<br/>(96 Size Classes, 64KB Pages, SRWLOCK)"]:::core
-        Workers["Workers.cpp Thread Pool<br/>(Atomic Fetch-Add Chunk Stealing)"]:::core
+        Pool["Pool.c Slab Allocator<br/>(95 Used Size Classes, 64 KiB Payloads)"]:::core
+        Workers["Workers.cpp Thread Pool<br/>(Atomic Compare-Exchange Chunk Stealing)"]:::core
         Prof["Prof.c Telemetry<br/>(8 Hardware Performance Slots)"]:::core
     end
 
@@ -361,7 +361,7 @@ flowchart TD
     title: "03. Intrusive Slab Allocator (Pool.c) & Sized Deallocation",
     category: "simulation",
     summary:
-      "Zero-header C++ sized operator delete, 1,520B pool slabs, decoupled 832B enemy ItemStats, and status bitmasks.",
+      "Sized deallocation, 16-byte pool size classes, on-demand gear stats, and status bitmasks.",
     sourceFiles: [
       "src/entity/Pool.c",
       "src/entity/Pool.h",
@@ -387,21 +387,11 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
 
 ### Inside \`src/entity/Pool.c\`
 
-1. **Size Class Quantization & 1,520-Byte Slab Expansion:**
-   Sizes are rounded up to multiples of 16 bytes via bit-shifting:
-   \`classOf(size) = (size + 15) >> 4\`.
-   The allocator supports 96 distinct size classes, handling allocations up to **1,520 bytes** directly within contiguous pre-allocated slab pages. In earlier versions, large monsters exceeding 512 bytes spilled into the system heap, causing micro-stutters during heavy wave spawns. With the 1,520-byte ceiling, every bestiary entity, boss, projectile, and particle is served by zero-fragmentation pool slabs.
+1. **Size classes and fallback:**
+   \`classOf(size)\` rounds requests up in 16-byte units after treating zero as one. Indices 1–95 cover requests through 1,520 bytes; index 0 is unused. Larger requests go directly to \`malloc\`. When \`__SANITIZE_ADDRESS__\` is defined, all requests use the direct path. The pool refills a class with a new slab when its free list is empty.
 
-2. **Decoupled Gear Footprint (\`ItemStats.hpp\`, 832-Byte Enemies):**
-   Monster memory footprint was aggressively optimized by isolating equipment stat tables (44 float properties) into \`ItemStats\`. Because standard horde enemies do not equip gear, they share an immutable zero-initialized static instance:
-   \`\`\`cpp
-   const ItemStats &Mob::bonus() const { return gear ? *gear : NONE; }
-   ItemStats &Mob::kit() {
-     if (!gear) gear = std::make_unique<ItemStats>();
-     return *gear;
-   }
-   \`\`\`
-   This compacts the \`Enemy\` base struct from 1,000 bytes down to **832 bytes**, saving 1.68 MB of raw resident memory per 10,000 active monsters and dramatically enhancing CPU L2/L3 cache line utilization.
+2. **On-demand gear stats (\`ItemStats.hpp\`):**
+   Ungeared mobs read a shared immutable zero-initialized instance through \`Mob::bonus()\`. \`Mob::kit()\` creates mutable stats on demand. Exact object sizes vary with the build and the types' current fields.
 
 3. **Status Effect Bitmask Fast-Path (\`Status.hpp\`):**
    The \`Status\` affliction component caches active states in a compact 32-bit integer mask (\`live |= 1u << i\`). Common enemies with no active status ailments bypass array iteration completely during the 60 Hz tick loop:
@@ -417,7 +407,7 @@ When \`std::unique_ptr<Entity>\` or \`std::unique_ptr<SpriteObject>\` destroys a
    When \`freeList[c]\` is empty, \`refill(c)\` allocates a single \`sizeof(Slab) + 65536\` block, links the \`Slab\` header into the global \`slabs\` chain for clean shutdown (\`pool_shutdown()\`), and carves the 64 KB payload in reverse order into an intrusive singly-linked list of \`Node { Node *next; }\`. Carve-in-reverse places the lowest memory address at the head of \`freeList[c]\`, ensuring sequential forward memory addresses on consecutive allocations!
 
 5. **Platform-Native Lightweight Synchronization:**
-   Pool operations are synchronized using Windows \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) or POSIX \`pthread_mutex_t\`, incurring single-digit nanosecond lock acquisition times during multi-threaded allocations.
+   Pool operations are synchronized using Windows \`SRWLOCK\` (\`AcquireSRWLockExclusive\`) or POSIX \`pthread_mutex_t\`, so concurrent access to the pool is serialized.
 `,
 
     mermaidCharts: [
@@ -431,14 +421,16 @@ flowchart LR
 
     New["new Spark(...) / new Wolf(...)"]:::cpp
     Del["delete basePtr (virtual ~SpriteObject)"]:::cpp
-    ClassOf["classOf(size) = (size + 15) >> 4<br/>16B Grain, 96 Classes (16B..1520B)"]:::pool
+    ClassOf["classOf(size) = (size + 15) >> 4<br/>16B Grain, 95 Used Classes (16B..1520B)"]:::pool
+    Fallback["malloc or free<br/>Oversized or sanitizer direct path"]:::mem
     Lock["POOL_LOCK()<br/>Win32 SRWLOCK / POSIX Mutex"]:::pool
     FreeArr["freeList[c] Intrusive Head<br/>O(1) Pop on Alloc / Push on Free"]:::mem
     Refill["refill(c): malloc(sizeof(Slab) + 64KB)<br/>Carve SLAB / size Nodes in Reverse"]:::mem
 
-    New -->|operator new(size)| ClassOf
-    Del -->|vtable passes sizeof(Derived)| ClassOf
-    ClassOf --> Lock --> FreeArr
+    New -->|"operator new(size)"| ClassOf
+    Del -->|"sized delete"| ClassOf
+    ClassOf -->|"class 1 to 95"| Lock --> FreeArr
+    ClassOf -->|"class 96 or greater, or direct mode"| Fallback
     FreeArr -.->|If NULL| Refill
     Refill --> FreeArr
 `,
@@ -480,10 +472,10 @@ classDiagram
         +double xWant, yWant, xPush, yPush
     }
 
-    SpriteObject <|-- Particle : ~96B (Class 6)
-    SpriteObject <|-- Entity : ~112B (Class 7)
-    Entity <|-- Mob : ~240B (Class 15)
-    Mob <|-- Enemy : ~368B (Class 23)
+    SpriteObject <|-- Particle
+    SpriteObject <|-- Entity
+    Entity <|-- Mob
+    Mob <|-- Enemy
 `,
       },
     ],
@@ -495,7 +487,7 @@ classDiagram
       "04. Lock-Free Atomic Stride Worker Pool, 4-Barrier AI & Thread Safety",
     category: "simulation",
     summary:
-      "Zero-allocation fork-join concurrency, OS scheduler stall elimination in completion barriers, and 4-barrier AI.",
+      "Chunked worker dispatch, completion tracking and the four enemy update passes.",
     sourceFiles: [
       "src/Workers.cpp",
       "src/Workers.hpp",
@@ -505,7 +497,7 @@ classDiagram
     content: `
 ### Zero-Allocation Fork-Join Concurrency (\`src/Workers.cpp\`)
 
-To maintain a flawless 60 Hz frame rate under 10,000 active swarm entities, **Mellangan** offloads heavy AI planning, collision avoidance, and spatial steering to a dedicated background worker pool (\`src/Workers.cpp\`). The pool initializes $(N - 1)$ persistent worker threads matching hardware concurrency, ensuring zero per-frame thread spawning overhead.
+**Mellangan** uses a persistent worker pool (\`src/Workers.cpp\`) for enemy thinking, movement, crowd separation and settling. It starts \`max(2, hardware_concurrency()) - 1\` background workers; the calling thread also processes chunks. This avoids creating worker threads for each pass, but does not guarantee a particular frame rate.
 
 #### Thread Scheduler Stall Elimination in Work Completion Barrier
 In previous architectures, the main thread dispatched work chunks and waited for every worker thread to signal completion. Under heavy operating system scheduling contention (such as background CPU spikes), a descheduled worker thread could stall the frame barrier for 16 ms or more, even if the main thread had already completed all pending tasks!
@@ -531,7 +523,7 @@ void Workers::run(int n, int size, Job j, void *c) {
 }
 \`\`\`
 
-If the main thread finishes all chunks via \`work(...)\`, \`finished == total\` is satisfied immediately, allowing the engine to step past the barrier without waiting for descheduled worker threads to wake up. Under benchmark testing with 100% CPU saturation across all cores, peak frame stalls dropped from 57–78 ms down to 11–32 ms, and frames exceeding 10 ms dropped by over 80%.
+If the main thread finishes all chunks via \`work(...)\`, \`finished == total\` is satisfied immediately, allowing the engine to step past the barrier without waiting for descheduled worker threads to wake up.
 
 #### Compile-Time Member-Pointer Thunks (\`pass<&Enemy::Step>\`)
 Worker dispatches avoid lambda allocations and virtual calls by wrapping member functions in static constexpr function thunks:
@@ -546,19 +538,19 @@ static void pass(void *ctx, int begin, int end) {
 \`\`\`
 
 #### The 4-Barrier Memory Contract & Crowd Separation Math
-Every tick executes four sequential multi-threaded barriers, guaranteeing deterministic, race-free simulation:
+Each level tick runs four sequential worker passes; each pass completes before the next starts:
 1. **Barrier 1: Sense & Think (\`Enemy::think\`):** Reads player and landmark states, updates \`GoalQueue\`, and writes desired velocities (\`xWant, yWant\`).
 2. **Barrier 2: Movement & Terrain Collision (\`Enemy::move\`):** Integrates velocity against terrain tiles, handling sliding and friction.
 3. **Barrier 3: Crowd Proximity Query (\`Enemy::push\`):** Reads neighbor positions from the CSR spatial grid and accumulates soft-body separation vectors into \`xPush, yPush\`.
 4. **Barrier 4: Separation Settle (\`Enemy::settle\`):** Commits separation displacements and resolves final boundary clamping.
 
 #### Thread-Safe PRNG (\`Enemy::roll\`) & Deferred Side Effects
-Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::roll()\`). AI decisions and attack timings remain completely deterministic regardless of thread scheduling order. Any global world mutations (such as projectile spawns or state transitions) are buffered in thread-local intent flags (\`wantsFire, wantsLeader\`) and flushed on the main thread between barriers.
+Each monster instance maintains a private 32-bit Xorshift PRNG seed (\`Enemy::roll()\`). A per-enemy seed keeps that enemy’s random choices separate from the global generator. Flags such as \`wantsFire\` and \`wantsLeader\` carry deferred actions into \`Enemy::act()\` during the serial entity tick after the worker passes. These design choices alone do not prove that every aspect of the full simulation is deterministic.
 `,
 
     mermaidCharts: [
       {
-        title: "Workers::run Atomic Fetch-Add Chunk Stealing Protocol",
+        title: "Workers::run Atomic Compare-Exchange Chunk Stealing Protocol",
         chart: `
 sequenceDiagram
     autonumber
@@ -759,7 +751,7 @@ private:
 
 ### Predictive Velocity Leading, \`Enemy::quarry()\` Aggro & Sight-Cone Math (\`Enemy::sense\`)
 
-At the beginning of \`Enemy::think()\`, each enemy first selects its target via \`Enemy::quarry()\` (\`src/entity/enemy/Enemy.cpp\`)—evaluating the player alongside any active summoned \`Ally\` companions (\`src/entity/Ally.cpp\`)—and then constructs a transient \`Sense\` packet combining **velocity-intercept target leading** with a **forward vision cone check**:
+When an enemy proceeds to its goal plan in \`Enemy::think()\`, it selects a target via \`Enemy::quarry()\` (\`src/entity/enemy/Enemy.cpp\`)—evaluating the player alongside any active summoned \`Ally\` companions (\`src/entity/Ally.cpp\`)—and then constructs a transient \`Sense\` packet combining **velocity-intercept target leading** with a **forward vision cone check**:
 
 \`\`\`cpp
 const Mob &Enemy::quarry() const {
@@ -796,7 +788,7 @@ Sense Enemy::sense() const {
 \`\`\`
 
 1. **Dynamic Ally & Decoy Aggro Redirection (\`Enemy::quarry\`):**
-   - Combat allies (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Drone\`, \`Crew\`) pull enemy aggro when they are within \`110 px\` of the monster and closer than the player (\`d < bd\`).
+   - Living, non-lure allies within 110 px compete with the player and other eligible allies by squared distance; the lowest current value wins.
    - A **\`Decoy\` (\`Mirror Image\`, \`def.lure == true\`)** has double the aggro capture radius (\`reach = 220.0f\`) and multiplies its squared distance by **\`0.2\`** (\`d *= 0.2\`), making it appear $\\sqrt{5} \\approx 2.236\\times$ closer than it physically is so nearby monsters aggressively peel off the player to attack the decoy!
    - If the player is dead, living allies in range can still be selected. Otherwise, sensing returns an unseen point 400 px away whose direction changes with time, so enemies do not continue tracking the fallen player.
 2. **Predictive Intercept Vector (\`lead\`):**
@@ -804,13 +796,13 @@ Sense Enemy::sense() const {
 3. **The 113° Forward Sight Cone (\`s.seen\`):**
    Since \`(s.xn, s.yn)\` points from the **enemy to the target**, its negation \`(-s.xn, -s.yn)\` points from the **target to the enemy**. Taking the dot product with the target's unit aim vector \`(p.xAim, p.yAim)\` yields $\\cos(\\theta)$:
    \`-(p.xAim * s.xn + p.yAim * s.yn) > 0.55\`.
-   Because $\\arccos(0.55) \\approx 56.6^{\\circ}$, \`s.seen\` is \`true\` whenever the enemy stands within \`300 px\` inside a **\`113.2°\` forward vision cone** centered on the player's aim!
+   For a unit aim vector, the threshold corresponds to an approximately 113.3° cone around the selected target’s aim. The 300 px limit uses the predicted displacement, so it is not necessarily the enemy’s current distance from the target.
 
 ---
 
 ### Summoned \`Ally\` Companions & Golden-Angle Phyllotaxis Orbit (\`src/entity/Ally.cpp\`)
 
-Allied companions (\`enum class AllyKind { Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy }\`, testable in any run via \`--allies N\` or summoned via \`SummonForm::fire\`) inherit from \`Mob\` and implement a tethered combat-and-escort state machine:
+Allies inherit from \`Mob\`. The current kinds include Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy, Ghost, Quickened and Beguiled; their definitions are in \`Ally.cpp\`. Summon forms create or refresh some of them. Their target selection is:
 
 \`\`\`cpp
 Mob *Ally::pick() const {
@@ -820,7 +812,7 @@ Mob *Ally::pick() const {
   double hx = x - p.x, hy = y - p.y;
   if (hx * hx + hy * hy > LEASH * LEASH)
     return nullptr;
-  for (Enemy *e : level->nearest(x, y, SIGHT, 1)) {
+  for (Enemy *e : level->nearest(x, y, SIGHT, 1, true)) {
     double ex = e->x - p.x, ey = e->y - p.y;
     if (ex * ex + ey * ey < LEASH * LEASH && e->type.damage > 0)
       return e;
@@ -829,13 +821,9 @@ Mob *Ally::pick() const {
 }
 \`\`\`
 
-- **Leash & Sight Envelope (\`LEASH = 170 px\`, \`SIGHT = 150 px\`):** An ally only engages enemies within \`150 px\` of itself that are also within \`170 px\` of the player. If the player dashes away (\`hx² + hy² > LEASH²\`), \`pick()\` returns \`nullptr\` and the ally immediately breaks off combat to sprint back at \`1.2×\` speed!
-- **Golden-Angle Phyllotaxis Idle Orbit (\`2.39996 rad\`):** When no target is in range, allies do not clump onto a single point; each ally is assigned a monotonic \`slot = nextSlot++\` and orbits the player at \`HOME = 24 px\` using the **golden angle** ($2\\pi(1 - 1/\\varphi) \\approx 2.39996\\text{ rad} \\approx 137.5^{\\circ}$):
-  \`\`\`cpp
-  double a = slot * 2.39996 + age * 0.6;
-  stride(p.x + std::cos(a) * HOME, p.y + std::sin(a) * HOME * 0.7, def.speed * 1.2f);
-  \`\`\`
-- **Autonomous Weapon-Kit Allies (\`Clockwork Drone\`):** While melee allies (\`Wolf\`, \`Hawk\`, \`Ghoul\`, \`Skeleton\`, \`Crew\`) strike with \`landHit(payload, *foe, ...)\` on a \`def.every\` bite cadence, \`Clockwork Drone\` specifies \`def.kit = "Arcane Staff"\`, calling \`grant(def.kit, 1)\` in \`Ally::onAdded()\` and \`tickKit()\` every frame to fire real \`RecipeShot\` bolts from \`70 px\` stand-off range!
+- **Target and leash:** A lure does not choose a target. Other allies ask for the nearest eligible enemy within 150 px, then require that enemy and the ally to be within 170 px of the player. The \`true\` argument applies \`Level::harms()\`, including the campaign hostility and Strike rules. Because the query requests only one enemy before checking its damage and distance from the player, failing those later checks does not make it try a second candidate.
+- **Idle formation:** With no target, an ally moves toward a position around the player using \`a = slot * 2.39996 + age * 0.6\` and radius \`HOME + (slot % 4) * 12\`. The vertical offset is scaled by 0.7 and the movement pace is \`def.speed * 1.2\`.
+- **Drone and melee attacks:** An ally with \`def.shot\`, such as the Clockwork Drone, fires a \`RecipeShot\` when in reach and its bite timer is ready. Other allies call \`landHit()\` instead. The drone definition uses a 90 px reach and a Drone Bolt recipe; it does not grant an Arcane Staff upgrade.
 
 ---
 
@@ -843,8 +831,11 @@ Mob *Ally::pick() const {
 
 \`\`\`cpp
 void Enemy::think() {
+  remember();
   if (!plan)
     return void(xWant = yWant = 0);
+  if (level->rules.peaceable && bide())
+    return;
   Sense s = sense();
   for (int i = 0; i < 2 && plan->interrupts[i]; i++) {
     const Goal *g = plan->interrupts[i];
@@ -1243,10 +1234,10 @@ flowchart TD
   },
   {
     id: "classes-encounters",
-    title: "10. 12 Hero Kits, 78 Foe Species, 20 Traits, Champions & 9 Bosses",
+    title: "10. Hero Kits, Enemy Kinds, Traits, Champions & Bosses",
     category: "gameplay",
     summary:
-      "Complete breakdown of the 12 standalone hero classes, 8 general skills, 78 EnemyKind species (16 classic, 10 M1-M5 expansion, 4 Renegades, 1 Mimic, 8 WildFoe, and 39 further expansion species), 20 Elite/Champion traits, 10 Landmarks, and 9 3-phase bosses.",
+      "An overview of hero kits, enemy families, traits, landmarks and regional bosses.",
     sourceFiles: [
       "src/hero/Hero.hpp",
       "src/entity/Trait.hpp",
@@ -1274,9 +1265,9 @@ Every one of the 12 playable classes lives in its own dedicated class implementa
 
 ---
 
-### 39 \`EnemyKind\` Species: Mimics, Renegades & \`WildFoe\` Greenwood Table (\`WildFoe.cpp\`)
+### \`EnemyKind\` Examples: Mimics, Renegades & \`WildFoe\` Greenwood Table (\`WildFoe.cpp\`)
 
-Beyond the 16 classic monsters and 10 regional expansion monsters (\`src/entity/enemy/ExpansionEnemy.cpp\`), \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) spans **78 distinct species**:
+Beyond the 16 classic monsters and 10 regional expansion monsters (\`src/entity/enemy/ExpansionEnemy.cpp\`), \`EnemyKind\` (\`src/entity/enemy/Enemy.hpp\`) currently has **84 enum values** before \`Count\`, including special kinds such as nests and the Synod. The following are selected examples:
 1. **Disguised Chest \`Mimic\` (\`EnemyKind::Mimic\`):** Waits motionless in the grass (\`Lurk\` goal with \`buried = true\` so player weapons ignore it), rattles when approached, springs at close range, and bursts into a shower of coins, items, and potions on death.
 2. **4 Renegade Adventurers (\`Outlaw\`, \`Berserker\`, \`PitFighter\`, \`Deserter\`):** Announced by *"RENEGADES ON YOUR TRAIL"* from 3 minutes onward. They wield real player weapons and telegraph special class skills with glowing warning rings.
 3. **8 Greenwood & Woodland Foes (\`WildFoe::DEFS[8]\` in \`src/entity/enemy/WildFoe.cpp\`):**
@@ -1391,14 +1382,14 @@ The selection uses start time, not sound category or priority. Music and ambient
 
 #### Music, weather and gain
 
-- \`night.ogg\` is decoded into memory at initialization. \`Sound::tick()\` refills the music stream when its queued input falls below one decoded track's length, unless music is hushed for a clip.
-- Rain and wind WAVs use separate looping streams. \`Sound::ambience()\` sets their target gains from clamped weather inputs, with peaks of 0.20 and 0.14. Each tick moves the current gain 2% toward its target. Once a silent target fades below 0.002, the stream queue is cleared.
+- Six Ogg tracks (night, campaign, menu, caves, boss and hearth) are decoded at initialization. \`Game::score()\` chooses a track based on mode and location, and \`Sound::tick()\` fades out before changing the stream format and track, then fades in. The current track is refilled while music is not hushed.
+- Rain, wind and five place beds (forest, marsh, frost, surf and cave) use separate looping streams. \`Sound::ambience()\` sets weather targets, while \`Sound::places()\` sets place targets from clamped weights; rain and wind peaks are 0.20 and 0.14. Each tick moves the current gain 2% toward its target. Once a silent target fades below 0.002, the stream queue is cleared.
 - \`Sound::mix()\` sets the device master gain and the music stream gain. Effects use the effect gain when played; the next ambience target uses the ambience gain. Mute sets the device gain to zero and restores the stored master gain when toggled back.
 - Some callers gate sound by visibility, such as \`Enemy::voice()\`. \`Sound::play()\` itself has no listener position or distance attenuation parameter.
 
 #### One-shot clip playback
 
-\`Sound::clip()\` decodes a separate Ogg file, queues it on its own stream and hushes music by clearing its queue and stopping refills. \`clipGain()\` clamps the clip gain to 0–1. \`endClip()\` releases the stream and decoded data and allows music refilling on a later tick. See the intro playback chapter for the video that uses this path.
+\`Sound::clip()\` decodes a separate Ogg file, queues it on its own stream and initially hushes music by clearing its queue and stopping refills. \`clipGain()\` clamps the clip gain to 0–1. \`easeIn()\` can resume and fade in music before the clip ends; \`endClip()\` releases the stream and decoded data and also clears the hush. See the intro playback chapter for the video that uses this path.
 
 ### Automated Test Suites, Benchmarks & Visual QA (\`src/test/\`)
 
@@ -1408,7 +1399,7 @@ Mellangan includes a built-in verification and visual QA harness in \`src/test/\
   2. \`CombatTest.cpp\` & \`PayloadTest.cpp\`: 7 statuses (\`testStatuses\`, \`testStatusDamage\`, \`testNewStatuses\`), 16 weapon payloads (\`testNewPayloads\`), and shape forms (\`testShapeForms\`).
   3. \`ItemTest.cpp\`: 30 affix families, rarity rolls, treasure classes, paper-doll inventory (\`testInventory\`), and reversible gear stats (\`testEquipStats\`).
   4. \`AllyTest.cpp\`: Summon cap refreshing, quarry aggro redirection, decoy lure weighting, and friendly-fire immunity (\`testAllies\`).
-  5. \`ClassTest.cpp\`, \`ArsenalTest.cpp\`, \`BestiaryTest.cpp\`, \`ExpansionEnemyTest.cpp\`, \`ExpansionTest.cpp\`: All 12 hero kits, 41 weapon evolutions, 78 foe species, and 20 traits.
+  5. \`ClassTest.cpp\`, \`ArsenalTest.cpp\`, \`BestiaryTest.cpp\`, \`ExpansionEnemyTest.cpp\`, \`ExpansionTest.cpp\`: Hero kits, weapons, enemies, and traits.
   6. \`WorldTest.cpp\`, \`BiomeTransitionTest.cpp\`, \`BiomeEncounterTest.cpp\`, \`RunTest.cpp\`, \`RunRulesTest.cpp\`: Voronoi determinism, hill/tarn constraints, shoreline dry moats, and \`RunRules\` parameterization.
 - **Headless GPU Screenshot & QA Views (\`Screenshots.cpp\`, \`QaViews.cpp\`, \`BiomeMap.cpp\`):** Programmatically stages combat encounters, boss fights, UI menus, and biome transitions, capturing uncompressed frames directly from Vulkan textures via \`vk2dTextureCopyPixels\`.
 `,
@@ -1426,7 +1417,7 @@ flowchart TD
     Scan["Scan voices[0..31]<br/>Find Queued == 0 OR Min(voiceStarted[i])"]:::mix
     Ratio["SDL_SetAudioStreamFrequencyRatio<br/>pitch * (1 + rng(-jitter, +jitter))"]:::mix
     Beds["Weather Beds (rain, wind)<br/>b.gain += (b.want - b.gain) * 0.02f"]:::mix
-    Vorbis["stb_vorbis Music Stream<br/>(res/music/night.ogg)"]:::mix
+    Vorbis["Music tracks<br/>menu, night, campaign, caves, boss, hearth"]:::mix
     Device["SDL_AudioDeviceID<br/>Hardware Output"]:::out
 
     Play --> Gate --> Scan --> Ratio --> Device
@@ -2550,192 +2541,71 @@ flowchart LR
       "src/level/RunRules.hpp",
       "src/level/Flavour.cpp",
       "src/meta/Codex.hpp",
+      "src/meta/Heat.cpp",
+      "src/level/Level.cpp",
+      "src/entity/enemy/SynodFoe.cpp",
+      "src/test/RunRulesTest.cpp",
     ],
     content: `
-### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
+### The night clock
 
-Every standard run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`) and \`RunRules\` (\`src/level/RunRules.hpp\`), tracking the countdown to dawn (\`r.nightLength = 900.0f\` seconds by default), active nocturnal \`Omens\`, and sacred Shrines scattered across the map.
+\`Night\` and \`RunRules\` control when dawn arrives. A default survival run starts with a 900-second night and a 60-second dawn pull per recorded shrine:
 
-#### The 11 Nocturnal Omens (\`OMENS[OMEN_COUNT = 11]\` in \`Flavour.cpp\`)
-At the start of a run, \`Level\` rolls \`rng.chance(0.85f)\` to activate one of 11 global Omens (falling back to \`CALM\` on the remaining 15% of nights):
-* **\`BLOOD MOON\`:** \`rate = 1.25, horde = 1.35, speed = 1.15, xp = 1.2, score = 1.5, elite = 1.2\`
-* **\`FROSTFALL\`:** \`rate = 0.9, horde = 1.0, speed = 0.85, xp = 1.0, score = 1.1, elite = 1.0\`
-* **\`ECLIPSE\`:** \`rate = 1.4, horde = 1.5, speed = 1.1, xp = 1.35, score = 1.75, elite = 1.5\`
-* **\`TEMPEST\`:** \`rate = 1.15, horde = 1.2, speed = 1.25, xp = 1.15, score = 1.3, elite = 1.1\`
-* **\`HARVEST MOON\`:** \`rate = 1.0, horde = 1.0, speed = 1.0, xp = 1.5, score = 1.2, elite = 1.0\`
-* **\`SOLITUDE\`:** \`rate = 0.7, horde = 0.5, speed = 1.1, xp = 0.9, score = 1.0, elite = 2.0\`
-* **\`MIASMA\`:** \`rate = 1.1, horde = 1.1, speed = 0.95, xp = 1.1, score = 1.25, elite = 1.3\`
-* **\`STARFALL\`:** \`rate = 1.0, horde = 1.1, speed = 1.05, xp = 1.25, score = 1.35, elite = 1.15\`
-* **\`CARRION CALL\`:** \`rate = 1.3, horde = 1.4, speed = 1.05, xp = 1.1, score = 1.4, elite = 0.8\`
-* **\`VOID WHISPER\`:** \`rate = 1.2, horde = 1.2, speed = 1.1, xp = 1.3, score = 1.6, elite = 1.4\`
-* **\`ASH RAIN\`:** \`rate = 1.05, horde = 1.15, speed = 0.9, xp = 1.15, score = 1.2, elite = 1.1\`
+$$\\text{dawnAt}=\\text{nightStart}+\\text{nightLength}-(\\text{endsAtDawn} ? \\text{lit}\\times\\text{dawnPull}:0)$$
 
-#### Endless Night Mode (\`Night::endless\`)
-At dawn (06:00), players can press K (or LT on gamepad) to reject the morning sun and plunge into **Endless Night**. The HUD clock transforms into an elapsed timer, and the dark deepens relentlessly:
-* Every 60 seconds of elapsed endless time, monsters receive compounding attribute multipliers:
-  $H(m) = H_0 \\times (1.10)^m, \\quad D(m) = D_0 \\times (1.05)^m$
-* Monster health scales by $+10\\%$ compounding per minute, while attack damage scales by $+5\\%$ compounding per minute.
-* Codex records the player's longest endless survival duration, rendering it on the death screen alongside personal records. Dedicated achievements unlock at 5 and 15 minutes of endless survival.
+\`left()\` clamps the remaining time to zero. In an ending-at-dawn run, \`Night::tick()\` calls \`game.onDawn()\` once the clock reaches the deadline. In cycling modes, \`Night::cycle()\` alternates night and day using \`dayLength\`; recorded shrines do not shorten that cycle. In the last 150 seconds of a night, \`daylight()\` uses a quadratic ramp. During daytime in a cycling mode it uses the remaining day time divided by 20, clamped to 0–1.
 
-#### The Heat Ladder (Heat 0 to 10)
-For players seeking deeper challenge, the class selection screen features a 10-tier Heat Ladder. Each Heat rank adds a permanent stacking curse on top of the selected difficulty:
-1. **Heat 1 (Thick Hides):** All monsters gain $+25\\%$ health.
-2. **Heat 2 (Hungry Dark):** Monster movement speed increases by $+10\\%$.
-3. **Heat 3 (Sharp Claws):** Monster attack damage increases by $+25\\%$.
-4. **Heat 4 (Chosen Ones):** Elite and champion spawn rates double (
-### The 15-Minute Nocturnal Survival Arc (\`src/level/Night.cpp\` & \`Flavour.cpp\`)
+### Kindling and rekindling shrines
 
-Every run in **Mellangan** is governed by \`Night\` (\`src/level/Night.cpp\`) and \`RunRules\` (\`src/level/RunRules.hpp\`), which track the countdown to dawn (\`r.nightLength = 900.0f\` seconds by default), the active nocturnal \`Omen\` (\`OMENS[11]\` in \`src/level/Flavour.cpp\`), and the kindling state of sacred Shrines scattered across the map.
+Standing inside the footprint of a cold shrine adds \`DT * level.kindleRate / 6\` to the progress meter; outside a cold shrine progress decays by \`DT / 2\`. The first kindling records the shrine up to \`MAX_LIT = 64\`, increments the Codex count and sets \`offering\` for the shrine menu. It also marks the biome, pulls gems within 240 px toward the hero, creates a nova and effects, and attempts to spawn a ring of \`8 + 3 * lit\` guards at radius 170 px. Spawn rules can reject individual guards.
 
-#### The 11 Nocturnal Omens (\`OMENS[OMEN_COUNT = 11]\` in \`Flavour.cpp\`)
-At the start of a run, \`Level\` rolls \`rng.chance(0.85f)\` (unless overridden by \`rules.omen\`) to activate one of **11 global Omens** (falling back to \`CALM\` on the remaining 15% of nights). Each \`Omen\` modifies six global pacing parameters (\`rate, horde, speed, xp, score, elite\`) accessed via \`level.portent()\`:
-- **\`BLOOD MOON\`:** \`rate = 1.25\`, \`horde = 1.3\`, \`xp = 1.2\`, \`score = 1.3\` (faster spawns & larger hordes).
-- **\`AURORA\`:** \`xp = 1.35\`, \`score = 1.1\`, \`elite = 0.05\` (richer XP gems and more elites).
-- **\`GALE\`:** \`speed = 1.15\`, \`score = 1.2\` (\`+15%\` monster movement speed).
-- **\`OUTLAW SEASON\`:** \`score = 1.25\` (doubles Renegade hunting party frequency).
-- **\`MIMIC MOON\`:** \`xp = 1.15\`, \`score = 1.2\` (\`2.5×\` disguised Chest Mimics).
-- **\`THE SWARM\`:** \`rate = 1.45\`, \`horde = 1.5\`, \`speed = 0.92\`, \`xp = 1.1\`, \`score = 1.35\` (relentless swarm density).
-- **\`IRON NIGHT\`:** \`rate = 0.85\`, \`xp = 1.25\`, \`score = 1.3\`, \`elite = 0.14\` (\`+14%\` flat elite promotion rate).
-- **\`WAR DRUMS\`:** \`horde = 1.45\`, \`speed = 1.08\`, \`xp = 1.15\`, \`score = 1.3\` (frequent war-party waves).
-- **\`LONG NIGHT\`:** \`rate = 1.15\`, \`horde = 1.2\`, \`speed = 1.05\`, \`xp = 1.2\`, \`score = 1.4\`.
-- **\`QUIET HOURS\`:** \`rate = 0.75\`, \`horde = 0.8\`, \`xp = 0.9\`, \`score = 0.85\` (calmer night, lower score multiplier).
-- **\`CHAMPION'S HOUR\`:** \`xp = 1.3\`, \`score = 1.4\`, \`elite = 0.08\` (halves Champion spawn interval and increases max simultaneous Champions to 3).
+Synod lamplighters can snuff a shrine. A dark shrine can be kindled again, restoring it without incrementing \`lit\` or the Codex count and without a second offering; the guard wave still occurs. \`dawnAt()\` uses the recorded \`lit\` count, not the current number of burning shrines.
 
----
+### Omens
 
-### Shrine Dawn-Pull & Quadratic Sunrise Mechanics (\`Night.cpp\`)
+When \`rules.omen\` requests a roll, level construction chooses one of 11 omens with 85% probability; otherwise \`portent()\` returns \`CALM\`. A nonnegative \`rules.omen\` forces an omen index, while a negative value other than the roll sentinel leaves it calm. The \`Omen\` structure contains separate fields for movement, XP, elite and health scaling, kindling, wave sizes and timing, and special spawn timing. Its full values are in \`src/level/Flavour.cpp\`; the in-game notes summarize their intent:
 
-#### 1. Shrine Kindling Pulls Dawn Closer by 60 Seconds (\`Night::dawnAt()\`)
-Standing inside an unlit shrine's structure footprint charges \`kindling\` at \`level.kindleRate / KINDLE\` per second, with \`KINDLE = 6\`. Progress decays by half a unit per second outside the footprint. On completion, \`Night::kindle()\`:
+- **Blood Moon:** more experience and elites.
+- **Aurora:** faster shrine kindling.
+- **Gale:** faster movement for the hero and foes.
+- **Outlaw Season:** earlier and more frequent renegades.
+- **Mimic Moon:** more mimics and richer experience.
+- **The Swarm:** larger hordes with less-hardy foes.
+- **Iron Night:** fewer, tougher foes.
+- **War Drums:** elites always learn a skill.
+- **Long Night:** denser, more frequent waves.
+- **Quiet Hours:** gentler waves and fewer rewards.
+- **Champion's Hour:** named foes appear more often.
 
-1. Records the shrine (up to \`MAX_LIT\`), increments the codex shrine count, marks its biome, and sets \`offering\` so the game opens the shrine menu.
-2. Magnets gems strictly within \`PULL = 240\` px of the shrine center, resets their speed, and creates a nova and visual effects. It also spawns \`8 + 3 * lit\` guards at radius 170, using the strongest enemy kind unlocked at the current time.
-3. In a run that ends at dawn, each recorded shrine advances dawn by \`r.dawnPull\` seconds (60 by default). In cycling modes, shrine count does not shorten the night.
+The \`rate\`, \`waves\`, \`bands\`, \`mimics\` and \`champions\` fields are timing factors in their respective call sites; a smaller interval factor can mean more frequent events. They should not all be read as spawn-rate multipliers.
 
-\`\`\`cpp
-float Night::dawnAt() const {
-  const RunRules &r = level.rules;
-  return nightStart + r.nightLength - (r.endsAtDawn ? lit * r.dawnPull : 0);
-}
-\`\`\`
+### Spawner scheduling
 
-#### 2. The Final 150 Seconds (\`Night::daylight()\`)
-During the final 150 seconds before dawn, \`Night::daylight()\` returns a quadratic ramp. In cycling modes, the dawn period instead returns \`clampf((dayEnds - level.time) / 20, 0, 1)\`.
+\`Spawner::tick()\` runs the trickle first. During dawn it then runs named-enemy logic and returns. At night it also checks waves, mimics, renegade parties, champions, barrels and bosses; \`rules.waves\` and \`rules.bosses\` gate the appropriate streams. Initial deadlines include 60 seconds for the first wave, 70 for mimics, 160 for renegades, 110 for champions, 15 for barrels and 150 for bosses, subject to the factors and conditions in \`tick()\`.
 
-\`\`\`cpp
-float Night::daylight() const {
-  if (dawn && !level.rules.endsAtDawn)
-    return clampf((dayEnds - level.time) / 20, 0, 1);
-  float d = clampf(1 - left() / 150, 0, 1);
-  return d * d;
-}
-\`\`\`
-For runs that end at dawn, \`Night::tick()\` calls \`game.onDawn()\`. Cycling modes use \`Night::cycle()\` to transition between night and day.
+\`trickle()\` multiplies its base interval by the omen's \`rate\`, then divides by spawn rate, pressure and the appropriate day-rate factor. Its batch grows with elapsed time and checks \`enemyCap\`. \`pick()\` first considers thieves, night stalkers and grave robbers when eligible, then a biome or cave-local pool, and finally the common pool. Spawn placement through \`ring()\` adds the screen reach to the requested distance and can bias toward the hero's travel direction. \`spawn()\` can reject a location because it is safe, lost, a sanctum or warded; do not assume every scheduled attempt creates an enemy.
 
----
+Six wave templates have individual unlock times and avoid repeating the last selection. A wave's size is based on the balance settings, omen and run rules. Other streams have their own timing and population checks: for example, mimics and champions can be skipped when their current limits are reached. \`Spawner::spawn()\` applies threat-scaled health and damage and can promote eligible foes to elites.
 
-### The 7-Stream Wave Director (\`src/level/Spawner.cpp\`)
+### Heat, daily runs and endless night
 
-\`Spawner::tick(Level &level)\` runs during \`PROF_HOUSEKEEP\` and coordinates **seven independent spawn streams**, all bounded by \`b.enemyCap\` and positioned outside the camera viewport via \`R_MIN = 220 + reach\` to \`R_MAX = 260 + reach\`:
+\`applyHeat()\` applies the first \`heat\` rungs cumulatively, clamped from 0 to 10. The rungs increase enemy health, speed and damage; double base elite chance; halve shrine dawn pull; reduce the spawn interval and increase the cap; reduce player health and XP; increase horde base and maximum; and finally increase night length by 20%. The definitions and exact factors are in \`src/meta/Heat.cpp\`.
 
-1. **Dynamic Trickle Stream (\`Spawner::trickle\`):**
-   \`\`\`cpp
-   float rate = level.portent().rate * level.rules.spawnRate * level.night.spawnScale();
-   float interval = std::max(b.spawnFloor, b.spawnInterval - t * b.spawnRamp) / rate;
-   int batch = 1 + int(t / b.batchEvery);
-   \`\`\`
-   Each enemy in the batch is chosen by \`Spawner::pick(level, r, x, y)\`:
-   - \`1.5%\` chance (after \`70s\`): \`EnemyKind::Thief\` treasure goblin.
-   - \`b.localChance\`: A biome-native specialist from \`localFoes(world::biomeUnder(x, y))\`.
-   - \`b.strongChance\`: One of the top 2 most recently unlocked monster tiers in \`r.common\`.
-   - Otherwise: Uniform draw from \`r.common\`, promoting to an elite with probability \`min(b.eliteCap, (t - b.eliteStart) * b.eliteRamp) + level.portent().elite\` (and rolling 1 \`Trait\` after \`90s\`, or 2 \`Traits\` with \`20%\` chance after \`300s\`).
-2. **6 Named Minute-Wave Templates (\`WAVE_DEFS[6]\` in \`Spawner::horde\`):**
-   Every \`b.hordeEvery\` (\`60s\`), \`Spawner::horde(t)\` computes \`count = int(min(b.hordeMax, b.hordeBase + t / b.hordeRamp) * o.horde * level.rules.hordeScale)\` and selects a non-repeating wave template from \`WAVE_DEFS[6]\`:
-   - **\`"THE HORDE CLOSES IN"\` (\`from = 0s\`):** Full ring of strong unlocked foes around the player.
-   - **\`"A SWARM DESCENDS"\` (\`from = 60s\`):** \`1.5×\` count of fast early-tier swarmers led by 2 elites.
-   - **\`"THE PACK HUNTS"\` (\`from = 100s\`):** Coordinated \`Alpha\` wolves and \`Wolf\` packs.
-   - **\`"AMBUSH!"\` (\`from = 120s\`):** Concentrated \`60°\` (\`PI / 3\`) arc directly ahead of the player's movement vector!
-   - **\`"THE DEAD RISE"\` (\`from = 150s\`):** Tight inner ring of \`Skeleton\`s (\`130..170 px\`) backed by an outer ring of \`Necromancer\` summoners (\`220..250 px\`).
-   - **\`"THE LAND STIRS"\` (\`from = 90s\`):** Biome-native ambush drawn entirely from \`localFoes(biome)\` plus 2 biome elites.
-3. **Disguised Chest Mimics (\`Spawner::mimics\`):**
-   Every \`45s\` (or \`18s\` under \`MIMIC MOON\`), hides a dormant \`EnemyKind::Mimic\` ahead of the player if fewer than 2 mimics are active.
-4. **Renegade Adventurer Hunting Parties (\`Spawner::renegades\`):**
-   From \`180s\` onward (or \`90s\` under \`OUTLAW SEASON\`), announces *"RENEGADES ON YOUR TRAIL"* and spawns \`1..2\` weapon-wielding \`Outlaw\`, \`Berserker\`, \`PitFighter\`, or \`Deserter\` foes.
-5. **Named Epithet Champions (\`Spawner::champions\`):**
-   From \`150s\` onward (every \`120s\`, or \`60s\` under \`CHAMPION'S HOUR\`), \`spawnChampion\` rolls a procedural epithet (\`Rank.cpp\`), 2 \`Trait\`s, 1 active \`Skill\`, and 1 player \`Upgrade\` weapon.
-6. **Explosive Supply Barrels (\`Spawner::barrel\`):**
-   Places a destructible \`SupplyBarrel\` every \`20s\` along the player's perimeter.
-7. **Regional & Cycling 3-Phase Bosses (\`Spawner::boss\`):**
-   Every \`b.bossEvery\` seconds, \`bossFor(world::biomeUnder(player->x, player->y))\` selects the biome's regional boss from \`BOSS_DEFS[9]\` (or cycles \`THE CYCLOPS\`, \`THE PACK LORD\`, and \`THE LICH\` on a 30% classic roll), scaled by \`1.0f + (bosses - 1) * b.bossHpStep\`.
-\\times$).
-5. **Heat 5 (Dim Shrines):** Shrines pull dawn only half as far (30s instead of 60s).
-6. **Heat 6 (Teeming):** Swarm wave spawn frequency and horde sizes scale up.
-7. **Heat 7 (Frail):** Player maximum health is reduced by $-20\\%$.
-8. **Heat 8 (Starved):** Experience gem yield is reduced by $-20\\%$.
-9. **Heat 9 (The Tide):** Hordes and wave surges increase by $+50\\%$ in density.
-10. **Heat 10 (Long Night):** Base nocturnal duration increases by $+20\\%$.
-
-Surviving to dawn at a given Heat level unlocks the next rank. Highest cleared Heat is tracked permanently in the Codex and highlighted in the run recap log (\`runs.csv\`).
-
-#### Daily Deterministic Worlds
-Daily runs provide a global standardized challenge: calendar dates deterministically seed the world generator, fix the active hero class (among unlocked characters), and assign a fixed Heat level between 0 and 3.
-
-#### Concentric Ring Shrine Search Optimization
-Locating the nearest sleeping shrine or Ancient Gate previously required generating an entire $81 \\times 81$ tile region matrix ($460\\text{ ms}$). The engine replaced this with an expanding concentric ring search that terminates immediately upon reaching the first ring bounding the nearest possible target, slashing query latency down to **$4\\text{ ms}$**.
+A daily run derives heat from its world code in the class menu, giving a value from 0 to 3. The player still chooses their hero. After reaching dawn in a non-campaign run, the dawn menu allows the player to continue into endless night. \`Game::beginEndless()\` extends the night, and \`Game::observe()\` compounds enemy health by 1.10 and damage by 1.05 each elapsed minute.
 `,
-
     mermaidCharts: [
       {
-        title:
-          "Night Clock, 60s Shrine Dawn-Pull & 7-Stream Spawner Director Pipeline",
+        title: "Night clock and shrine lifecycle",
         chart: `
 flowchart TD
-    classDef clock fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
-    classDef shrine fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-    classDef stream fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#e2e8f0;
-
-    Seed["Level Init: Roll Omen (85% OMENS[0..10], 15% CALM)<br/>portent() -> (rate, horde, speed, xp, score, elite)"]:::clock
-    Tick["Night::tick(level) @ 60 Hz<br/>dawnAt = nightStart + nightLength - lit * dawnPull (60s)"]:::clock
-    DawnCheck{"dawnAt - level.time <= 150s?"}:::clock
-    Daylight["Quadratic Sunrise Ramp<br/>d = clamp(1 - left/150, 0, 1); daylight = d * d"]:::clock
-    StrikeDawn["level.time >= dawnAt:<br/>dawn = true -> game.onDawn() (or Night::cycle)"]:::clock
-
-    ShrineProx["Player Within 28px of Unlit Shrine?<br/>kindling += DT * kindleRate / 6.0s"]:::shrine
-    Kindle["Night::kindle() @ kindling >= 1.0<br/>lit++ (Pulls Dawn -60s!) + Ring of (8 + 3*lit) Foes @ r=170"]:::shrine
-
-    Spawner["Spawner::tick(level) (7 Concurrent Streams)<br/>Spawn Ring = [220 + reach .. 260 + reach]"]:::stream
-    Streams["1. trickle(t)  2. horde(t) (WAVE_DEFS[6])  3. mimics()<br/>4. renegades(t)  5. champions()  6. barrel()  7. boss()"]:::stream
-
-    Seed --> Tick --> DawnCheck
-    DawnCheck -- "Yes" --> Daylight --> StrikeDawn
-    Tick --> ShrineProx --> Kindle
-    Tick --> Spawner --> Streams
-`,
-      },
-      {
-        title: "Spawner::pick() Decision Tree & Biome Specialist Routing",
-        chart: `
-flowchart TD
-    classDef roll fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-    classDef out fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
-
-    Start["Spawner::pick(level, roster, x, y)"]:::roll
-    ThiefRoll{"t > 70s &&<br/>chance(0.015)?"}:::roll
-    LocalRoll{"chance(b.localChance)<br/>&& localFoes(biome)?"}:::roll
-    StrongRoll{"chance(b.strongChance)<br/>&& common.size >= 3?"}:::roll
-
-    Thief["EnemyKind::Thief<br/>(Treasure Goblin)"]:::out
-    BiomeFoe["Biome-Native Specialist<br/>localFoes(world::biomeUnder(x, y))"]:::out
-    TopTwo["Top-2 Newest Unlocked Tier<br/>r.common[size - 1 - range(0, 1)]"]:::out
-    Uniform["Uniform Common Pool<br/>+ Elite & Trait Promotion Roll (after b.eliteStart)"]:::out
-
-    Start --> ThiefRoll
-    ThiefRoll -- "Yes" --> Thief
-    ThiefRoll -- "No" --> LocalRoll
-    LocalRoll -- "Yes" --> BiomeFoe
-    LocalRoll -- "No" --> StrongRoll
-    StrongRoll -- "Yes" --> TopTwo
-    StrongRoll -- "No" --> Uniform
+    Cold[Cold shrine] -->|"stand inside and charge"| Kindle{Previously recorded and dark?}
+    Kindle -->|No| First[Record shrine and offer blessing]
+    Kindle -->|Yes| Relight[Restore shrine without another offering]
+    First --> Effects[Pull gems and attempt guard wave]
+    Relight --> Effects
+    Effects --> Clock[Update night and dawn deadline]
+    First -->|"can be snuffed"| Cold
+    Clock -->|"ends-at-dawn and deadline reached"| Dawn[Trigger dawn]
 `,
       },
     ],
@@ -2795,12 +2665,8 @@ The ordinary \`Saves::write()\` wrapper discards that return value. These steps 
 
 \`Saves::record()\` keeps up to six recent world records, moving the recorded world to the front, accumulating its run count, best time and dawn flag. Evicting the oldest record also calls \`erase()\` on its chart and sibling backup and temporary files.
 
-#### 50 In-Game Achievements & Codex Unlocks (\`src/meta/Feats.cpp\`)
-The Codex tracks 50 distinct achievements spanning lifetime milestones, single-run feats, challenge completions, and class masteries:
-* **Lifetime Milestones:** First dawn, 10 dawns, 50 runs, 1,000 / 10,000 / 100,000 lifetime kills, 50 / 150 / 300 kill streaks, visiting 10 / 20 / all biomes, collecting 5 / 10 / 16 relics.
-* **Single-Run Feats:** Reaching level 20 / 40, slaying 5,000 foes in one run, kindling 5 shrines, crafting 3 weapon evolutions, reaching dawn with a single weapon, full-health dawn, or sub-12:00 dawn.
-* **Difficulty & Boss Triumphs:** Dawn on Ultra-Violence, Nightmare, and under nocturnal Omens; slaying the Ancient Cyclops, Alpha Wolf, and Pale Warden; and clearing dawn with each of the 12 individual hero classes.
-The final Codex tab displays all 50 achievements, providing contextual hint text for locked entries and maintaining stable IDs for future digital storefront synchronization.
+#### Achievements and Codex unlocks (\`src/meta/Feats.cpp\`)
+The \`FEATS\` table currently contains 64 achievements. Its predicates cover lifetime milestones, survival runs, classes, campaign acts, rescues, delves, founders and campaign endings. The Codex displays their names and hints across pages. Achievement flags are stored in a 64-bit field, and a compile-time assertion limits the table to 64 entries.
 
 #### Run Balancing Telemetry (\`runs.csv\` & \`tools/run_report.py\`)
 When run recording is permitted, the game reads \`runs.csv\`, replaces its header, adds a telemetry row and writes the resulting file through \`Saves::write()\`:
@@ -2820,9 +2686,11 @@ The bundled \`tools/run_report.py\` utility parses this telemetry to calculate m
 | Particles, damage numbers | \`reduced_particles\`, \`damage_numbers\` | 0 or 1; particle density and number visibility are separate settings. |
 | Colours | \`colourblind\` | 0–4: Standard, Deuteranopia, Protanopia, Tritanopia and Monochrome. |
 | Fullscreen, scaling, VSync | \`fullscreen\`, \`pixel_perfect\`, \`vsync\` | 0 or 1; scaling selects Fill or Pixel Perfect. |
+| Anti-aliasing | \`msaa\` | 0–3 selects Off, 2×, 4× or 8× MSAA; the applied sample count is limited by renderer capabilities. |
 | Intro | \`intro\` | 0 or 1; controls whether the optional intro is eligible at startup. |
+| Language | \`language\` | Selects English or a language file discovered in \`res/lang/\`. |
 
-Numeric rows clamp at their ends; labeled choices cycle. Each change calls \`Game::applySettings()\` and requests a save, subject to \`writes()\`. Applying settings updates the audio mix, camera shake, selected palette and scaling mode. When a window exists, it also updates fullscreen and selects VSync or triple-buffer screen mode. Other consumers read settings directly, including particle rendering and flash effects.
+Numeric rows clamp at their ends; labeled choices cycle. Each change calls \`Game::applySettings()\` and requests a save, subject to \`writes()\`. Applying settings updates the audio mix, camera shake, selected palette and scaling mode. When a window exists, it also updates fullscreen, selects VSync or triple-buffer screen mode, and applies the supported MSAA setting. Other consumers read settings directly, including particle rendering and flash effects.
 
 #### Colour schemes and verification (\`Palette.hpp\`)
 
@@ -2831,7 +2699,7 @@ The five schemes define colors for warnings, damage, healing, comparison indicat
 \`PaletteTest.cpp\` models each alternative under a corresponding simulated vision matrix and compares selected color distances against the standard scheme. It tests item rarity separation, hurt versus heal, and warning versus a sample grass color. These checks help catch regressions in those comparisons; they do not establish readability for every scene, display or player.
 
 #### Controls and rebinding
-The controls menu saves 17 keyboard bindings and eight gamepad bindings in \`keys.txt\`. See **Input, Controls & Rebinding** for the fixed controls, conflict handling, analog stick behavior and prompt substitutions.
+The controls menu saves 18 keyboard bindings and nine gamepad bindings in \`keys.txt\`. See **Input, Controls & Rebinding** for the fixed controls, conflict handling, analog stick behavior and prompt substitutions.
 
 `,
 
@@ -2870,7 +2738,6 @@ flowchart TD
 `,
       },
     ],
-    interactiveComponent: "director",
   },
   {
     id: "combat-status-draft",
@@ -2878,12 +2745,14 @@ flowchart TD
       "23. 7 Status Afflictions, 0.5s DoT Ticks, Bleed Stacking & Level-Up Draft",
     category: "gameplay",
     summary:
-      "Exact math behind all 7 StatusKind afflictions in Status.hpp (including Bleed 1.6x moving damage, Weaken, and Fear), lossless 0.5-second DoT ticks, and LevelUpMenu weighted card drafting.",
+      "Seven status effects, half-second damage ticks and the weighted level-up and treasure draft.",
     sourceFiles: [
       "src/entity/Status.hpp",
       "src/entity/Mob.cpp",
       "src/menu/LevelUpMenu.cpp",
       "src/entity/pickup/Chest.cpp",
+      "src/item/Upgrade.cpp",
+      "src/hero/Mutation.cpp",
     ],
     content: `
 ### Fixed-Slot 7-Status Affliction Array (\`src/entity/Status.hpp\`)
@@ -2900,7 +2769,7 @@ When a weapon or hazard calls \`status.apply(kind, duration, power, source)\`:
    - \`Burn\`, \`Poison\`, and \`Bleed\` cap at \`1000.0f\` DPS, and \`duration\` is clamped to \`60.0f\` seconds.
 3. **Additive \`Bleed\` Stacking vs Max-Envelope Stacking:**
    - Re-applying **\`StatusKind::Bleed\`** while active **stacks additively**: \`e.power = std::min(cap(kind), e.power + power)\`.
-   - Re-applying any other status takes the max envelope: \`if (e.time <= 0 || power > e.power) e.power = power\`.
+   - Re-applying any other status retains the stronger power. All statuses retain the greater of their current remaining time and the new duration (capped at 60 seconds).
 
 ---
 
@@ -2927,35 +2796,30 @@ if (ticks(i)) {
 }
 \`\`\`
 
-This guarantees that an affliction with \`power = 10\` and \`duration = 1.3s\` deals two \`5.0\` ticks at \`0.5s\` and \`1.0s\`, followed by an exact \`3.0\` remainder tick at \`1.3s\` (\`13.0\` total damage, or \`20.8\` if bleeding while moving).
+For an isolated effect with unchanged power, no resistance and a target that survives the full duration, \`power = 10\` and \`duration = 1.3s\` produce approximately 5 damage at each half-second tick and 3 on expiry, or 13 total. Bleed uses the movement flag at the tick that pays out damage, so changing movement during an accumulated interval can change its total.
 
 ---
 
-### Weighted Level-Up Draft & Bonus 4th Card (\`src/menu/LevelUpMenu.cpp\`)
+### Level-up and treasure drafts (\`src/menu/LevelUpMenu.cpp\`)
 
-When the player levels up or opens a \`Chest\` (\`treasure = true\`), \`LevelUpMenu::roll(Game &g, bool treasure)\` builds the draft hand from the global \`UPGRADES\` registry without replacement.
+A normal level gain increments \`pendingLevels\`. Taking a chest increments both \`pendingLevels\` and \`pendingTreasures\`. When the game processes pending levels, \`LevelUpMenu::open()\` constructs a draft; the constructor consumes one pending treasure, if present, and marks that draft as treasure. Campaign level banking can change when a draft is processed.
 
-#### 1. Slot Cap Filtering (\`Upgrade::SLOTS\`)
-First, \`LevelUpMenu::roll\` counts how many passive upgrades (\`owned[0]\`) and active weapons (\`owned[1]\`) the player already owns. Any unowned upgrade whose category has already reached \`Upgrade::SLOTS\` is excluded from the pool so the player can only level up existing items in that category.
+#### The ordinary upgrade pool
 
-#### 2. 3× / 2× / 1× Weighted Sampling Without Replacement
-For each of the 3 primary card slots (\`k < 3\`), every eligible upgrade \`u\` in \`pool\` is assigned an integer draft weight:
+The constructor builds its pool from the player's own \`p.upgrades\`. It counts owned ordinary weapons and passives separately, excluding relics and skills. A candidate must be visible, non-rare, non-skill and not maxed; it must already be owned or have room in its category, and any class owner must match the player's hero. \`mutation::slots()\` supplies the category limit: the normal base is six, with an extra weapon slot for the Second Arms mutation.
 
-\`\`\`cpp
-auto weight = [&](const Upgrade *u) {
-  return u->owner ? 3 : (p.hero && p.hero->favours(u->name)) ? 2 : 1;
-};
-\`\`\`
+Up to three ordinary cards are drawn without replacement. Each draw uses weight 3 for an owner-specific upgrade, 2 for a hero-favoured upgrade with no owner, and 1 otherwise. If the pool is empty, the menu inserts a null choice, which heals the player by 40 when applied.
 
-- **\`3× Weight\` (\`u->owner != nullptr\`):** Exclusive class weapons and talents belonging to the player's hero class are three times as likely to appear.
-- **\`2× Weight\` (\`p.hero->favours(u->name)\`):** Weapons and passives listed in the hero's \`affinity[]\` array are twice as likely to appear.
-- **\`1× Weight\`:** All other eligible upgrades in the general pool.
+#### The special card: skill, evolution, then relic
 
-#### 3. The Bonus 4th Card Slot (\`MAX_CHOICES = 4\`)
-After drawing up to 3 standard upgrade cards, \`LevelUpMenu::roll\` checks whether a **4th special card** should appear:
-1. **Active Skill Offer (\`25%\` chance at \`lvl >= 4\`):** On normal level-ups (\`!treasure\`) once \`p.lvl >= 4\`, there is a **1-in-4 (\`25%\`)** chance to offer an unlearned class skill or one of the 8 general skills in the 4th slot.
-2. **Weapon Evolution (\`evolveSlot\` on Treasure Chests):** When opening a \`treasure\` chest, if any owned weapon satisfies \`u->canEvolve(p)\` (max weapon level + required catalyst passive), the 4th slot deterministically offers the **Evolution** (\`evolveSlot = count++\`).
-3. **Relic Offering (\`treasure || 3%\` wild roll):** If no Evolution occupied the 4th slot, opening a \`treasure\` chest (or rolling a \`3%\` lucky proc on a normal level-up) offers an unowned \`Relic\` via \`pickRelic(p, g.rng)\`.
+The constructor prepares a list of evolvable upgrades and a separate skill list. The skill list contains skills other than the player's current skill whose owner is either unset or matches the hero. It then uses one \`if / else if\` chain, so at most one special card is added:
+
+1. If the skill list is nonempty, the first ordinary choice is not null, the player is at least level 4, and a 25% roll succeeds, add a random skill. This check also runs for treasure drafts.
+2. Otherwise, if the draft is treasure and the evolution list is nonempty, add one random evolution. \`canEvolve()\` requires a partner, a non-evolved upgrade at maximum level, and an owned partner at level 1 or above.
+3. Otherwise, if a non-maxed, visible relic is available and the draft is treasure or a 3% roll succeeds, add a random relic.
+
+A treasure draft therefore does **not** guarantee an evolution: the skill branch takes precedence. \`LevelUpMenu::open()\` displays a menu only when the resulting draft has more than one choice; otherwise it applies the sole choice immediately and continues processing pending levels. \`apply()\` evolves the chosen upgrade, levels it, or heals for a null choice, then decrements \`pendingLevels\`.
+
 `,
     mermaidCharts: [
       {
@@ -2977,29 +2841,26 @@ flowchart TD
 `,
       },
       {
-        title:
-          "LevelUpMenu::roll() 3x/2x/1x Weighted Draft & 4th Bonus Card Resolution",
+        title: "Level-up and treasure draft selection",
         chart: `
 flowchart TD
-    classDef pool fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-    classDef weight fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
-    classDef bonus fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-
-    Filter["Filter UPGRADES Registry<br/>u->eligible(p) && (owned || slots < Upgrade::SLOTS)"]:::pool
-    Draw3["Draw 3 Cards Without Replacement<br/>weight(u) = owner ? 3 : hero->favours ? 2 : 1"]:::weight
-    Slot4Check{"Bonus 4th Card Roll<br/>(count < MAX_CHOICES)"}:::bonus
-    SkillCard["Normal Level-Up (lvl >= 4 & 25% Roll)<br/>Offer Class Skill or General Skill"]:::bonus
-    EvolveCard["Treasure Chest + u->canEvolve(p)<br/>Guaranteed Weapon Evolution Card (29 Evolutions)"]:::bonus
-    RelicCard["Treasure Fallback or 3% Wild Roll<br/>Offer Unowned Relic (pickRelic)"]:::bonus
-
-    Filter --> Draw3 --> Slot4Check
-    Slot4Check -- "!treasure && lvl >= 4 (25%)" --> SkillCard
-    Slot4Check -- "treasure && canEvolve" --> EvolveCard
-    Slot4Check -- "treasure || 3% chance" --> RelicCard
+    Start[Consume a pending treasure if present] --> Pool[Filter player upgrades and draw up to three]
+    Pool --> Empty{Pool empty?}
+    Empty -- Yes --> Heal[Insert heal choice]
+    Empty -- No --> Skill{Eligible skill and level 4 and 25 percent roll?}
+    Heal --> Evolution
+    Skill -- Yes --> AddSkill[Add random skill]
+    Skill -- No --> Evolution{Treasure and evolution ready?}
+    Evolution -- Yes --> AddEvolution[Add random evolution]
+    Evolution -- No --> Relic{Relic available and treasure or 3 percent roll?}
+    Relic -- Yes --> AddRelic[Add random relic]
+    Relic -- No --> Finish[Finish draft]
+    AddSkill --> Finish
+    AddEvolution --> Finish
+    AddRelic --> Finish
 `,
       },
     ],
-    interactiveComponent: "director",
   },
   {
     id: "goal-steering-catalog",
@@ -3019,7 +2880,7 @@ flowchart TD
     content: `
 ### Architectural Overview of \`src/entity/enemy/ai/\`
 
-All 39 monster species in **Mellangan** (\`EnemyKind::Bat\` through \`EnemyKind::Cutthroat\`) are driven by combinations of **16 stateless \`Goal\` subclasses** wired into \`const Plan PLANS[39]\` (\`src/entity/enemy/ai/Plans.cpp\`). A compile-time assertion guarantees that every \`EnemyKind\` has a corresponding plan:
+Enemy kinds use combinations of \`Goal\` objects wired into \`PLANS\` (\`src/entity/enemy/ai/Plans.cpp\`). A compile-time assertion guarantees that every \`EnemyKind\` has a corresponding plan:
 
 \`\`\`cpp
 static_assert(sizeof(PLANS) / sizeof(PLANS[0]) == int(EnemyKind::Count));
@@ -3166,286 +3027,93 @@ flowchart TD
   },
   {
     id: "diablo-loot-runrules",
-    title:
-      "25. Diablo-Style Item System, 30 Affix Families, Treasure Classes & RunRules",
+    title: "25. Item Generation, Rarity and Run Rules",
     category: "gameplay",
-    summary:
-      "Deep dive into v0.5.14+ item bases, 30 five-tier affix families, diminishing-returns Magic Find, Night-Touched cursed items, ItemDrop physics, RunRules, and BiomeViewer.",
+    summary: "Item bases and quality tiers, affixes, rarity rolls, night-touched items and loot drops.",
     sourceFiles: [
-      "src/item/loot/Item.hpp",
+      "src/item/loot/ItemBase.cpp",
       "src/item/loot/Affix.cpp",
       "src/item/loot/Loot.cpp",
+      "src/item/loot/Unique.cpp",
       "src/entity/pickup/ItemDrop.cpp",
       "src/level/RunRules.hpp",
-      "tools/biome_viewer/main.cpp",
     ],
-    content: `
-### Diablo-Style Item System Architecture (\`src/item/loot/\`)
+    content: `### Item bases and quality
 
-Introduced in \`v0.5.14+\` (and testable via \`--loot\` in gameplay or \`--loot-sim <COUNT> [MLVL]\` from the CLI), \`src/item/loot/\` implements a complete, deterministic ARPG itemization engine modeled after classic *Diablo II* prefix/suffix generation, treasure classes, and diminishing-returns Magic Find.
+Equipment is built from a base in \`ItemBase.cpp\`. The three quality tiers are **Worn**, **Fine** and **Masterwork**; their quality-level offsets are 0, 18 and 36. Base eligibility and weighting depend on item level. Ordinary base selection excludes implants, which are obtained through other mechanics.
 
-#### 1. Item Bases & 3 Quality Tiers (\`ItemBase.hpp\`, \`ItemBase.cpp\`)
-Every weapon in the arsenal—plus dedicated **Off-hands**, **Armour**, and **Charms**—is registered in \`itemBases()\` with a slot bitmask (\`slot::Weapon\`, \`slot::Offhand\`, \`slot::Armour\`, \`slot::Charm\`, \`slot::AreaWeapon\`, \`slot::ShotWeapon\`), base quality level \`qlvl\`, spawn \`weight\`, gold \`value\`, and an implicit \`Stat\`.
-- Each base exists across **3 progression tiers** (\`TIER_COUNT = 3\`) with quality offsets \`TIER_LEVEL[3] = {0, 18, 36}\`.
-- When \`pickBase(ilvl, tier, rng)\` selects a base for an item of level \`ilvl\`, any \`(base, tier)\` pair whose effective quality \`q = b.qlvl + TIER_LEVEL[t]\` is within \`10\` levels of \`ilvl\` (\`ilvl - q <= 10\`) receives a **\`3×\` freshness weight bonus**:
-  \`\`\`cpp
-  auto weight = [&](const ItemBase &b, int t) {
-    int q = b.qlvl + TIER_LEVEL[t];
-    return q > ilvl ? 0 : b.weight * (ilvl - q <= 10 ? 3 : 1);
-  };
-  \`\`\`
+### Affixes and rarity
 
----
+The affix registry contains **31 families: 14 prefixes and 17 suffixes**. Families do not all have the same number of tiers: for example, projectile count has three tiers and skills have two. Eligible affixes depend on the item and its level. Rare items request more affixes than magic items, but the generator can finish with fewer when it cannot find enough eligible choices.
 
-### 2. 30 Affix Families Across 5 Tiers (\`src/item/loot/Affix.cpp\`)
+Rarity is rolled in order: unique, rare, magic, then superior or normal. Each of the first three checks draws a new random number. If their respective thresholds are U, R and M, the initial probabilities are U, (1 − U)R and (1 − U)(1 − R)M. Of the remaining outcomes, one eighth is superior and seven eighths normal. Magic find uses diminishing returns for the unique and rare thresholds, while the magic threshold uses magic find directly. The explorer below shows these initial outcomes.
 
-\`AFFIXES[30]\` defines **14 Prefix families** and **16 Suffix families**, each containing up to **5 progressive \`AffixTier\` brackets** (\`qlvl = 1, 12, 24, 36, 48\`):
-- **14 Prefix Families (\`prefix = true\`):**
-  \`damage\` (*Sharp* → *Merciless*, \`+6%..+70%\`), \`burn\` (*Smoldering* → *Infernal*), \`chill\` (*Chilling* → *Arctic*), \`poison\` (*Noxious* → *Pestilent*), \`shock\` (*Charged* → *Thunderous*), \`bleed\` (*Jagged* → *Butchering*), \`count\` (*Twin* / *Triple* / *Legion*, \`+1..+2\` projectiles on \`ShotWeapon\`), \`area\` (*Wide* → *Titanic*, \`+6%..+40%\` on \`AreaWeapon | Offhand\`), \`crit\` (*Keen* → *Fatal*), \`leech\` (*Thirsty* → *Sanguine*), \`armour\` (*Sturdy* → *Impregnable*), \`life\` (*Hale* → *Titan's*, \`+8..+80\` HP), \`fortune\` (*Lucky* → *Divine*, \`+6%..+58%\` Magic Find), and \`gleaming\` (*Gleaming* → *Radiant*, Gold Find).
-- **16 Suffix Families (\`prefix = false\`):**
-  \`speed\` (*of the Fox* → *of the Gale*), \`haste\` (*of Haste* → *of Quickening*), \`regen\` (*of Mending* → *of Life Eternal*), \`reach\` (*of the Magnet* → *of Attraction*), \`wisdom\` (*of the Pupil* → *of the Archmage*), \`thorns\` (*of Thorns* → *of Razors*), \`resist burn/chill/poison\`, \`kindling\`, \`night\` (*of Dusk* → *of the Long Night*), \`dawn\` (*of Daybreak* → *of the Sun*, boss damage), \`slaying\` (*of Slaying* → *of the Executioner*, elite damage), and class-item skill tree boosters \`arms\`, \`arts\`, and \`instincts\` (\`+1..+2\` levels).
+The final item can differ from that initial roll: a rarity floor may raise it, and a unique roll can fall back to a rare item if an eligible unique cannot be made. The game does have unique definitions in \`Unique.cpp\`.
 
-#### Family Exclusion & Prefix/Suffix Caps (\`Item::addAffix\`)
-An \`Item\` holds up to \`MAX_AFFIXES = 6\` rolls (\`Roll rolls[6]\`). \`Item::hasFamily(affix)\` prevents two rolls from the same affix family from appearing on the same item:
-- **\`Rarity::Magic\` (\`affixMagic\`):** Rolls \`1..2\` affixes (at most 1 prefix and 1 suffix) and names the item dynamically, e.g., *"Searing Standard Ember Lance of Alacrity"*.
-- **\`Rarity::Rare\` (\`affixRare\`):** Rolls \`3..5\` affixes (up to \`6\` if a Unique roll upgrades a Rare via \`extra = 1\`), enforcing at most **3 prefixes and 3 suffixes**, and generates a deterministic two-word title from \`hash2(seed, 17)\` and \`hash2(seed, 91)\` (e.g., *"Dusk Fang"*, *"Storm Aegis"*).
+### Night and dropped items
 
----
+At night, item drops receive extra weight in the loot selection. A magic or rare item can become night-touched on a 1-in-25 roll; the effect requires at least one affix, improves one affix by up to two tiers and adds a curse. The Frail curse is displayed as −10% maximum health, but equipment application currently subtracts **10 maximum health** as a flat amount.
 
-### 3. Diminishing-Returns Magic Find & Night-Touched Curses (\`Loot.cpp\`)
+Dropped equipment follows a short arc; potions are separate pickups. Rare-or-better items and night-touched items can show a temporary beam. When at least 120 item drops already exist, newly rolled drops below rare are skipped, including night-touched magic items. Rare-or-better equipment produces a landing effect.
 
-\`rarityOdds(int ilvl, float magicFind)\` scales base drop rates by \`scale = 1 + ilvl / 40.0f\` and applies a hyperbolic diminishing-returns curve \`diminish(mf, k) = (mf * k) / (mf + k)\` to Rare (\`k = 600\`) and Unique (\`k = 250\`) rolls while keeping Magic rolls linear:
+### Run rules
 
-\`\`\`cpp
-float diminish(float mf, float k) { return mf * k / (mf + k); }
-
-RarityOdds rarityOdds(int ilvl, float magicFind) {
-  float scale = 1 + ilvl / 40.0f;
-  return {std::min(1.0f, scale / 700 * (1 + diminish(magicFind, 250) / 100)),
-          std::min(1.0f, scale / 90 * (1 + diminish(magicFind, 600) / 100)),
-          std::min(1.0f, scale / 7 * (1 + magicFind / 100))};
-}
-\`\`\`
-
-#### Night-Touched Items (\`touch(Item &item, Rng &rng)\`)
-When an item is rolled at night (\`night == true\`), Magic and Rare items have a **\`1-in-25\` (\`4%\`)** chance to become **Night-Touched**:
-1. Picks one existing affix roll on the item at random and **boosts its tier by \`+2\`** (\`r.tier = std::min(AFFIXES[r.affix].tiers - 1, r.tier + 2)\`), rerolling its numeric value in the higher tier!
-2. Assigns one of 5 permanent **\`CURSES\`** (\`Frail: -10% max health\`, \`Leaden: -5% movement speed\`, \`Hunted: foes deal 5% more damage\`, \`Bleeding: lose 1 health/s\`, or \`Dimmed: -20% light radius\`).
-
----
-
-### 4. Treasure Classes & \`ItemDrop\` Parabolic Spill (\`ItemDrop.cpp\`)
-
-\`TREASURE[8]\` maps each \`Source\` (\`Swarm\`, \`Line\`, \`Brute\`, \`Elite\`, \`Champion\`, \`Boss\`, \`Chest\`, \`Mimic\`) to a \`TreasureClass\` with guaranteed \`floored\` drops (e.g., \`Champion\` guarantees \`1× Magic+\`, \`Boss\` guarantees \`2× Rare+\`, \`Mimic\` guarantees \`1× Magic+\`) plus \`picks\` weighted draws across \`{none, gold, potion, material, item}\` where \`itemWeight = tc.item * (roll.night ? 2 : 1)\`.
-- When an enemy dies or chest opens in \`--loot\` mode, \`ItemDrop::spill\` launches each drop along a \`0.35s\` (\`FLY\`) parabolic arc \`z = std::sin(k * PI) * 14\`.
-- Rare and Night-Touched items emit vertical light beams (\`ItemDrop::beams()\`) and burst 8 colored sparks on landing.
-
----
-
-### 5. \`RunRules\` Mode Parameterization & Standalone \`BiomeViewer\`
-
-- **\`RunRules\` (\`src/level/RunRules.hpp\`):** Decouples run rules from hardcoded Dawn constants so future campaign/endless modes can configure \`nightLength\`, \`dawnPull\`, \`dayLength\`, \`endsAtDawn\`, \`spawnRate\`, \`hordeScale\`, fixed \`omen\`, circular sanctuary zones \`std::vector<SafeZone> safe\` (\`safeAt(x, y)\`), and a spatial difficulty callback \`float (*threat)(double x, double y)\`.
-- **Standalone \`BiomeViewer\` (\`tools/biome_viewer/main.cpp\`):** Built via \`cmake --build <dir> --target BiomeViewer\`, this tool streams a \`768×768\` world preview at 6 zoom scales (\`1, 2, 4, 8, 16, 32\` tiles/pixel), overlays all regional \`Structure\` and \`Landmark\` sites, and exports PNGs directly to disk or the OS clipboard.
+\`RunRules\` configures conditions such as loot, timing and safe zones for a run. \`safeAt(x, y)\` checks whether a position lies inside a configured circular safe zone; the consequences depend on the code that calls it.
 `,
-    mermaidCharts: [
-      {
-        title:
-          "Diablo-Style Loot Pipeline: TreasureClass -> rollItem() -> Night-Touched Touch()",
-        chart: `
-flowchart TD
-    classDef tc fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-    classDef roll fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
-    classDef curse fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
-
-    Spill["ItemDrop::spill(level, x, y, Source, mlvl)<br/>Lookup TREASURE[Source] (itemWeight * 2 at Night)"]:::tc
-    Floored["Emit tc.floored Guaranteed Drops<br/>(Champion: 1x Magic+ | Boss: 2x Rare+ | Mimic: 1x Magic+)"]:::tc
-    PickBase["pickBase(ilvl, tier, rng)<br/>q = b.qlvl + TIER_LEVEL[t] <= ilvl (3x Weight if ilvl - q <= 10)"]:::roll
-    RarityRoll["rollRarity(ilvl, magicFind, ownRng)<br/>diminish(mf, k) = mf * k / (mf + k)<br/>Magic: 1-2 Affixes | Rare: 3-6 Affixes (<=3 Pre, <=3 Suf)"]:::roll
-    NightTouch{"night && (Magic || Rare)<br/>&& 1-in-25 Roll?"}:::curse
-    Touch["touch(item, ownRng)<br/>Boost Random Affix Tier by +2 & Reroll<br/>Attach CURSES[0..4] + Emit Vertical Light Beam"]:::curse
-
-    Spill --> Floored --> PickBase --> RarityRoll --> NightTouch
-    NightTouch -- "Yes" --> Touch
+    mermaidCharts: [{
+      title: "From rarity roll to item",
+      chart: `flowchart TD
+    A[Select eligible base and tier] --> B[Roll unique, rare, then magic]
+    B --> C[Apply rarity floor]
+    C --> D{Unique roll?}
+    D -->|Yes| E[Try an eligible unique]
+    E -->|Unavailable| F[Generate rare affixes]
+    D -->|No| G[Generate rarity properties]
+    E -->|Available| H[Unique item]
 `,
-      },
-      {
-        title:
-          "RunRules Campaign Parameterization & SafeZone / Threat Evaluation",
-        chart: `
-flowchart TD
-    classDef rules fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-    classDef sys fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-
-    RR["struct RunRules (src/level/RunRules.hpp)<br/>nightLength=900, dayLength=0, endsAtDawn=true<br/>spawnRate=1, hordeScale=1, loot=false, omen=ROLL_OMEN"]:::rules
-    Safe["SafeZone Vector (safeAt(x, y))<br/>xd² + yd² < radius² -> Suppresses Spawns & Hostile Aggro"]:::sys
-    Threat["Spatial Threat Function Pointer<br/>float (*threat)(double x, double y)<br/>Scales Monster Level (mlvl) by World Distance / Region"]:::sys
-
-    RR --> Safe & Threat
-`,
-      },
-    ],
+    }],
     interactiveComponent: "loot",
   },
   {
     id: "paper-doll-gear-combat",
-    title:
-      "26. Paper-Doll Inventory (I), Reversible PlayerGear, ItemStats Combat Hooks & Loot Label Stacker",
+    title: "26. Equipment, Inventory and Combat Effects",
     category: "gameplay",
-    summary:
-      "How the 37-slot InventoryMenu (5 paper-doll slots + 8x4 bag), reversible applyItem(±1) stat & upgrade-level accounting, (1-r)² quadratic DoT resistance, Enemy::hurt/onHit combat pipeline, and 12-pass Hud::lootLabels() AABB stacker operate.",
+    summary: "Six equipment slots, the bag, equipping and removing gear, combat effects and ground labels.",
     sourceFiles: [
       "src/menu/InventoryMenu.cpp",
       "src/entity/PlayerGear.cpp",
       "src/item/loot/Equip.cpp",
-      "src/entity/ItemStats.hpp",
       "src/entity/enemy/Enemy.cpp",
-      "src/gui/Tooltip.cpp",
-      "src/gui/Hud.cpp",
+      "src/gui/HudWorld.cpp",
     ],
-    content: `
-### 1. The 37-Slot Paper-Doll Inventory (\`src/menu/InventoryMenu.cpp\`)
+    content: `### Equipment and bag
 
-Pressing **\`I\`** (or \`Tab\` when configured) opens \`InventoryMenu\`, a full paper-doll equipment and bag interface built around \`SLOTS = GEAR + Player::BAG\` (\`5 + 32 = 37\` addressable slots):
+The inventory has **six equipment slots**: weapon, offhand, armour, two charms and implant. The bag has 32 positions arranged in an 8 × 4 grid. Directional navigation wraps through the bag and links its left edge to the equipment slots. Mouse movement selects a cell; a left click or confirm activates it, and the erase action drops an item.
 
-- **Left Paper-Doll Column (\`slot 0..4\`):**
-  1. \`GearWeapon (0)\`: Main-hand weapons (\`Slot::Weapon\`) that also grant or level up a passive \`UpgradeId\` (\`item.def().grants\`).
-  2. \`GearOffhand (1)\`: Shields, bucklers, tomes, lanterns, and thorny totems (\`Slot::Offhand\`).
-  3. \`GearArmour (2)\`: Tunics, mail, coats, and plate (\`Slot::Armour\`).
-  4. \`GearCharm (3)\` & \`GearCharm2 (4)\`: Dual charm slots (\`Slot::Charm\`). \`Player::equip(bagIndex)\` automatically routes a newly equipped charm to \`GearCharm2\` whenever \`worn[GearCharm]\` is occupied and \`!worn[GearCharm2]\`:
-     \`\`\`cpp
-     GearSlot slot = gearSlotFor(in.def().slot);
-     if (slot == GearCharm && worn[GearCharm] && !worn[GearCharm2])
-         slot = GearCharm2;
-     \`\`\`
-- **Center Hero & Live Stat Readout:** Renders the animated hero sprite at \`2×\` scale above 5 live totals (\`Health\`, \`Armour\`, \`Power %\`, \`Speed %\`, \`Magic Find %\`), plus active \`Potion\` (\`Q\`), \`Gold\`, and \`Scrap\` counters.
-- **Right \`8 × 4\` Bag Grid (\`slot 5..36\`, \`COLS = 8, ROWS = 4\`):**
-  - **2D Spatial D-Pad Navigation (\`InventoryMenu::move\`):** Evaluates candidate slot centroids \`(sx, sy)\` along the input direction vector \`(dx, dy)\` and selects the slot minimizing \`along + perp * 2.5f\`, seamlessly crossing between the paper-doll column and the \`8 × 4\` bag grid.
-  - **Direct Manipulation:** \`Enter / Space / Left-Click\` equips a bag item or unequips a paper-doll slot back into the bag; \`X / Right-Click\` drops the selected item onto the ground via \`ItemDrop::drop(level, x, y, out)\`.
+### Putting on and removing gear
 
----
+An item must fit the hero and its target slot. If the first charm slot is occupied and the second is empty, another charm goes into the second slot. Equipping into an occupied slot swaps the old item into the selected bag position. Implant changes have additional restrictions: the player must not be a changeling and must be in a safe zone; equipping an implant also increases suspicion. Removing equipment through the unequip action requires room in the bag.
 
-### 2. Reversible \`applyItem(±1)\` & \`gearLevels[slot]\` Accounting (\`Equip.cpp\`, \`PlayerGear.cpp\`)
+\`applyItem\` applies the base implicit, affixes and curse with a positive sign on equip and a negative sign on removal. Maximum-health changes also adjust current health: an increase adds health, while a decrease clamps current health to the new maximum. Items that grant an upgrade add levels up to the appropriate item tier; the player records the levels added by that item so removal can subtract them.
 
-Equipping and unequipping items in real time without floating-point drift or permanent upgrade-level corruption requires strict **signed reversibility**:
+### Effects in combat
 
-1. **Signed Stat Application (\`applyItem(Mob &m, const Item &item, int sign)\` in \`src/item/loot/Equip.cpp\`):**
-   Every implicit base stat (\`base.stat1\`, \`base.stat2\`), rolled affix (\`item.rolls[0..affixCount-1]\`), and Night-Touched curse (\`item.curse\`) is routed through \`addStat(m, stat, val * sign)\` where \`sign = +1\` in \`Player::wear()\` and \`sign = -1\` in \`Player::shed()\`:
-   \`\`\`cpp
-   void Player::wear(GearSlot slot, const Item &item) {
-       if (!item) return;
-       applyItem(*this, item, +1);
-       UpgradeId id = item.def().grants;
-       if (id != UpgradeId::Count)
-           if (Upgrade *up = findUpgrade(id)) {
-               int before = up->level;
-               int target = std::min<int>(item.tier + 1, Upgrade::MAX_LEVEL);
-               while (up->level < target) up->levelUp();
-               gearLevels[slot] = static_cast<uint8_t>(up->level - before);
-           }
-   }
-   \`\`\`
-2. **Exact Upgrade-Level Delta Tracking (\`gearLevels[5]\`):**
-   - A weapon base specifies \`UpgradeId grants\` and \`tier\` (\`0 = Simple -> Lv.1\`, \`1 = Fine -> Lv.2\`, \`2 = Elite -> Lv.3\`).
-   - If the player already drafted \`Lv.1\` of that weapon during a level-up and equips a \`Tier 2 (Elite)\` weapon (target \`Lv.3\`), \`wear()\` calls \`up->levelUp()\` twice and records \`gearLevels[slot] = 2\`.
-   - When the weapon is unequipped in \`Player::shed(slot)\`, \`up->level = std::max(0, up->level - gearLevels[slot])\` subtracts only the \`2\` gear-contributed levels, preserving the player's drafted \`Lv.1\` intact!
-3. **Max-HP Ratio Preservation (\`recalcStats\`):**
-   Whenever gear modifies \`bonus.maxHealth\` or \`bonus.healthPct\` (including the Night-Touched \`Frail\` curse \`-10% maxHealth\`), \`Player::recalcStats()\` preserves the player's fractional health ratio \`health / prevMax\` (or adds flat max-HP gains directly during \`wear()\`) and clamps \`health\` to \`[1, maxHealth]\`.
+Equipment stats feed into damage and on-hit effects in \`Enemy::hurt\`. Non-periodic hits can receive critical and other damage modifiers; eligible hits can also trigger effects such as burn, chill, poison, bleed, leech and shock. These effects depend on the attack source and the corresponding player stats, so an item description alone does not guarantee that every hit will trigger one.
 
----
+### Ground labels
 
-### 3. Quadratic $(1 - r)^2$ DoT Resistance in \`Status::apply\` (\`src/entity/Status.hpp\`)
-
-Elemental and bleed resistances (\`Stat::FireResist\`, \`Stat::ColdResist\`, \`Stat::LightningResist\`, \`Stat::PoisonResist\`, \`Stat::BleedResist\`) are stored on \`Mob::resist[StatusKind::Count]\` and clamped to **\`75%\` (\`0.75f\`)**:
-
-\`\`\`cpp
-void apply(StatusKind kind, float duration, float power, uint32_t source = 0) {
-    auto i = static_cast<size_t>(kind);
-    float r = std::clamp(resist[i], 0.0f, 0.75f);
-    duration *= 1 - r;
-    power = std::min(power * (1 - r), cap(kind));
-    // ...
-}
-\`\`\`
-
-Because \`Status::apply\` multiplies **both** \`duration\` by $(1 - r)$ **and** \`power\` (damage per second / slow magnitude) by $(1 - r)$, total damage-over-time for \`Burn\`, \`Poison\`, and \`Bleed\` scales **quadratically**:
-
-$$\\text{Total DoT} = (\\text{power} \\cdot (1 - r)) \\times (\\text{duration} \\cdot (1 - r)) = \\text{Base DoT} \\cdot (1 - r)^2$$
-
-- At \`r = 0.50\` (\`50%\` resistance): DPS is halved and duration is halved $\\implies 25$% total DoT taken (\`75%\` effective mitigation).
-- At the \`r = 0.75\` (\`75%\` resistance cap): DPS is $0.25\\times$ and duration is $0.25\\times$ $\\implies (0.25)^2 = 6.25$% total DoT taken (**\`93.75%\` effective DoT mitigation**!).
-
----
-
-### 4. \`Enemy::hurt\` & \`Enemy::onHit\` Combat Pipeline (\`src/entity/enemy/Enemy.cpp\`)
-
-When a player attack strikes an enemy, \`Enemy::hurt\` and \`Enemy::onHit\` execute a multi-stage pipeline combining terrain elevation, hero crit multipliers, \`ItemStats\` target-category bonuses, and 6 on-hit status/chain procs:
-
-1. **Elevation Advantage (\`+15%\`):** If the target is non-flying (\`!type.floats\`) and the attacker stands on higher terrain (\`level->heightAt(player->x, player->y) > level->heightAt(x, y)\`), damage is multiplied by **\`1.15f\`** and emits a golden spark.
-2. **Hero Critical Hit (\`8% + luck\`):** Rolls \`rng.chance(0.08f + player->luck)\`; on success, multiplies damage by \`hero->edge()\` (\`1.8f\` base, \`2.2f\` Corsair, \`2.5f\` Duelist).
-3. **Target-Category \`ItemStats\` Scaling:**
-   \`\`\`cpp
-   const auto &b = player->bonus;
-   float pct = (boss || def ? b.bossDamage : 0)
-             + (elite || title ? b.eliteDamage : 0)
-             + (level->isDawn() ? 0 : b.nightDamage);
-   if (pct > 0) damage *= 1 + pct / 100;
-   \`\`\`
-4. **6 On-Hit Item Procs (\`Enemy::onHit\`):**
-   - **\`burnChance\`:** Applies \`StatusKind::Burn\` for \`2.0s\` at \`damage * 0.20f\` DPS.
-   - **\`chillChance\`:** Applies \`StatusKind::Chill\` for \`1.2s\` at \`0.30f\` (\`30%\` slow).
-   - **\`poisonChance\`:** Applies \`StatusKind::Poison\` for \`3.0s\` at \`damage * 0.15f\` DPS.
-   - **\`bleedChance\`:** Applies \`StatusKind::Bleed\` for \`3.0s\` at \`damage * 0.12f\` DPS (stacks additively in \`Status::apply\`, and ticks at \`1.6×\` when the target moves!).
-   - **\`lifeOnHit\` (\`leech\`):** Heals the player by \`std::min(damage * leech / 100.0f, 0.5f)\` HP per hit.
-   - **\`shockChance\`:** Queries the nearest living enemy within \`80 px\` (\`level->findNearestEnemy(x, y, 80, this)\`), deals \`damage * 0.5f\` lightning damage, and spawns a visual \`Arc\` bolt.
-5. **Defensive Thorns & Emergency Ward (\`Player::hurt\` in \`src/entity/Player.cpp\`):**
-   - **\`thorns\`:** Reflects flat \`bonus.thorns\` damage back onto the melee attacker (\`from->hurt(bonus.thorns, x, y, false, id)\`).
-   - **\`ward\` (\`LowLifeWard\`):** When an incoming hit drops the player from \`>= 30%\` HP to \`< 30%\` HP and \`wardCooldown <= 0\`, triggers a \`3.0s\` \`StatusKind::Shield\` equal to \`bonus.ward\` with a **\`30.0s\`** cooldown (\`wardCooldown = 30\`).
-
----
-
-### 5. Differential Item Comparison (\`Tooltip.cpp\`) & 12-Pass Loot Label Stacker (\`Hud.cpp\`)
-
-- **Differential Stat Comparison (\`gui::compare\` in \`src/gui/Tooltip.cpp\`):**
-  When hovering a ground \`ItemDrop\` or bag slot while holding an equipped item in the corresponding paper-doll slot, \`tally(item)\` sums all implicit and affix contributions across \`Stat::Damage .. Stat::Light\` into a 22-float array and prints green (\`BETTER\`) or red (\`"lose " + WORSE\`) delta rows for every stat where \`|delta| >= 0.05f\`.
-- **12-Pass Vertical AABB Loot Label De-Overlap (\`Hud::lootLabels\` in \`src/gui/Hud.cpp\`):**
-  When multiple items spill onto the same tile, their world-to-screen label boxes \`Tag { drop, name, x, y, w, h }\` would overlap. \`Hud::lootLabels()\` sorts visible tags bottom-to-top (\`a.y > b.y\`) and runs up to **12 iterative vertical sweep passes**, pushing any overlapping upper tag above the lower tag by \`1 * u\` pixel (\`t.y = hit->y - t.h - u\`) until reaching a fixed point!
+\`Hud::lootLabels\` sorts visible labels and tries to place them without overlapping earlier labels or HUD obstacles. It makes up to 12 placement attempts per label, so a dense pile is not guaranteed to be perfectly separated.
 `,
-    mermaidCharts: [
-      {
-        title:
-          "Reversible PlayerGear::wear / shed & (1-r)² Status Resistance Pipeline",
-        chart: `
-flowchart TD
-    classDef gear fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
-    classDef stat fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
-    classDef combat fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
-
-    Equip["Player::equip(bagIndex)<br/>Charm auto-routes to GearCharm2 if GearCharm occupied"]:::gear
-    Shed["Player::shed(slot)<br/>applyItem(*this, oldItem, -1)<br/>up->level -= gearLevels[slot]"]:::gear
-    Wear["Player::wear(slot, newItem)<br/>applyItem(*this, newItem, +1)<br/>Level grants up to min(tier + 1, 3) -> store gearLevels[slot]"]:::gear
-    Recalc["Player::recalcStats()<br/>Preserve health / prevMax ratio<br/>Clamp resist[0..6] to 75% (0.75f)"]:::stat
-    DotResist["Status::apply(kind, duration, power)<br/>duration *= (1 - r) AND power *= (1 - r)<br/>Quadratic Total DoT = Base * (1 - r)² (6.25% at 75% cap!)"]:::combat
-
-    Equip --> Shed --> Wear --> Recalc --> DotResist
+    mermaidCharts: [{
+      title: "Equipping and removing an item",
+      chart: `flowchart TD
+    A[Select item in bag] --> B[Check fit and slot restrictions]
+    B --> C[Swap or equip item]
+    C --> D[Apply item stats and granted levels]
+    D --> E[Remove item]
+    E --> F[Reverse stats and recorded levels]
 `,
-      },
-      {
-        title: "Enemy::hurt & Enemy::onHit Multi-Stage Combat & Proc Pipeline",
-        chart: `
-flowchart TD
-    classDef hit fill:#181524,stroke:#f43f5e,stroke-width:2px,color:#f8fafc;
-    classDef proc fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
-
-    BaseHit["Enemy::hurt(damage, fromX, fromY, knockback, by)<br/>1. High Ground (!floats && h_player > h_enemy): damage *= 1.15f<br/>2. Crit Roll (0.08 + luck): damage *= hero->edge()"]:::hit
-    CatMult["Target-Category ItemStats Multiplier<br/>damage *= 1 + (bossDamage + eliteDamage + nightDamage) / 100"]:::hit
-    OnHit["Enemy::onHit(player, damage)<br/>Rolls 6 Independent ItemStats Procs:"]:::proc
-    Procs["• Burn: 2.0s @ 20% dmg/s<br/>• Chill: 1.2s @ 30% slow<br/>• Poison: 3.0s @ 15% dmg/s<br/>• Bleed: 3.0s @ 12% dmg/s (Additive + 1.6x moving)<br/>• Leech: heal min(dmg * leech%, 0.5 HP)<br/>• Shock: 80px Arc chain for 50% dmg"]:::proc
-
-    BaseHit --> CatMult --> OnHit --> Procs
-`,
-      },
-    ],
-    interactiveComponent: "gearevents",
+    }],
   },
   {
     id: "biome-events-chart-hud",
@@ -4426,6 +4094,12 @@ flowchart LR
     sourceFiles: [
       "src/campaign/Campaign.hpp",
       "src/campaign/Campaign.cpp",
+      "src/campaign/Standing.cpp",
+      "src/entity/Faction.hpp",
+      "src/level/Aggro.cpp",
+      "src/level/RunRules.hpp",
+      "src/entity/pickup/Gem.cpp",
+      "src/test/PeaceableTest.cpp",
       "src/campaign/Townsfolk.hpp",
       "src/campaign/Townsfolk.cpp",
       "src/campaign/Sentry.hpp",
@@ -4477,7 +4151,7 @@ public:
        talk = SAY;
        hush = SAY + 6;
        spoken = line();
-       level->game.announce("A SANCTUARY SEEKER FOLLOWS YOU  BRING THEM TO A BASTION");
+       level->game.announce(lang.seekerFollows);
    }
    \`\`\`
 
@@ -4487,7 +4161,7 @@ public:
    Bastion routing and wall collision constrain the path. A fast player can still outrun the follower and break the leash.
 
 3. **The Leash Break Theorem (\`LEASH = 260.0f\`):**
-   If the hero abandons the sanctuary seeker or sprints past the separation threshold ($d > \\text{LEASH}$), the tether breaks! The sanctuary seeker reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
+   If the hero dies or passes the separation threshold ($d > \\text{LEASH}$), the tether breaks! The sanctuary seeker reverts to \`Mode::Lost\`, ceases movement, and cries out for help:
    \`\`\`cpp
    if (d > LEASH || p.dead()) {
        mode = Mode::Lost;
@@ -4503,7 +4177,7 @@ public:
    \`\`\`
    If HP drops to zero, the sanctuary seeker disintegrates in a burst of white spark particles (\`Spark::burst\`) and is permanently lost to the dark.
 
-5. **Dialogue:** Lost and following sanctuary seekers use fixed lines. Once home, they choose from four lines for their town, indexed by \`town % 5\`. A nearby living player can hear the nearest townsperson speak.
+5. **Dialogue:** Lost and following seekers use localized lines. At home, the nearest eligible townsperson can speak when the player is nearby. They can share a recipe or a founder rumour at intervals, falling back to one of four town lines otherwise.
 
 ---
 
@@ -4530,7 +4204,7 @@ public:
    s.sprite(atlas::town(tt::TowerTop + 1), xp, yp - 48, 8, 16, 1, 1);
    \`\`\`
 2. **Target Acquisition & Ballistic Cadence:**
-   Once its reload timer reaches zero, the tower scans a circular perimeter of radius $\\text{RANGE} = 190$ px centered at the arrow slit ($y - 40$). It selects the nearest living, unburied hostile and looses an arrow projectile at **260 px/s**, then resets its reload to 1.1 seconds:
+   Once its reload timer reaches zero, the tower scans a circular perimeter of radius $\\text{RANGE} = 190$ px centered at the arrow slit ($y - 40$). It uses \`Level::targets()\` to select the nearest eligible living, unburied enemy and looses an arrow projectile at **260 px/s**, then resets its reload to 1.1 seconds:
    $$damage = 8.0 + 2.0 \\times \\text{Player::lvl}$$
 3. **Dynamic Lightfield Beacon:**
    The tower summit casts an additive flame glow into \`level->lights\` with a natural sinusoidal flicker:
@@ -4542,7 +4216,7 @@ public:
 
 ### Sentries and walls (\`src/campaign/Sentry.cpp\`)
 
-Sentries select the nearest living, unburied enemy within 120 px of their post. They chase within 70% of that guard radius and cleave nearby enemies when in reach. Their movement passes through the active \`RunRules::wall\` callback. When a sentry pushes an overlapping enemy, the same wall callback constrains the displacement, except for Shades. This keeps ordinary enemies from being pushed through a bastion wall.
+Sentries select the nearest eligible living, unburied enemy within 120 px of their post. Their target and cleave use \`Level::targets()\`, which applies \`harms()\`: in a peaceable campaign this ordinarily selects angry enemies, while holding Strike also permits calm targets. Sentries chase within 70% of their guard radius and cleave nearby eligible enemies when in reach. Their movement passes through the active \`RunRules::wall\` callback. Their physical shove checks nearby enemies independently of the target filter; the wall callback constrains that displacement except for Shades. This keeps ordinary enemies from being pushed through a bastion wall.
 
 ---
 
@@ -4563,6 +4237,16 @@ When a following sanctuary seeker comes within 120 px of a town center, \`Campai
    - If the hound is removed, the campaign marks it down. At the next transition to dawn, the flag clears and a new hound can be summoned beside a living player.
 
 ---
+
+### Campaign standing, combat and experience
+
+Campaign rules enable \`autoXp\` and \`peaceable\`. \`Gem::drop()\` immediately gives positive XP to the player when \`autoXp\` is enabled; in survival, the ordinary path creates a collectible gem. This applies wherever a reward uses \`Gem::drop()\`, so campaign players do not need to collect those XP gems.
+
+Faction standing begins from lineage, class and a seed-based tilt. \`standing::spread()\` changes the chosen faction and propagates a scaled change to other reputed factions according to their relationship. \`standing::disposition()\` maps the resulting value to Hated, Disliked, Indifferent, Liked, Friendly or Revered; the thresholds are defined in \`Level\` and \`Campaign\` rather than inferred from the labels.
+
+In a peaceable campaign, enemies normally wait or wander. Hated enemies rouse when they see a living hero. Disliked enemies warn nearby heroes and attack if approached closely or if the hero lingers. Bosses, champion definitions and titled enemies are treated as hated. Aggro can also spread to nearby members of the same faction; a group may flee after enough members fall. Aggro expires when the enemy loses sight for 20 seconds or goes 480 px from where it was roused.
+
+The hero's automatic weapons run while combat is active or while Strike is held. Combat is refreshed when an aggroed enemy is within 480 px, and remains active for five seconds after the last refresh. Ordinarily player-targeted attacks use \`Level::harms()\` to spare foes that are not angry. Holding Strike (F or R3 by default) permits attacks on otherwise peaceful foes; a direct player hit on a calm foe rouses its nearby faction group and costs standing, except for the Synod standing penalty in this particular path. Foe death and other campaign actions have their own reputation effects.
 
 ### 4. Deep Dark Dungeon Delves (\`Delve.cpp\`)
 
@@ -5438,7 +5122,7 @@ flowchart LR
     title: "33. Menu Text and Language Overrides",
     category: "contribute",
     summary:
-      "How menu strings, format arguments and the currently unwired override parser work.",
+      "English defaults, the language selector, translation files, glossary and format validation.",
     sourceFiles: [
       "src/gui/Lang.hpp",
       "src/gui/Lang.cpp",
@@ -5449,34 +5133,28 @@ flowchart LR
       "src/test/LangTest.cpp",
     ],
     content: `
-### Where menu text lives
+### Interface text and content names
 
-\`src/gui/Lang.hpp\` defines English defaults as members of \`Lang\`. The global \`lang\` instance supplies text to the pause, settings, controls, death and dawn menus. Coverage is partial: other game text still lives elsewhere in the code. The settings menu stores pointers to \`Lang\` members in its row definitions, so it reads the current value when it renders.
+\`src/gui/Lang.hpp\` defines the English interface defaults in \`Lang\`; menus read the global \`lang\` instance. \`say()\` formats strings with runtime \`fmt\` arguments. Content names and other text can also pass through the \`Glossary\` via \`tr()\`. These are two complementary kinds of entries in the same language file.
 
-Strings with arguments pass through \`say()\`, a wrapper around runtime \`fmt::format\`. For example, \`say(lang.felledBy, by)\` inserts the cause of death into the default \`felled by {}\`. Input prompts such as the pause-menu controls also pass through \`Input::prompt()\` when rendered.
+### Selecting a language
 
-### Reading overrides
+The Language row in Settings lists \`english\` first, followed by the sorted \`.txt\` filenames in \`res/lang/\`. The selected name is saved in \`settings.txt\`. \`Game::loadLanguage()\` resets the interface strings and glossary to English defaults when the selection changes, then loads \`res/lang/<name>.txt\` unless English is selected. If the file cannot be read, the game logs a warning and keeps the defaults. German is supplied as \`res/lang/deutsch.txt\`.
 
-\`Lang::parse()\` accepts text already held in memory. Each recognized line has a case-sensitive key, one literal space, then the value. The remainder of the line is preserved as the value, including additional spaces. Lines beginning with \`#\`, lines without a space, unknown keys and values with a different number of opening braces from the English default are ignored. CRLF and LF line endings are accepted.
+### File format and validation
 
-For example:
+Interface overrides use a case-sensitive key followed by a literal space and the translated text. A content glossary entry begins with \`~\`, followed by the English text, a tab, and the translation. Lines beginning with \`#\` can be used as comments. For example:
 
 \`\`\`text
-# Example overrides passed to Lang::parse()
 paused PAUSA
 felledBy abattu par {}
-world monde {}
+~Wolf	Loup
 \`\`\`
 
-The return value counts accepted lines, not distinct keys; if a key appears more than once, the last accepted value wins. Missing or rejected keys keep their current values. A freshly constructed \`Lang\` starts with English defaults. Parsed values are kept in static string storage, so their pointers remain valid after the input buffer goes away.
+\`Lang::parse()\` rejects unknown keys, mismatched counts of opening braces, and values that fail its \`fmt\` check. \`Glossary::parse()\` checks for a tab, nonempty text on both sides, matching brace counts and format validity when the value contains braces. CRLF and LF are accepted. Each parser returns the number of accepted lines, including repeated keys; a later accepted entry replaces the earlier value. Untranslated interface entries retain their English defaults and an absent glossary entry returns the original English text.
 
-**Current integration limit:** the source currently calls \`Lang::parse()\` in the language test, but does not wire a translation file or language selector into game startup. Supplying a file beside the executable therefore does not by itself change the menus.
+The format check uses sample numeric arguments. It does not prove that a translation works for every type and value supplied at its actual call site, so keep placeholders compatible and exercise the real UI. \`langTemplate()\` produces the English interface keys as a starting point. \`src/test/LangTest.cpp\` tests defaults, formatting, parsing, language discovery and switching. When adding text, register interface fields in \`LANG_KEYS\` or use the glossary path for content, then update the language file and relevant tests.
 
-### Format strings and testing
-
-The parser counts \`{\` characters; it does not fully validate \`fmt\` syntax, argument types, or the order of placeholders. A translation can pass that check and still fail when \`say()\` formats it. Keep the placeholders compatible with the call site and test actual formatted output. For example, \`endlessRun\` has two arguments, while \`world\` has one.
-
-To add a menu string, define its English default in \`Lang\`, add its member to \`LANG_KEYS\`, use it at the render site, and extend \`src/test/LangTest.cpp\` for formatting or parsing behavior. The existing test checks nonempty defaults, unique keys and members, formats defaults containing braces, and checks accepted and rejected overrides. It does not validate every possible translation or exercise a startup file loader.
 `,
   },
   {
@@ -5500,13 +5178,13 @@ After initializing audio and applying settings, \`Game\` chooses the optional in
 
 \`IntroMenu\` opens the MPEG video with \`pl_mpeg\`, disables its embedded audio, allocates an RGBA buffer, and creates a Vulkan2D image and texture. When the frame resource and duration are valid, it starts the separate Ogg clip through \`Sound::clip()\`.
 
-On each menu tick, \`decode()\` consumes video frames until the next frame time is ahead of the menu clock. Each decoded frame is converted to RGBA; after the loop, only the latest is uploaded to the existing texture. Rendering clears the screen to black and fits the video within the viewport while preserving its aspect ratio.
+On each menu tick, \`decode()\` consumes video frames until the next frame time is ahead of the menu clock. The loop keeps the latest decoded frame, converts it to RGBA and uploads it to the existing texture. Rendering clears the screen to black and fits the video within the viewport while preserving its aspect ratio.
 
-The menu fades the picture and clip gain over the final 0.5 seconds. Input after the first 0.1 seconds starts an early fade. When the fade ends, the title menu replaces the intro. If video setup fails, duration is set to zero and the menu proceeds to the title on its next tick.
+The menu fades the picture and clip gain over the final 0.5 seconds. Input after the first 0.1 seconds starts an early fade. When the fade ends, the title menu replaces the intro with a matching veil. Music begins easing in during the final three seconds or after a skip. If video setup fails, duration is set to zero and the menu proceeds to the title on its next tick.
 
 ### Ownership and cleanup
 
-The menu owns the decoder, CPU buffer, image and texture. Its destructor ends the clip, waits for the renderer, then frees the texture, image and decoder. Ending the clip also allows the ordinary music stream to refill. Video and audio come from separate files; the menu advances video from its own clock and does not implement an explicit audio-clock synchronization mechanism.
+The menu owns the decoder, CPU buffer, image and texture. Its destructor ends the clip, waits for the renderer, then frees the texture, image and decoder. Ending the clip also allows the ordinary music stream to refill. Video and audio come from separate files. The intro clock uses the greater of menu time and the clip playback estimate from \`Sound::clipTime()\`; this is based on queued audio bytes and is not a direct measurement of what the device has already played.
 `,
   },
   {
@@ -5526,11 +5204,11 @@ The menu owns the decoder, CPU buffer, image and texture. Its destructor ends th
 
 \`Input::handle()\` receives SDL events and updates shared \`Key\` objects. A \`Key\` records whether it is held (\`down\`) and counts transitions from released to pressed. At the next \`Input::tick()\`, \`clicked\` is set if at least one press was recorded and the count is cleared. A press and release between ticks can therefore produce \`clicked\` even though \`down\` is already false. Losing window focus releases the keys and clears stored stick and trigger state.
 
-Keyboard and gamepad bindings can point to the same action. Some gamepad bindings deliberately control two actions: by default, X maps to Gather and Retry, Y to Inventory and Codex, and Back to Map and Quit. Which action matters depends on the current game or menu context.
+Keyboard and gamepad bindings can point to the same action. Some gamepad bindings deliberately control two actions: by default, X maps to Gather and Retry, Y to Inventory and Codex, and Back to Map and Quit. Strike defaults to F on the keyboard and R3 on a gamepad. Which action matters depends on the current game or menu context.
 
 ### Rebinding and persistence
 
-The controls menu exposes 17 keyboard rows and eight gamepad rows. It switches the displayed set according to the current input mode. Selecting a row listens for a new key or supported pad button; Escape cancels keyboard listening and B cancels gamepad listening. Reset restores both sets of defaults.
+The controls menu exposes 18 keyboard rows and nine gamepad rows. It switches the displayed set according to the current input mode. Selecting a row listens for a new key or supported pad button; Escape cancels keyboard listening and B cancels gamepad listening. Reset restores both sets of defaults.
 
 \`Input::rebind()\` rejects unknown and fixed scancodes. \`rebindPad()\` accepts only buttons listed by \`padName()\`. If the requested input is already assigned, the other binding receives the selected row's old input. Both methods release the tracked keys after a successful change, avoiding an unintended held action during the swap.
 

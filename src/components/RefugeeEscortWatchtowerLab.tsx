@@ -288,8 +288,8 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
         r.flash = Math.max(0, r.flash - dt);
         r.shiver = isNight ? Math.sin(s.time * 25) * 1.5 : 0;
 
-        const CALL_RANGE = 38; // Townsfolk::CALL = 28 (scaled for lab canvas)
-        const LEASH_RANGE = 180; // Townsfolk::LEASH = 260
+        const CALL_RANGE = 28;
+        const LEASH_RANGE = 260;
         const TRAIL_SPEED = Math.min(50, p.speed * 1.05);
 
         const distToPlayer = Math.hypot(p.x - r.x, p.y - r.y);
@@ -330,7 +330,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
           } else {
             // Trail hero breadcrumb
             r.facing = p.x < r.x ? -1 : 1;
-            if (distToPlayer > 26) {
+            if (distToPlayer > 20) {
               const rx = p.x - r.x;
               const ry = p.y - r.y;
               const rd = Math.hypot(rx, ry);
@@ -339,7 +339,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
             }
 
             // Check arrival at town safe radius
-            if (distToTown < s.townRadius - 15) {
+            if (distToTown < 120) {
               r.mode = "Home";
               r.spoken = REGIONAL_LINES[r.townIndex][0];
               r.speechTimer = 5.0;
@@ -357,7 +357,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
                   vx: (Math.random() - 0.5) * 120,
                   vy: (Math.random() - 0.5) * 120,
                   color: ["#34d399", "#60a5fa", "#f59e0b", "#fbbf24"][
-                    Math.floor(Math.random() * 5)
+                    Math.floor(Math.random() * 4)
                   ],
                   life: 0.9,
                   maxLife: 0.9,
@@ -378,8 +378,8 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
         // Enemy melee damage to refugee
         s.enemies.forEach((e) => {
           const ed = Math.hypot(e.x - r.x, e.y - r.y);
-          if (ed < 16) {
-            r.hp -= e.damage * dt;
+          if (r.mode !== "Home" && ed < 16) {
+            r.hp -= e.damage * 1.5 * dt;
             r.flash = 0.15;
             if (r.speechTimer <= 0) {
               r.spoken = "Help! They're attacking!";
@@ -879,7 +879,7 @@ export const RefugeeEscortWatchtowerLab: React.FC = () => {
             </h3>
             <p className="text-xs text-slate-400">
               A simplified illustration of sanctuary seeker states and watchtower
-              targeting. Movement, combat and timing are approximations of the game.
+              targeting. Movement and combat are approximations; all simulated enemies are treated as eligible targets.
             </p>
           </div>
         </div>

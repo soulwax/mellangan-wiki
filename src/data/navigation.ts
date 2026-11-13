@@ -219,7 +219,7 @@ export const NAV_TREE: NavTreeGroup[] = [
     items: [
       {
         id: "diablo-loot-runrules",
-        shortTitle: "Diablo Loot, 30 Affixes & RunRules",
+        shortTitle: "Item Generation & Run Rules",
       },
       {
         id: "paper-doll-gear-combat",
@@ -337,7 +337,7 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
       {
         id: "diablo-loot-runrules",
         title: "Diablo Loot & Item Affixes",
-        subtitle: "30 Affixes, RunRules & Rarities",
+        subtitle: "Affixes, Run Rules & Rarities",
         icon: Sparkles,
         badge: "LAB",
       },
