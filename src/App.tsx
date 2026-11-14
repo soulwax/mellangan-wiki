@@ -274,7 +274,7 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg bg-[#120e1e] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#1a1429] transition-colors"
+              className="lg:hidden p-2 rounded-lg bg-[#282c34] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#353b45] transition-colors"
               aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
               aria-expanded={isMobileMenuOpen}
               aria-controls="chapter-navigation"
@@ -305,7 +305,7 @@ export const App: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <div
-              className="hidden sm:flex items-center bg-[#110d1c] p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
+              className="hidden sm:flex items-center bg-[#282c34] p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
               title="Switch article reading typography between Plus Jakarta Sans and Source Serif 4"
             >
               <button
@@ -343,7 +343,7 @@ export const App: React.FC = () => {
             <a
               href="/contribute-basics"
               onClick={(e) => selectChapter("contribute-basics", e)}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#282c34] hover:bg-[#353b45] border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
               title="Contribution Guide &amp; Dev Toolchain"
             >
               <Wrench className="w-3.5 h-3.5 text-gold-400" />
@@ -354,7 +354,7 @@ export const App: React.FC = () => {
             <a
               href="/engine-mathematics"
               onClick={(e) => selectChapter("engine-mathematics", e)}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#282c34] hover:bg-[#353b45] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
               title="Spielmathematik, Invarianten und Beweise"
             >
               <Calculator className="w-3.5 h-3.5 text-indigo-400" />
@@ -368,8 +368,8 @@ export const App: React.FC = () => {
                 onClick={() => setIsTopicsOpen(!isTopicsOpen)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                   isTopicsOpen
-                    ? "bg-[#1d1630] text-gold-300 border border-gold-500/60 shadow-lg shadow-black"
-                    : "bg-[#110d1c] hover:bg-[#181326] text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
+                    ? "bg-[#353b45] text-gold-300 border border-gold-500/60 shadow-lg shadow-black"
+                    : "bg-[#282c34] hover:bg-[#353b45] text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
                 }`}
                 aria-expanded={isTopicsOpen}
                 aria-haspopup="true"
@@ -389,11 +389,11 @@ export const App: React.FC = () => {
 
               {isTopicsOpen && (
                 <div
-                  className="fixed left-3 right-3 top-[64px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-80px)] overflow-y-auto bg-[#0a0712] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
+                  className="fixed left-3 right-3 top-[64px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-80px)] overflow-y-auto bg-[#21252b] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
                   role="menu"
                 >
                   {/* Menu header */}
-                  <div className="flex items-center justify-between p-4 sm:p-5 pb-3 sm:pb-3.5 border-b border-dark-800 bg-[#0e0a19]">
+                  <div className="flex items-center justify-between p-4 sm:p-5 pb-3 sm:pb-3.5 border-b border-dark-800 bg-[#282c34]">
                     <div className="flex items-center gap-2.5">
                       <div className="w-2 h-2 rounded-full bg-gold-400 animate-pulse"></div>
                       <div>
@@ -424,7 +424,7 @@ export const App: React.FC = () => {
                   </div>
 
                   {/* 3 Categories Grid */}
-                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 bg-[#0a0712]">
+                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 bg-[#21252b]">
                     {FEATURED_TOPIC_GROUPS.map((group) => (
                       <div key={group.groupName} className="flex flex-col gap-2">
                         <div className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-400 px-1 flex items-center justify-between">
@@ -445,15 +445,15 @@ export const App: React.FC = () => {
                                 }}
                                 className={`group p-2.5 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
                                   isActive
-                                    ? "bg-[#1d1630] border-gold-500/70 shadow-md shadow-black"
-                                    : "bg-[#130f1e] hover:bg-[#1a1428] border-dark-800 hover:border-dark-700"
+                                    ? "bg-[#353b45] border-gold-500/70 shadow-md shadow-black"
+                                    : "bg-[#282c34] hover:bg-[#353b45] border-dark-800 hover:border-dark-700"
                                 }`}
                               >
                                 <div
                                   className={`p-1.5 rounded-lg border shrink-0 mt-0.5 transition-colors ${
                                     isActive
                                       ? "bg-[#271d42] border-gold-500/50 text-gold-300"
-                                      : "bg-[#0a0712] border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/40"
+                                      : "bg-[#21252b] border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/40"
                                   }`}
                                 >
                                   <IconComponent className="w-3.5 h-3.5" />
@@ -488,7 +488,7 @@ export const App: React.FC = () => {
                   </div>
 
                   {/* Footer link to full index */}
-                  <div className="p-3.5 sm:px-5 border-t border-dark-800 bg-[#0e0a19] flex items-center justify-between text-xs font-mono text-slate-400">
+                  <div className="p-3.5 sm:px-5 border-t border-dark-800 bg-[#282c34] flex items-center justify-between text-xs font-mono text-slate-400">
                     <span className="text-[11px]">{orderedSectionIds.length} Chapters across 6 modules</span>
                     <button
                       type="button"
@@ -595,7 +595,7 @@ export const App: React.FC = () => {
             </div>
 
             <div className="wiki-hero pb-7 mb-8">
-              <div className="wiki-kicker"><span className="wiki-kicker-dot" /> THE MELLANGAN FIELD GUIDE <span className="wiki-kicker-line" /> {String(currentIndex + 1).padStart(2, "0")} / {String(orderedSectionIds.length).padStart(2, "0")}</div>
+              <div className="wiki-kicker"><span className="wiki-kicker-dot" /> Mellangan field guide <span className="wiki-kicker-line" /> {String(currentIndex + 1).padStart(2, "0")} / {String(orderedSectionIds.length).padStart(2, "0")}</div>
               <h1 className="wiki-title font-display text-slate-100">
                 {activeSection.title}
               </h1>

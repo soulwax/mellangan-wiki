@@ -58,7 +58,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={`Search ${chapterCount} chapters...`}
             aria-label="Search chapters and files"
-            className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
+            className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[#282c34] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
           />
           {searchQuery && (
             <button
@@ -75,7 +75,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 px-0.5">
           <span className="uppercase tracking-wider font-semibold flex items-center gap-1.5">
             <ListTree className="w-3 h-3 text-gold-400" />
-            Manual Contents
+            Contents
           </span>
           <div className="flex items-center gap-2">
             <button
