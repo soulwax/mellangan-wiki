@@ -6,6 +6,7 @@ type LabName = NonNullable<WikiSection["interactiveComponent"]>;
 // Keep the chapter-to-component mapping in one place. Each module loads only
 // when its chapter is opened.
 const labs: Record<LabName, ComponentType> = {
+  farming: lazy(() => import("./FarmingLab").then(m => ({ default: m.FarmingLab }))),
   gameloop: lazy(() => import("./InteractiveGameLoop").then(m => ({ default: m.InteractiveGameLoop }))),
   radix: lazy(() => import("./RadixDepthSorter").then(m => ({ default: m.RadixDepthSorter }))),
   slab: lazy(() => import("./SlabMemoryVisualizer").then(m => ({ default: m.SlabMemoryVisualizer }))),

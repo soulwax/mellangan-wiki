@@ -5,22 +5,18 @@ import { extractHeadings } from "./utils/markdown";
 
 import { DiagramPanel } from "./components/DiagramPanel";
 import { ChapterArticle } from "./components/ChapterArticle";
+import { ChapterNavigation } from "./components/ChapterNavigation";
 import { GalleryPage } from "./components/GalleryPage";
 import { SimulationPanel } from "./components/SimulationPanel";
 import {
   Layers,
-  Search,
   Menu,
   X,
   ChevronRight,
   ChevronDown,
-  Terminal,
   FileCode2,
   Wrench,
   Sparkles,
-  ListTree,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Hash,
   GitBranch,
   Link2,
@@ -67,25 +63,12 @@ export const App: React.FC = () => {
     () => parseLocationRoute().hash,
   );
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isTopicsOpen, setIsTopicsOpen] = useState<boolean>(false);
   const topicsRef = useRef<HTMLDivElement>(null);
   const [activeDiagramTab, setActiveDiagramTab] = useState<"all" | number>(
     "all",
   );
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
-    {
-      "getting-started": true,
-      tutorials: true,
-      "ai-concurrency": true,
-      rendering: true,
-      "world-terrain": true,
-      "core-memory": true,
-      "gameplay-ai": true,
-    },
-  );
-
   const sectionById = useMemo(() => {
     const map = new Map<string, WikiSection>();
     for (const s of WIKI_SECTIONS) {
@@ -117,14 +100,6 @@ export const App: React.FC = () => {
       ) || NAV_TREE[0]
     );
   }, [activeSection]);
-
-  useEffect(() => {
-    if (activeGroup) {
-      setExpandedGroups((prev) =>
-        prev[activeGroup.key] ? prev : { ...prev, [activeGroup.key]: true },
-      );
-    }
-  }, [activeGroup]);
 
   // Keep document title & canonical URL path synchronized
   useEffect(() => {
@@ -164,6 +139,15 @@ export const App: React.FC = () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isTopicsOpen]);
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMobileMenuOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isMobileMenuOpen]);
 
   // Listen to browser Back/Forward (popstate) and in-page hash navigation
   useEffect(() => {
@@ -225,37 +209,6 @@ export const App: React.FC = () => {
     return [];
   }, [activeSection]);
 
-  const filteredTree = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return NAV_TREE;
-    return NAV_TREE.map((group) => {
-      const matchedItems = group.items.filter((item) => {
-        const sec = sectionById.get(item.id);
-        if (!sec) return false;
-        return (
-          item.shortTitle.toLowerCase().includes(q) ||
-          sec.title.toLowerCase().includes(q) ||
-          sec.summary.toLowerCase().includes(q) ||
-          sec.content.toLowerCase().includes(q) ||
-          sec.sourceFiles.some((f) => f.toLowerCase().includes(q))
-        );
-      });
-      return { ...group, items: matchedItems };
-    }).filter((g) => g.items.length > 0);
-  }, [searchQuery, sectionById]);
-
-  const toggleGroup = (key: string) => {
-    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const setAllGroups = (open: boolean) => {
-    const next: Record<string, boolean> = {};
-    for (const g of NAV_TREE) {
-      next[g.key] = open;
-    }
-    setExpandedGroups(next);
-  };
-
   const selectChapter = (id: string, e?: React.MouseEvent<HTMLElement>) => {
     if (
       e &&
@@ -307,14 +260,17 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#07050b] text-slate-200 flex flex-col font-sans selection:bg-gold-500/30 selection:text-gold-200">
-      <header className="sticky top-0 z-40 h-14 bg-[#09070f] border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
+    <div className="wiki-shell min-h-screen text-slate-200 flex flex-col font-sans selection:bg-gold-500/30 selection:text-gold-200">
+      <a href="#main-content" className="skip-link">Skip to content</a>
+      <header className="wiki-header sticky top-0 z-40 h-14 px-4 lg:px-6 flex items-center justify-between gap-4">
         <div className="max-w-[1440px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg bg-[#120e1e] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#1a1429] transition-colors"
+              className="lg:hidden p-2 rounded-lg bg-[#282c34] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#353b45] transition-colors"
               aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="chapter-navigation"
             >
               {isMobileMenuOpen ? (
                 <X className="w-4 h-4" />
@@ -335,10 +291,7 @@ export const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-display font-bold text-base tracking-normal text-slate-100">
-                    Mellangan <span className="hidden sm:inline">Docs</span>
-                  </span>
-                  <span className="hidden sm:inline text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.6.5+
+                    Mellangan <span className="wiki-brand-sub hidden sm:inline">/ FIELD GUIDE</span>
                   </span>
                 </div>
               </div>
@@ -350,7 +303,7 @@ export const App: React.FC = () => {
             <a
               href="/contribute-basics"
               onClick={(e) => selectChapter("contribute-basics", e)}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#282c34] hover:bg-[#353b45] border border-dark-750 hover:border-gold-500/40 text-xs font-mono text-slate-300 hover:text-gold-300 transition-colors"
               title="Contribution Guide &amp; Dev Toolchain"
             >
               <Wrench className="w-3.5 h-3.5 text-gold-400" />
@@ -361,7 +314,7 @@ export const App: React.FC = () => {
             <a
               href="/engine-mathematics"
               onClick={(e) => selectChapter("engine-mathematics", e)}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#110d1c] hover:bg-[#181326] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#282c34] hover:bg-[#353b45] border border-dark-750 hover:border-indigo-500/40 text-xs font-mono text-slate-300 hover:text-indigo-300 transition-colors"
               title="Spielmathematik, Invarianten und Beweise"
             >
               <Calculator className="w-3.5 h-3.5 text-indigo-400" />
@@ -375,8 +328,8 @@ export const App: React.FC = () => {
                 onClick={() => setIsTopicsOpen(!isTopicsOpen)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                   isTopicsOpen
-                    ? "bg-[#1d1630] text-gold-300 border border-gold-500/60 shadow-lg shadow-black"
-                    : "bg-[#110d1c] hover:bg-[#181326] text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
+                    ? "bg-[#353b45] text-gold-300 border border-gold-500/60 shadow-lg shadow-black"
+                    : "bg-[#282c34] hover:bg-[#353b45] text-slate-200 hover:text-gold-300 border border-dark-750 hover:border-gold-500/40"
                 }`}
                 aria-expanded={isTopicsOpen}
                 aria-haspopup="true"
@@ -385,7 +338,7 @@ export const App: React.FC = () => {
                 <Layers className="w-3.5 h-3.5 text-gold-400" />
                 <span className="hidden sm:inline">Topics</span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px] font-semibold">
-                  12 Labs
+                  Labs
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
@@ -396,18 +349,18 @@ export const App: React.FC = () => {
 
               {isTopicsOpen && (
                 <div
-                  className="fixed left-3 right-3 top-[60px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-76px)] overflow-y-auto bg-[#0a0712] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
+                  className="fixed left-3 right-3 top-[60px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-76px)] overflow-y-auto bg-[#21252b] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
                   role="menu"
                 >
                   {/* Menu header */}
-                  <div className="flex items-center justify-between p-4 sm:p-5 pb-3 sm:pb-3.5 border-b border-dark-800 bg-[#0e0a19]">
+                  <div className="flex items-center justify-between p-4 sm:p-5 pb-3 sm:pb-3.5 border-b border-dark-800 bg-[#282c34]">
                     <div className="flex items-center gap-2.5">
                       <div className="w-2 h-2 rounded-full bg-gold-400 animate-pulse"></div>
                       <div>
                         <div className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
                           <span>Featured Topics &amp; Labs</span>
                           <span className="px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px]">
-                            12 Labs Online
+                            Interactive Labs
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-400 font-sans mt-0.5">
@@ -431,7 +384,7 @@ export const App: React.FC = () => {
                   </div>
 
                   {/* 3 Categories Grid */}
-                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 bg-[#0a0712]">
+                  <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 bg-[#21252b]">
                     {FEATURED_TOPIC_GROUPS.map((group) => (
                       <div key={group.groupName} className="flex flex-col gap-2">
                         <div className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-400 px-1 flex items-center justify-between">
@@ -452,15 +405,15 @@ export const App: React.FC = () => {
                                 }}
                                 className={`group p-2.5 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
                                   isActive
-                                    ? "bg-[#1d1630] border-gold-500/70 shadow-md shadow-black"
-                                    : "bg-[#130f1e] hover:bg-[#1a1428] border-dark-800 hover:border-dark-700"
+                                    ? "bg-[#353b45] border-gold-500/70 shadow-md shadow-black"
+                                    : "bg-[#282c34] hover:bg-[#353b45] border-dark-800 hover:border-dark-700"
                                 }`}
                               >
                                 <div
                                   className={`p-1.5 rounded-lg border shrink-0 mt-0.5 transition-colors ${
                                     isActive
-                                      ? "bg-[#271d42] border-gold-500/50 text-gold-300"
-                                      : "bg-[#0a0712] border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/40"
+                                      ? "bg-[#434955] border-gold-500/50 text-gold-300"
+                                      : "bg-[#21252b] border-dark-750 text-slate-400 group-hover:text-gold-300 group-hover:border-gold-500/40"
                                   }`}
                                 >
                                   <IconComponent className="w-3.5 h-3.5" />
@@ -495,7 +448,7 @@ export const App: React.FC = () => {
                   </div>
 
                   {/* Footer link to full index */}
-                  <div className="p-3.5 sm:px-5 border-t border-dark-800 bg-[#0e0a19] flex items-center justify-between text-xs font-mono text-slate-400">
+                  <div className="p-3.5 sm:px-5 border-t border-dark-800 bg-[#282c34] flex items-center justify-between text-xs font-mono text-slate-400">
                     <span className="text-[11px]">{orderedSectionIds.length} Chapters across 6 modules</span>
                     <button
                       type="button"
@@ -531,7 +484,7 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex-1 flex max-w-[1440px] w-full mx-auto relative">
+      <div className="wiki-layout flex-1 flex w-full mx-auto relative">
         {/* Mobile menu backdrop */}
         {isMobileMenuOpen && (
           <div
@@ -540,208 +493,18 @@ export const App: React.FC = () => {
             aria-hidden="true"
           />
         )}
-        <aside
-          className={`fixed lg:sticky top-14 z-30 w-64 shrink-0 h-[calc(100vh-3.5rem)] bg-[#09070f] border-r border-dark-800 flex flex-col transition-transform duration-200 ${
-            isMobileMenuOpen
-              ? "translate-x-0"
-              : "-translate-x-full lg:translate-x-0"
-          }`}
-        >
-          <div className="p-2.5 border-b border-dark-800 bg-[#09070f] space-y-1.5">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`Filter ${orderedSectionIds.length} chapters, files...`}
-                className="w-full pl-8 pr-7 py-1 rounded-md bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200"
-                  title="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+        <ChapterNavigation
+          isMobileMenuOpen={isMobileMenuOpen}
+          chapterCount={orderedSectionIds.length}
+          sectionById={sectionById}
+          activeSection={activeSection}
+          activeHash={activeHash}
+          activeHeadings={activeHeadings}
+          selectChapter={selectChapter}
+          scrollToAnchor={scrollToAnchor}
+        />
 
-            <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 px-0.5">
-              <span className="uppercase tracking-wider font-semibold flex items-center gap-1.5">
-                <ListTree className="w-3 h-3 text-gold-400" />
-                Manual Contents
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setAllGroups(true)}
-                  className="hover:text-gold-300 flex items-center gap-0.5 transition-colors"
-                  title="Expand all sections"
-                >
-                  <ChevronsUpDown className="w-3 h-3" />
-                  <span>All</span>
-                </button>
-                <span className="text-dark-700">|</span>
-                <button
-                  onClick={() => setAllGroups(false)}
-                  className="hover:text-gold-300 flex items-center gap-0.5 transition-colors"
-                  title="Collapse all sections"
-                >
-                  <ChevronsDownUp className="w-3 h-3" />
-                  <span>Fold</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-            {filteredTree.map((group) => {
-              const Icon = group.icon;
-              const isOpen =
-                searchQuery.trim().length > 0 || !!expandedGroups[group.key];
-              const hasActiveChild = group.items.some(
-                (i) => i.id === activeSection.id,
-              );
-
-              return (
-                <div
-                  key={group.key}
-                  className="rounded-lg border border-dark-800/80 bg-dark-900/30 overflow-hidden"
-                >
-                  <button
-                    onClick={() => toggleGroup(group.key)}
-                    className={`w-full px-2 py-1.5 flex items-center justify-between gap-1.5 text-left transition-colors ${
-                      hasActiveChild
-                        ? "bg-dark-850/90 text-slate-100"
-                        : "hover:bg-dark-900/80 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Icon className={`w-3.5 h-3.5 shrink-0 ${group.color}`} />
-                      <span className="text-[11.5px] font-display font-bold tracking-tight truncate">
-                        {group.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span
-                        className={`text-[9px] font-mono px-1 py-0.2 rounded border ${group.badgeColor}`}
-                      >
-                        {group.items.length}
-                      </span>
-                      {isOpen ? (
-                        <ChevronDown className="w-3 h-3 text-slate-400" />
-                      ) : (
-                        <ChevronRight className="w-3 h-3 text-slate-500" />
-                      )}
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="px-1 pb-1 pt-0.5 space-y-0.5 border-t border-dark-850/80">
-                      {group.items.map((item) => {
-                        const sec = sectionById.get(item.id);
-                        if (!sec) return null;
-                        const isActive = sec.id === activeSection.id;
-
-                        return (
-                          <div key={item.id}>
-                            <a
-                              href={`/${item.id}`}
-                              onClick={(e) => selectChapter(item.id, e)}
-                              className={`w-full text-left px-2 py-1 rounded-md text-[11.5px] leading-snug transition-all flex items-center justify-between gap-1.5 ${
-                                isActive
-                                  ? "bg-gold-500/15 text-gold-300 font-semibold border border-gold-500/40 shadow-sm"
-                                  : "text-slate-400 hover:text-slate-100 hover:bg-dark-850/60 border border-transparent"
-                              }`}
-                            >
-                              <span className="truncate">
-                                {item.shortTitle}
-                              </span>
-                              {sec.interactiveComponent && (
-                                <span
-                                  className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0"
-                                  title="Includes Interactive Simulator"
-                                >
-                                  Lab
-                                </span>
-                              )}
-                            </a>
-
-                            {isActive && activeHeadings.length > 0 && (
-                              <div className="ml-2.5 mt-0.5 mb-1 pl-1.5 border-l border-gold-500/30 space-y-0.5">
-                                {activeHeadings.map((h) => (
-                                  <a
-                                    key={h.slug}
-                                    href={`/${activeSection.id}#${h.slug}`}
-                                    onClick={(e) => scrollToAnchor(h.slug, e)}
-                                    className={`w-full text-left py-0.5 px-1.5 rounded text-[10.5px] hover:text-gold-300 hover:bg-dark-850 transition-colors block truncate ${
-                                      activeHash === h.slug
-                                        ? "text-gold-300 bg-dark-850/80 font-semibold"
-                                        : h.level === 4
-                                          ? "pl-2 text-slate-400 font-mono text-[10px]"
-                                          : "text-slate-300 font-medium"
-                                    }`}
-                                    title={h.text}
-                                  >
-                                    {h.text}
-                                  </a>
-                                ))}
-                                {sec.interactiveComponent && (
-                                  <a
-                                    href={`/${activeSection.id}#interactive-lab-anchor`}
-                                    onClick={(e) =>
-                                      scrollToAnchor(
-                                        "interactive-lab-anchor",
-                                        e,
-                                      )
-                                    }
-                                    className="w-full text-left py-0.5 px-1.5 rounded text-[10.5px] font-mono text-emerald-300 hover:bg-dark-850 flex items-center gap-1 truncate"
-                                  >
-                                    <Sparkles className="w-2.5 h-2.5 shrink-0" />
-                                    <span className="truncate">
-                                      Simulator
-                                    </span>
-                                  </a>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </nav>
-
-          <div className="p-2 border-t border-dark-800 bg-[#09070f] text-[9.5px] font-mono text-slate-400">
-            <div className="flex items-center justify-between text-gold-400 font-semibold mb-0.5">
-              <span className="flex items-center gap-1.5">
-                <Terminal className="w-3 h-3" />
-                <span>Engine Invariants</span>
-              </span>
-              <span className="text-slate-500">60 Hz DT</span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-1.5 gap-y-0.5">
-              <div>
-                Pool: <span className="text-slate-200">32 Slabs</span>
-              </div>
-              <div>
-                Grid: <span className="text-emerald-400">CSR Prefix</span>
-              </div>
-              <div>
-                Sort: <span className="text-sky-400">12b Radix×3</span>
-              </div>
-              <div>
-                Audio: <span className="text-amber-300">32-Voice LRU</span>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6">
+        <main id="main-content" tabIndex={-1} className="wiki-main flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6">
           <div className="max-w-[840px] xl:max-w-[880px] mx-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -791,10 +554,10 @@ export const App: React.FC = () => {
             </div>
 
             <div className="border-b border-dark-800 pb-5 mb-6">
-              <h1 className="text-2xl sm:text-[28px] leading-tight font-display font-black text-slate-100 tracking-wide mb-2.5">
+              <h1 className="text-2xl sm:text-[26px] leading-tight font-display font-bold text-slate-100 tracking-tight mb-2">
                 {activeSection.title}
               </h1>
-              <p className="text-[15px] text-slate-300/90 leading-relaxed mb-4">
+              <p className="text-[14.5px] text-slate-300 leading-relaxed mb-3.5">
                 {activeSection.summary}
               </p>
 
@@ -892,7 +655,7 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <aside className="hidden xl:block sticky top-14 w-56 shrink-0 h-[calc(100vh-3.5rem)] border-l border-dark-800 bg-[#09070f] p-3.5 overflow-y-auto">
+        <aside className="wiki-toc hidden xl:block sticky top-14 w-56 shrink-0 h-[calc(100vh-3.5rem)] p-3.5 overflow-y-auto">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-2.5 flex items-center gap-1.5">
             <Hash className="w-3.5 h-3.5 text-gold-400" />
             <span>On This Page</span>
@@ -944,7 +707,7 @@ export const App: React.FC = () => {
         </aside>
       </div>
 
-      <footer className="border-t border-dark-800 py-5 px-4 text-center text-xs text-slate-500 font-mono bg-[#09070f]">
+      <footer className="wiki-footer py-5 px-4 text-center text-xs text-slate-500 font-mono">
         <p>
           Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT •
           SDL3

@@ -864,7 +864,7 @@ export const GoalAiConcurrencyLab: React.FC = () => {
               <div className="text-[10px] text-slate-500 mt-1">
                 {concurrencyStats.fastPath
                   ? "N <= 256: Fast-Path Inline (0 locks!)"
-                  : `${concurrencyStats.totalChunks} chunks of 256 via next.fetch_add(256)`}
+                  : `${concurrencyStats.totalChunks} chunks of 256 via compare-exchange on next`}
               </div>
             </div>
 
@@ -913,7 +913,7 @@ export const GoalAiConcurrencyLab: React.FC = () => {
             <div className="text-xs font-mono text-slate-400 flex items-center justify-between">
               <span>
                 Atomic Stride Distribution (
-                <code>begin = next.fetch_add(256)</code>)
+                <code>compare_exchange(next, next + 256)</code>)
               </span>
               <span className="text-[11px] text-slate-500">
                 Grain = 256 Enemies / Chunk
