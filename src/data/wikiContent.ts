@@ -5633,4 +5633,64 @@ flowchart LR
 `,
     }],
   },
+  {
+    id: "crafting-workbench",
+    title: "Crafting, Salvage & Schematics",
+    category: "gameplay",
+    summary: "Workbench formulas, material costs, item eligibility, and how salvage and imbue work.",
+    sourceFiles: [
+      "src/item/craft/Recipes.cpp",
+      "src/item/craft/Recipes.hpp",
+      "src/item/craft/Resources.cpp",
+      "src/menu/CraftMenu.cpp",
+      "src/test/CraftTest.cpp",
+    ],
+    content: `
+### Using the workbench
+
+Choose a formula, select the required items from the bag, and activate the formula. Choosing another formula clears the selection. For Imbue, the restart control (R by default) cycles learned schematics. The menu reports missing materials, incompatible selections, and insufficient bits before it consumes anything. Combine requires three distinct items in the same gear slot; the other item formulas require one. The Hoe requires no item and can only be made once.
+
+The costs below are per use. Shards are crystal shards and runes here are **rune stones**, a crafting material, not the socketable runes used in rune words.
+
+| Formula | Cost | Input and result |
+| --- | --- | --- |
+| Reroll | 3 shards | Magic, rare, or crafted item with at least one affix: reroll its weakest affix within that affix's existing tier. |
+| Reforge | 5 shards, 2 ore | Rare item without a night curse: roll a new set of rare affixes while retaining its name. |
+| Upgrade | 6 ore, 1 rune stone | Any item below the highest base tier: raise its tier one step, from Worn to Fine or Fine to Masterwork. |
+| Combine | None | Three magic items of the same slot become one rare. Its base and tier come from the first selection; its item level is the lowest of the three. |
+| Cleanse | 1 shard, 1 herb | Remove a night curse. If there are affixes, the one with the highest tier index loses up to two tier steps and is rerolled. |
+| Tinker | 4 ore | Add one random affix to an eligible item with room. |
+| Salvage | None | Destroy one item for bits and possibly learn an unknown affix. |
+| Imbue | Bits | Add a compatible learned affix to an eligible item with room. |
+| Hoe | 3 wood, 2 stone | Make the hoe used to till grass and dirt for farming. |
+
+Eligibility differs by formula: Upgrade does not require a plain item, while Reforge excludes night-cursed rares. Tinker and Imbue reject unique and night-cursed items and require fewer than five affixes before adding one. Imbue also checks the affix's compatibility and the three-prefix or three-suffix limit. Adding an affix turns normal or superior gear magic; magic gear becomes rare once it has more than two affixes.
+
+### Crafted gear
+
+These eight formulas take one **normal or superior** item in the listed slot. The result is crafted gear on the same base, with the two named fixed affixes and a roll for one to three additional affixes, subject to compatibility and prefix/suffix limits. Existing affixes are cleared first. The implementation makes up to 16 attempts to add the random affixes, so the requested count is not an unconditional guarantee.
+
+| Formula | Slot | Materials | Fixed affixes |
+| --- | --- | --- | --- |
+| Bloodfang | Weapon | 2 shards, 2 ore, 2 bones | damage, leech |
+| Stormbrand | Weapon | 3 shards, 2 ore, 1 rune stone | shock, haste |
+| Ember Lamp | Off-hand | 3 shards, 1 rune stone, 2 herbs | burn, area |
+| Sage's Ward | Off-hand | 4 ore, 1 rune stone, 1 herb | armour, wisdom |
+| Frostmantle | Armour | 2 shards, 2 ore, 2 hides | armour, resist chill |
+| Thornhide | Armour | 2 ore, 1 herb, 3 hides | thorns, life |
+| Blood Charm | Charm | 1 shard, 1 rune stone, 1 herb, 2 bones | life, leech |
+| Fortune Charm | Charm | 4 shards, 2 rune stones | fortune, gleaming |
+
+### Bits and learning
+
+For normal through crafted rarities, salvage yields **1 + base tier index + affix count + rarity bonus** bits. Worn, Fine and Masterwork have tier indices 0, 1 and 2. The rarity bonuses are normal 0, superior 1, magic 1, rare 3, unique 6 and crafted 3. The Third Hand doubles the yield and guarantees learning if the item has an unknown affix. Otherwise, when unknown affixes are present, the chances are 0% for normal or superior, 50% for magic, 65% for rare, 100% for unique and 80% for crafted. At most one unknown affix is learned, chosen from those on the item; salvage still destroys the item when nothing is learned.
+
+Founder tablets and friendly families can also teach schematics. Imbue selects the best tier of the chosen affix allowed by the item's level; its full price is **4 + 3 × tier index** bits, where the first affix tier has index 0. Near a built Anvil or rune forge, the price is halved and rounded up. Imbuing through the menu adds 3 Synod scrutiny, doubled for a Synod member when that system is active. Campaign saves retain bits and schematics.
+
+### Implementation and checks
+
+\`missing()\` validates a formula before \`craft()\` performs it. Single-item formulas replace the bag entry; Combine removes its three inputs and appends the result. Successful actions can award campaign experience, with separate craft, salvage and tinker sources. \`CraftTest.cpp\` exercises the basic formulas, slot restrictions, fixed affixes, salvage, imbue, scrutiny and schematic save round-trip. The formula table in \`Recipes.cpp\` is the authoritative source for current costs and eligibility.
+`,
+  },
+
 ];
