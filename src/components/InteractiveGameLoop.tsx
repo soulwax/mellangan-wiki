@@ -19,7 +19,7 @@ const STAGES: Stage[] = [
     profSlot: "PROF_HOUSEKEEP (Slot 3)",
     name: "Housekeeping & CSR Grid",
     subsystem: "Level::tick() / Level::buildGrid()",
-    desc: "Advances night.tick(), spawner.tick(), explore(), hunt(), climate(), weather(), and rebuilds the Compressed Sparse Row (CSR) prefix-sum spatial grid (cellStart[], cells[]) for O(1) neighbor queries. Flushes dead entities and emplaces pending Owned entities at frame end.",
+    desc: "Advances night.tick(), spawner.tick(), explore(), hunt(), climate(), weather(), and rebuilds the Compressed Sparse Row (CSR) prefix-sum spatial grid (cellStart[], cells[]) for O(1) neighbor queries. A second housekeeping interval flushes deferred entity changes after particle processing.",
     codeTrace:
       "night.tick() -> spawner.tick() -> buildGrid() -> events.tick(*this) ... flush()",
     timeCost: "0.28 ms",
@@ -31,7 +31,7 @@ const STAGES: Stage[] = [
     profSlot: "PROF_THINK (Slot 0)",
     name: "4-Barrier Parallel AI",
     subsystem: "Workers::shared().run(n, 256, ...)",
-    desc: "Dispatches 4 sequential lock-free parallel fork-join passes (grain=256) across all worker threads: Barrier 1: think() evaluates Sense & GoalQueue. Barrier 2: move() integrates velocity & Level::collide. Barrier 3: push() reads CSR grid to compute xPush/yPush without mutating positions. Barrier 4: settle() commits xPush/yPush.",
+    desc: "Dispatches 4 ordered parallel fork-join passes (grain=256) across all worker threads: Barrier 1: think() evaluates Sense & GoalQueue. Barrier 2: move() integrates velocity & Level::collide. Barrier 3: push() reads CSR grid to compute xPush/yPush without mutating positions. Barrier 4: settle() commits xPush/yPush.",
     codeTrace:
       "workers.run(think) -> workers.run(move) -> workers.run(push) -> workers.run(settle)",
     timeCost: "0.82 ms",
@@ -57,7 +57,7 @@ const STAGES: Stage[] = [
     subsystem: "Level::particles[] (In-Place Sweep)",
     desc: "Ticks all active visual effects (Arc, Shockwave, Spark, Drift, BloodDebris, TextParticle) and performs an in-place two-pointer compaction (particles[alive++] = std::move(p)) to reclaim expired particles in a single linear pass.",
     codeTrace:
-      "for (auto &p : particles) if (!p->removed) particles[alive++] = std::move(p);",
+      "tick live particles -> compact survivors -> resize",
     timeCost: "0.31 ms",
     ms: 0.31,
     color: "#ec4899",
@@ -67,7 +67,7 @@ const STAGES: Stage[] = [
     profSlot: "PROF_LIGHT (Slot 4)",
     name: "Scatter & LightField",
     subsystem: "Level::renderLight(Screen &s)",
-    desc: "Populates bit-packed surfaces[] (water/ice, 2-bit height, ramp flag) and visible props[], then renders additive light glows into the offscreen lightmap texture while registering up to 16 LightField shadow casters with dual-octave Perlin flicker.",
+    desc: "Populates bit-packed surfaces[] (water/ice, 2-bit height, ramp flag) and visible props[], then renders additive light glows into the offscreen lightmap texture while registering up to 8 LightField shadow casters with dual-octave Perlin flicker.",
     codeTrace:
       "scatter(s) -> lights.clear() -> player->drawLight(s) -> night.renderLight(s)",
     timeCost: "0.38 ms",
@@ -117,7 +117,6 @@ const TOTAL_ACTIVE_MS = STAGES.reduce((acc, s) => acc + s.ms, 0);
 export const InteractiveGameLoop: React.FC = () => {
   const [currentStageIndex, setCurrentStageIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [fps, setFps] = useState<number>(60);
   const [frameCounter, setFrameCounter] = useState<number>(4096);
 
   useEffect(() => {
@@ -127,7 +126,6 @@ export const InteractiveGameLoop: React.FC = () => {
         const next = (prev + 1) % STAGES.length;
         if (next === 0) {
           setFrameCounter((f) => f + 1);
-          setFps(Math.floor(59 + Math.random() * 2));
         }
         return next;
       });
@@ -143,7 +141,7 @@ export const InteractiveGameLoop: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-mono font-semibold text-slate-200">
-            8-Slot Hardware Telemetry (<code className="text-gold-300">src/Prof.c</code>)
+            Illustrative Profiler Stages (<code className="text-gold-300">src/Prof.c</code>)
           </span>
         </div>
 
@@ -153,7 +151,7 @@ export const InteractiveGameLoop: React.FC = () => {
             <span>#{frameCounter}</span>
           </div>
           <div className="px-2 py-1 rounded bg-dark-900 border border-dark-750 text-emerald-400">
-            {fps} Hz ({TOTAL_ACTIVE_MS.toFixed(2)} / 16.67ms)
+            Example: {TOTAL_ACTIVE_MS.toFixed(2)} ms active
           </div>
           <button
             onClick={() => setIsPlaying(!isPlaying)}
@@ -182,8 +180,8 @@ export const InteractiveGameLoop: React.FC = () => {
       <div className="p-4 sm:p-5 space-y-4">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-            <span>Proportional CPU Frame Breakdown (4.01 ms Active Work)</span>
-            <span className="text-emerald-400">75.9% Frame Headroom</span>
+            <span>Illustrative CPU breakdown (not live measurements)</span>
+            <span className="text-emerald-400">Example timings</span>
           </div>
           <div className="h-3 w-full rounded-lg bg-dark-950 border border-dark-800 overflow-hidden flex p-0.5 gap-0.5">
             {STAGES.map((stage, idx) => {

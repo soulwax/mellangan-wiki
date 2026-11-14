@@ -19,6 +19,7 @@ export interface WikiSection {
   mermaidChart?: MermaidDiagramDef;
   mermaidCharts?: MermaidDiagramDef[];
   interactiveComponent?:
+    | "farming"
     | "gameloop"
     | "radix"
     | "slab"
@@ -60,6 +61,20 @@ export const WIKI_SECTIONS: WikiSection[] = [
       "src/meta/Settings.hpp",
     ],
     content: `
+### Follow one frame
+
+The outer loop in \`Game::run()\` connects real time to the fixed-step simulation. Each iteration measures elapsed wall time, adds it to an accumulator capped at 0.25 seconds, and polls SDL events into the input state. While at least \`DT = 1/60\` second remains, it calls \`Game::tick()\` and subtracts one step. It then renders once and presents the frame. A frame can therefore contain **zero, one, or several ticks**; a long stall beyond the accumulator cap is discarded rather than simulated indefinitely. Quit and fatal renderer status end the loop.
+
+For example, starting with an empty accumulator, a 25 ms frame runs one approximately 16.67 ms tick and leaves about 8.33 ms for the next frame. The remainder is also used for rendering interpolation when measured FPS exceeds 70; at lower FPS the renderer uses the current state. Frame timing and profiler values depend on the machine and workload.
+
+### What a tick does
+
+1. \`Game::tick()\` updates input, audio, hotkeys and camera-related state. If a menu is active it ticks the menu. Otherwise routing or hit-stop can prevent normal play; only the normal play path calls \`Game::play()\`. The world is still rendered when normal play is paused.
+2. \`Game::play()\` handles player actions, campaign choices and travel, then calls \`Level::tick()\`. Afterwards it handles campaign bookkeeping and pending shrine, boon and level-up menus.
+3. \`Level::tick()\` advances level time and housekeeping, builds the spatial grid, and gathers enemies. Four ordered worker passes think, move, compute crowd pushes and settle them; combat and experience bookkeeping also run between the first and second passes.
+4. The main thread ticks live owned entities and resolves interactions, then ticks and compacts particles. Finally \`flush()\` processes deferred entity changes. Rendering starts only after all fixed ticks for that outer iteration finish.
+5. \`Game::render()\` sets up the camera and temporary interpolation, renders lighting, world and GUI, then restores the simulation positions. \`vk2dRendererPresent()\` presents the frame. The profiler diagram below expands the level and rendering stages; its interactive timings are illustrative, not measurements from your game.
+
 ### Architectural Paradigm: Pragmatic "C with Classes"
 
 **Mellangan** is engineered in **C++20** and **C11** around a strict systems-programming ethos: data locality, predictable cache residency, and deterministic 60 Hz simulation (\`DT = 1.0 / 60.0\`). Rather than deep object-oriented wrapper hierarchies or heavy runtime polymorphism, the engine combines flat data structures, bitwise state packing, and lightweight virtual dispatch at the entity root (\`SpriteObject\`).
@@ -143,7 +158,7 @@ flowchart TD
     end
 
     subgraph Render_Pipeline ["LevelRender.cpp & Screen.cpp"]
-        Light["LightField.cpp<br/>(64 Shadow Casters & Perlin Flicker)"]:::gfx
+        Light["LightField.cpp<br/>(8 Shadow Casters & Perlin Flicker)"]:::gfx
         Radix["3-Pass 12-Bit Radix Sort<br/>(64-Bit Key: Layer | orderedBits(y) | Idx)"]:::gfx
         Reflect["Planar Water Mirror & Submerge<br/>(s.mirror / s.submerge)"]:::gfx
     end
@@ -172,13 +187,15 @@ sequenceDiagram
     participant Render as LevelRender.cpp
     participant VK2D as Vulkan2D GPU
 
-    Main->>Level: level.tick() [DT = 1/60s]
+    Note over Main: Poll input; run zero or more fixed ticks per frame
+    Main->>Level: Game::play() calls level.tick() when play is active
     Note over Level: PROF_HOUSEKEEP (Begin)
     Level->>Level: night.tick(), spawner.tick(), explore(), hunt()
     Level->>Level: buildGrid() -> CSR Prefix-Sum cellStart[] & cells[]
     Note over Level: PROF_HOUSEKEEP (End) / PROF_THINK (Begin)
     Level->>Workers: Barrier 1: workers.run(n, 256, Enemy::think)
     Workers-->>Level: Sense & GoalQueue -> xWant, yWant
+    Level->>Level: Combat and experience bookkeeping
     Level->>Workers: Barrier 2: workers.run(n, 256, Enemy::move)
     Workers-->>Level: Velocity integration & Level::collide
     Level->>Workers: Barrier 3: workers.run(n, 256, Enemy::push)
@@ -187,11 +204,13 @@ sequenceDiagram
     Workers-->>Level: Commit xPush, yPush & re-collide
     Note over Level: PROF_THINK (End) / PROF_ENTITIES & PARTICLES
     Level->>Level: Tick Owned Entities, Compact Particles, flush() Dead/Pending
+    Note over Main: After all ticks, render once
     Main->>Render: renderLight(s) [PROF_LIGHT]
     Render->>VK2D: scatter() Surfaces/Props + Offscreen Lightmap Glows
     Main->>Render: render(s) [PROF_FLOOR -> PROF_SORT -> PROF_DRAW]
     Render->>Render: renderFloor(s) + 64-Bit Key Pack + 3-Pass LSD Radix Sort
     Render->>VK2D: Planar reflect(s) -> LightField Shadows -> Sorted Sprites
+    Main->>VK2D: GUI, then present
 `,
       },
     ],
@@ -293,7 +312,7 @@ If spatial displacement exceeds 3 tiles ($48\\text{ px}$), such as a flash step,
 
 #### 5. Planar Water Reflections, Submerge Clipping & \`LightField\` Shadows
 * **Planar Reflections (\`Level::reflect\`):** Before drawing Layer 1, if \`waterInView\` or \`sky.flood() > 0\`, entities standing adjacent to wet tiles are rendered upside-down via \`s.mirror(std::floor(e->y), tint)\`, capped at 48 crowd reflections to bound fillrate.
-* **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 64 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
+* **Layer-Transition Shadow Flush:** During the main draw loop over \`keys\`, the moment the first key with \`(k >> 56) >= 1\` is encountered, all Layer 1 occluders project radial contact shadows from up to 8 active point light casters (\`lights.cast(s, e->x, e->y, width, height)\`) before any Layer 1 sprite body is drawn.
 * **Submerged Swimmer Clipping:** Entities wading in water (\`swimming(e)\`) replace their ground shadow with an animated water ripple (\`atlas::wx::ripple\`) and clip their lower torso via \`s.submerge(std::floor(e->y) - 5)\`.
 `,
 
@@ -342,7 +361,7 @@ flowchart TD
 
     Torch["Torches, Braziers, Shrine Flames & Projectiles"]:::light
     Flicker["Dual-Octave Perlin Flicker<br/>1 + 0.10*perlin(3.1t) + 0.05*perlin(11.7t)"]:::math
-    Caster["LightField::add(x, y, reach, strength)<br/>Up to 64 Active Casters"]:::light
+    Caster["LightField::add(x, y, reach, strength)<br/>Up to 8 Active Casters"]:::light
     Occluder["SpriteObject::occlusion(width) -> height"]:::math
     Project["LightField::cast(Screen&, x, y, w, h)<br/>d = hypot(x - cx, y - cy), angle = atan2(yd, xd)"]:::math
     ShadowSprite["Render Oriented atlas::Shadow<br/>len = height * clamp(d/48, 0.35, 2.2)<br/>alpha = clamp(1.5 * strength * (1 - d/reach), 0, 1)"]:::out
@@ -5691,6 +5710,128 @@ Founder tablets and friendly families can also teach schematics. Imbue selects t
 
 \`missing()\` validates a formula before \`craft()\` performs it. Single-item formulas replace the bag entry; Combine removes its three inputs and appends the result. Successful actions can award campaign experience, with separate craft, salvage and tinker sources. \`CraftTest.cpp\` exercises the basic formulas, slot restrictions, fixed affixes, salvage, imbue, scrutiny and schematic save round-trip. The formula table in \`Recipes.cpp\` is the authoritative source for current costs and eligibility.
 `,
+  },
+
+  {
+    id: "campaign-farming",
+    title: "Campaign Farming: Seed to Harvest",
+    category: "gameplay",
+    summary: "How to plant and harvest crops, find seeds, and understand weather and grove bonuses.",
+    sourceFiles: ["src/campaign/Farm.cpp", "src/campaign/Farm.hpp", "src/campaign/Harvest.cpp", "src/test/FarmTest.cpp"],
+    content: `
+### Start a field
+
+Craft a Hoe at a workbench for 3 wood and 2 stone. On the campaign surface, aim at eligible ground and use the gather action to till it. Water, ramps, existing plots, structures, placed objects and obstructing or harvestable props can prevent tilling. Dirt and a defined set of fertile biomes qualify; not every surface tile is suitable. The prompt indicates whether the targeted tile can be tilled.
+
+Use the gather action on bare tilled soil to plant an available seed. The game cycles through available seed types after each planting; the prompt names the next seed. A growing crop cannot be harvested early. Gather it once ripe, and the plot remains tilled for another planting. Each till, planting and harvest can grant campaign experience, subject to the normal repeat rules.
+
+| Crop | Base time | Base produce per harvest |
+| --- | ---: | ---: |
+| Turnip | 2 days | 3 |
+| Barley | 2 days | 3 |
+| Gourd | 3 days | 2 |
+| Firepepper | 3 days | 2 |
+
+Growth reaches the growing stage halfway through its required time and becomes ripe at the full duration. Each harvest has a 50% deterministic seed-return roll based on the plot and sowing time. Foraging herbs or bushes can also yield seeds; a Liked Rootsworn camp fire can give two seeds once per day.
+
+### Weather, boons and groves
+
+Rain and retained water add growth bonus while plots are within 1,200 pixels of the player on the surface; ordinary elapsed-time growth still counts for distant plots. Wet growth adds one extra day of progress per day wet, and water remains for up to a quarter day after rain. Seedkeeper gives a crop one day of bonus when planted. A qualifying settled Rootsworn camp within 320 pixels doubles the base produce, and Harvest Home adds one more produce after that multiplication. Grove harvests also grant standing. These bonuses do not change the seed-return roll.
+
+Plots and their sowing, growth bonus and water state are part of campaign edits and are saved. \`FarmTest.cpp\` exercises planting, growth, rain, saving, grove yield and experience; \`Farm.cpp\` is the authority for exact eligibility and distance checks.
+`,
+    interactiveComponent: "farming",
+    mermaidCharts: [{ title: "A plot through the seasons", chart: `
+flowchart LR
+    Ground[Eligible ground] -->|Hoe and gather| Soil[Tilled soil]
+    Soil -->|Plant one seed| Sprout[Sprout]
+    Sprout -->|Half required growth| Growing[Growing]
+    Growing -->|Full required growth| Ripe[Ripe]
+    Ripe -->|Gather produce| Soil
+` }],
+  },
+  {
+    id: "gems-and-sockets",
+    title: "Gems, Sockets & the Jeweller",
+    category: "gameplay",
+    summary: "Gem grades, slot-dependent bonuses, socket limits, and jeweller services.",
+    sourceFiles: ["src/item/loot/Jewel.cpp", "src/item/loot/Jewel.hpp", "src/menu/JewelMenu.cpp", "src/test/JewelTest.cpp"],
+    content: `
+### Gems and equipment
+
+Gems come in seven kinds and five grades: Rough, Cut, Clear, Flawless and Radiant. Their bonus depends on the equipment slot. Weapons and off-hands share one effect column, armour uses another, and charms use a third. Higher grades multiply the base effect by 1, 2, 3.5, 5.5 and 8 respectively; the sum of socketed contributions to a stat on an item is capped.
+
+| Gem | Weapon or off-hand | Armour | Charm |
+| --- | --- | --- | --- |
+| Amber | Shock | Poison resistance | Gold find |
+| Jade | Poison | Regeneration | Magic find |
+| Garnet | Burn | Burn resistance | Life |
+| Sapphire | Chill | Chill resistance | Haste |
+| Opal | Critical chance | Speed | Kindling |
+| Onyx | Damage | Armour | Leech |
+| Moonstone | Night damage | Light | Wisdom |
+
+Weapons and armour can have up to three sockets, off-hands two and each charm one. Gear may generate with sockets as reach increases, or the town jeweller can add them. Gems can be found from kills, ore and caches; reach gates higher grades at 1, 6, 12, 18 and 24 respectively. Radiant drops have a separate rarity roll once eligible.
+
+### Services
+
+At the Jeweller's Bench or town jeweller, insert a carried gem into the first empty socket. Three gems of the same grade can be combined into one gem of the next grade, with the output kind selected in the menu. Inputs may be different kinds; the implementation removes them one at a time from the most plentiful kind at that grade. Radiant gems cannot be combined further. Combining is free at the bench; the town fee is 50, 100, 150 or 200 gold according to the input grade.
+
+The town jeweller also removes gems for 100 gold times their grade number, returning them to stock, and adds sockets for 300, 900 or 2,700 gold for the first, second or third socket. Slot limits still apply. Rune insertion, removal and completed rune words have additional rules described on the Runes page. Closing a changed jeweller menu saves the campaign.
+`,
+    mermaidCharts: [{ title: "The two jeweller services", chart: `
+flowchart LR
+    Gems[Three same-grade gems] --> Bench[Bench: combine free]
+    Gems --> Town[Town jeweller: combine for gold]
+    Bench --> Higher[Choose a higher-grade gem]
+    Town --> Higher
+    Town --> Services[Add sockets or remove gems for gold]
+    Stock[Carried gem] --> Insert[Fill first empty socket]
+` }],
+  },
+  {
+    id: "runes-and-words",
+    title: "Runes & Rune Words",
+    category: "gameplay",
+    summary: "Ordered rune recipes, discovery, equipment restrictions, and the cost of breaking a word.",
+    sourceFiles: ["src/item/loot/Rune.cpp", "src/item/loot/Rune.hpp", "src/item/loot/RuneWord.cpp", "src/menu/JewelMenu.cpp", "src/test/RuneTest.cpp"],
+    content: `
+### Making a word
+
+Socketable runes are distinct from the rune stones used in workbench recipes. Runes can be found through kills and certain first-time discoveries, including shrines, founder tablets and special hearts. Each rune has its own stat bonus. At a jeweller, runes fill the first empty socket, so insert them in the order shown below.
+
+A word activates only when the item has **exactly** the listed socket count, the correct gear slot and the full ordered rune sequence. Unique items cannot form words. Combining partial hints can reveal a word in the campaign Codex; successfully making a word also teaches it. The individual rune bonuses still contribute to the item's socket stats.
+
+| Word | Slot | Runes in order | Effect described by the game |
+| --- | --- | --- | --- |
+| Ashen Tithe | Weapon | Keth, Wenn | Kills near a lit shrine feed light; 25 kills near a cold shrine rekindle it. |
+| Furrowsong | Armour | Orra, Keth | Moving over open ground periodically tills and sows a faster-growing seed. |
+| Toll of Roads | Off-hand | Dunn, Orra | Camps treat you one standing band higher; sales grant Coinroad standing, up to 40 daily. |
+| Matterwake | Weapon | Brae, Mirr | Hits leave their payload's matter under the foe for 3 seconds. |
+| Unwhitened | Off-hand | Mirr, Dunn | Lime does not touch you; scrutiny falls while no Synod eye is on you. |
+| Kindred Flesh | Armour | Wenn, Brae, Keth | Changeling defects sleep and mutations arrive sooner; Hale implants are stronger and can be swapped anywhere. |
+| Kinward | Armour | Hathe, Orra, Wenn | Nearby allies and followers mend; quickened props last twice as long. |
+| Smithcall | Weapon | Quor, Dunn, Brae | Some kills yield bits; imbue beside a campfire at the Anvil price. |
+| Undertorch | Off-hand | Selv, Mirr | Below ground, gain light, avoid attracting lightdrawn foes and receive earlier tremor warning. |
+| Long Table | Armour | Hathe, Selv, Keth | Meals last three times as long and mend nearby allies and followers. |
+| Laid Spear | Off-hand | Yrn, Quor | Once daily, use 1 by an angry group leader to send the group home. |
+| Quarter Given | Weapon | Aelm, Thask, Yrn | Foes below 10% yield and flee, granting standing without a kill. |
+
+### Removing runes
+
+The town jeweller can return a lone rune for a fee. A completed word locks its runes: breaking it requires a second confirmation, destroys its runes, and returns any gems on the item. The jeweller cannot add sockets to a completed word. This makes the socket count as important as the rune order when planning an item.
+
+\`RuneTest.cpp\` checks matching, insertion, removal and word effects. The table in \`Rune.cpp\` defines current sequences; individual effect implementations live in \`RuneWord.cpp\` and their associated systems.
+`,
+    mermaidCharts: [{ title: "Checking a rune word", chart: `
+flowchart TD
+    Start[Socket runes in order] --> Unique{Unique item?}
+    Unique -->|Yes| No[No rune word]
+    Unique -->|No| Match{Slot, socket count and sequence match?}
+    Match -->|No| No
+    Match -->|Yes| Word[Word activates]
+    Word -->|Town jeweller, confirm twice| Break[Break word and destroy runes]
+` }],
   },
 
 ];

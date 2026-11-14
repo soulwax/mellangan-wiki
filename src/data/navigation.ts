@@ -217,6 +217,9 @@ export const NAV_TREE: NavTreeGroup[] = [
     color: "text-rose-400",
     badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
     items: [
+      { id: "campaign-farming", shortTitle: "Campaign Farming" },
+      { id: "gems-and-sockets", shortTitle: "Gems & Sockets" },
+      { id: "runes-and-words", shortTitle: "Runes & Rune Words" },
       {
         id: "crafting-workbench",
         shortTitle: "Crafting, Salvage & Schematics",
