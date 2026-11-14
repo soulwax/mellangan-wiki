@@ -5834,4 +5834,180 @@ flowchart TD
 ` }],
   },
 
+  {
+    id: "campaign-cookery",
+    title: "Campaign Cookery & Sharing the Fire",
+    category: "gameplay",
+    summary: "Combine ingredients into world-specific meals, season them, and share a hearth with visitors.",
+    sourceFiles: ["src/campaign/Cookery.cpp", "src/campaign/Cookery.hpp", "src/hero/Synergy.hpp", "src/test/ExperienceTest.cpp"],
+    content: `
+### Make a meal
+
+In the campaign, use the cook menu near a campfire to consume two **different** cookable materials. The 12 eligible materials are crystal shard, ore, rune stone, herb, hide, bone, wood, stone, turnip, barley, gourd and firepepper. Their unordered pair determines a trigger and payload for that world's seed, so the same pair can produce a different dish in another world. There are 66 possible pairs. Cooking immediately replaces the current meal effect and awards campaign experience.
+
+An optional third, different material is a spice: it changes the trigger while retaining the pair's payload. A delicacy can also be consumed as garnish, adding a second payload on the same trigger. Neither spice nor garnish needs to be present. The game remembers discovered pairs and spices separately; villagers or visitors may also reveal recipes.
+
+Meals normally last 300 seconds. Cooking near a Smoke Rack doubles that duration; the Long Table rune word can extend it further. A trigger is the condition under which a meal acts, such as being struck, moving or standing still; a payload is what happens when it acts. A meal's effect is therefore conditional, not necessarily a constant stat bonus.
+
+### A guest at the hearth
+
+After cooking, if no guest is already close enough to share the meal, the game can attempt a visit. Visits require night and enabled faction relations; hated families and certain families barred by Synod membership are excluded. Eligible families with better standing are more likely to be chosen. Cook again while the visitor is nearby to share, improve their faction's standing and receive a secret or, if no eligible secret remains, gold. A guest has a limited lifetime.
+
+The code validates ingredient counts and hearth proximity before consuming anything. \`Cookery.cpp\` defines the seed-dependent mapping, sharing and validation; the experience tests exercise a cooking award.
+`,
+    mermaidCharts: [{ title: "From ingredients to a meal", chart: `
+flowchart LR
+    Pair[Two different materials] --> Dish[World seed selects trigger and payload]
+    Spice[Optional third material] --> Trigger[Replace trigger]
+    Dish --> Trigger
+    Trigger --> Meal[Active meal]
+    Garnish[Optional delicacy] --> Meal
+    Meal --> Guest[May attract a night visitor]
+    Guest --> Share[Cook again nearby to share]
+` }],
+  },
+  {
+    id: "campaign-experience",
+    title: "Campaign Experience Beyond Combat",
+    category: "gameplay",
+    summary: "First-time awards, local repetition, recovery and scaling for campaign activities.",
+    sourceFiles: ["src/hero/Experience.cpp", "src/hero/Experience.hpp", "src/level/Level.hpp", "src/test/ExperienceTest.cpp"],
+    content: `
+### Actions can advance a peaceful hero
+
+Campaign experience is granted directly to the hero. Crafting, cooking, tinkering, gathering, mining, farming, gifts and resolving encounters can all award it, alongside combat and quests. The source table also defines first shrine lighting, rekindling, first trades and standing-band awards. These activity awards require automatic XP rules and a living player; they are not a description of every kill or quest reward.
+
+For a table-driven activity, the award is its base value multiplied by the act multiplier, depth multiplier, any first-time multiplier, local repetition factor and supplied units. Act I through V multipliers are 1, 1.7, 2.25, 2.5 and 3.2; surface, cave and deep multipliers are 1, 1.15 and 1.35.
+
+| Activity | Base XP | First-time multiplier | Repeat factor after an award |
+| --- | ---: | ---: | ---: |
+| Craft | 12 | 5 | 0.8 |
+| Cook | 22 | 4 | 0.8 |
+| Tinker | 15 | 3 | 0.8 |
+| Gather | 3 | 1 | 0.8 |
+| Mine | 6 | 1 | 0.8 |
+| Till / plant / harvest | 1 / 2 / 10 | 1 / 3 / 2 | 0.8 |
+| Rekindle | 10 | 1 | 0.5 |
+| Gift / resolve / salvage | 15 / 25 / 4 | 1 | 0.8 |
+
+For example, the first craft of a particular formula on the Act I surface pays 60 XP. An immediate repeat of that formula in the same region pays 12 × 0.8 = 9.6 XP. The first-time marker is keyed by source and activity; repeat fading is additionally tracked by layer and region. A different region can have its own repeat factor, but does not reset the first-time bonus.
+
+The repeat factor recovers linearly at one unit per in-game day, capped at 1. Each qualifying award multiplies its current factor by the source's decay. Some sources, including first shrine lighting, trade and standing bands, are once per key rather than repeatable. First markers and unfinished recovery are saved; older saved keys are migrated. \`ExperienceTest.cpp\` checks first awards, local fading, recovery, save handling and several activity paths.
+`,
+    mermaidCharts: [{ title: "How an activity award is calculated", chart: `
+flowchart LR
+    Action[Activity and key] --> Eligible{Automatic XP and living hero?}
+    Eligible -->|No| Zero[No activity award]
+    Eligible -->|Yes| First[First-time or once-only check]
+    First --> Scale[Base times act, depth, first bonus and local factor]
+    Scale --> Grant[Grant XP]
+    Grant --> Fade[Reduce local factor; recover over time]
+` }],
+  },
+  {
+    id: "campaign-standing",
+    title: "Campaign Standing & Faction Relations",
+    category: "gameplay",
+    summary: "Starting reputation, disposition bands, and how faction politics can spread standing changes.",
+    sourceFiles: ["src/campaign/Standing.cpp", "src/campaign/Politics.cpp", "src/level/Level.hpp", "src/test/PoliticsTest.cpp"],
+    content: `
+### Your reputation with a faction
+
+A campaign starts with faction-specific base values, adjusted by lineage, class and a seed-dependent pair of positive and negative world tilts. Reputation is clamped to −1,000 through 1,000. Hearth standing is fixed at zero, and a Changeling's Synod standing is capped at the WARY threshold. Thus two heroes or worlds need not meet the same faction on identical terms.
+
+| Standing | Disposition |
+| --- | --- |
+| −1,000 to −500 | Hated |
+| −499 to −250 | Disliked |
+| −249 to 249 | Indifferent |
+| 250 to 499 | Liked |
+| 500 to 899 | Friendly |
+| 900 to 1,000 | Revered |
+
+These are the numeric bands used by \`standing::disposition()\`. Individual systems can impose additional conditions: for example, \`Level::friendly()\` excludes the Synod even at a high score. A band describes standing, not a promise that every group will behave identically in every encounter.
+
+### Relations between factions
+
+When a qualifying standing change spreads, the politics system uses faction relationships to propagate it to other factions. It uses live politics when available, otherwise seeded base relations. The result is clamped and the lineage restrictions are applied again. Campaign politics can change over time, so the same action need not have identical secondary effects in every world or on every day.
+
+Faction dispositions feed several campaign systems, including camp services and social encounters. The separate politics state describes relationships **between factions**; reputation describes the hero's standing **with each faction**. \`Standing.cpp\` owns the initial modifiers and bands, while \`Politics.cpp\` owns relations and propagation. \`PoliticsTest.cpp\` checks political behavior and persistence.
+`,
+    mermaidCharts: [{ title: "From an action to faction standing", chart: `
+flowchart LR
+    Action[Qualifying action] --> Direct[Standing with one faction changes]
+    Direct --> Politics[Current faction relationships]
+    Politics --> Spread[Secondary standing changes]
+    Spread --> Clamp[Clamp and lineage rules]
+    Clamp --> Bands[Disposition bands]
+    Bands --> Encounters[Camp and encounter rules]
+` }],
+  },
+
+  {
+    id: "campaign-quest-flow",
+    title: "Campaign Quests: Offer to Reward",
+    category: "gameplay",
+    summary: "The spine quest state machine, turn-in, act transitions and the elder's errand interface.",
+    sourceFiles: ["src/campaign/Quests.cpp", "src/campaign/Quests.hpp", "src/campaign/Errand.hpp", "src/menu/QuestMenu.cpp", "src/test/QuestTest.cpp"],
+    content: `
+### Follow the campaign spine
+
+The elder's quest panel shows the current campaign quest and its status. Accept an offered quest to make it active. The game tracks its objective and moves it to ready when the conditions are met; return to the elder to claim its reward. The menu also displays generated errands separately, including their known clues and any revealed twists. Selecting an errand and using the indicated abandon control removes that errand; it does not abandon the spine quest.
+
+Turning in a ready spine quest grants its gold, experience and an item. If the bag is full, the item drops beside the player. A gathering objective checks the required materials again on turn-in and consumes them; if they are no longer available, the quest returns to active. Rewards and slot choices come from the quest and act tables.
+
+The quest table contains legacy entries as well as the current spine. \`quests::after()\` advances between the designated spine entries, and \`respine()\` moves an offered legacy quest onto the appropriate current path. This distinction matters when reading older save data: the number of table entries per act is not the number of spine quests a new campaign must complete.
+
+### Between acts and after the king
+
+On completing an act's spine, the next act can enter the Road state until its town is reached. If that town is already founded, the next offer can become available directly. After the last spine quest, the campaign enters Done or, when applicable, Reckoning for the Synod ending. These are distinct from generated errands, which maintain their own progress and clues.
+
+\`QuestMenu::tick()\` routes accept and turn-in actions; \`quests::tick()\` evaluates objectives; \`quests::turnIn()\` pays rewards and advances the campaign. The menu saves after these actions. \`QuestTest.cpp\` exercises the act spines and transitions.
+`,
+    mermaidCharts: [{ title: "Spine quest states", chart: `
+flowchart LR
+    Offered[Offered] -->|Accept| Active[Active]
+    Active -->|Objective met| Ready[Ready]
+    Ready -->|Missing gather materials| Active
+    Ready -->|Claim reward| Next{Next step}
+    Next -->|Next quest available| Offered
+    Next -->|New town required| Road[Road to next town]
+    Road -->|Reach town| Offered
+    Next -->|Final spine| End[Reckoning or Done]
+` }],
+  },
+  {
+    id: "campaign-fact-ledger",
+    title: "Local Knowledge: Fact Ledger Foundation",
+    category: "gameplay",
+    summary: "The current fact and disclosure data model, save format, journal display and integration status.",
+    sourceFiles: ["src/campaign/Facts.hpp", "src/campaign/Facts.cpp", "src/campaign/People.hpp", "src/campaign/CampaignSave.cpp", "src/menu/QuestMenu.cpp", "src/test/FactTest.cpp"],
+    content: `
+### What exists today
+
+The campaign has a local-knowledge ledger with twelve defined facts and 51 permitted fact-recipient pairs. Each fact has a stable key and up to four named sources. The ledger records the **first accepted source** for a fact; learning the same fact from another source later does not replace it. Disclosures record whether a known fact has been shared with a permitted recipient, once per pair.
+
+This is currently a **data and interface foundation**. In the current source tree, calls to \`facts::learn()\` and \`facts::share()\` occur in \`FactTest.cpp\`, with no gameplay call sites yet. The presence of a defined source or recipient therefore does not establish that a player can discover or disclose it in ordinary play.
+
+If a campaign ledger contains a known fact, the elder's quest panel offers a Local Knowledge page. Left and right switch between that page and quests; up and down select known facts. The display includes the claim, its recorded source and a descriptive label such as Record, Testimony, Observed or Derived. These labels are presentation text, not a numerical confidence calculation. For the grief-order fact, the display distinguishes testimony from the board record according to the recorded source.
+
+### Persistence and validation
+
+\`qfact <fact-key> <source-key>\` saves a learned fact; \`qdisclose <fact-key> <recipient-key>\` saves a permitted disclosure. The loader rejects unknown keys, invalid sources and malformed rows. It may read disclosure rows before fact rows; after the campaign is loaded, \`link()\` removes disclosures for facts that were not successfully learned. This prevents an orphan disclosure from surviving a load while allowing rows in either order.
+
+\`FactTest.cpp\` checks key lookup, first-source retention, invalid and duplicate disclosures, load ordering, orphan cleanup and a save round-trip. These checks establish ledger behavior, not the completion of the future in-world interaction that would populate it.
+`,
+    mermaidCharts: [{ title: "Fact ledger lifecycle", chart: `
+flowchart LR
+    Source[Valid named source] --> Learn[Learn fact once]
+    Learn --> Ledger[Ledger keeps first source]
+    Ledger --> Display[Quest panel can show local knowledge]
+    Ledger --> Share[Share with permitted recipient once]
+    Ledger --> Save[Save fact and disclosure rows]
+    Share --> Save
+    Save --> Load[Load rows in either order]
+    Load --> Link[Remove orphan disclosures]
+` }],
+  },
+
 ];

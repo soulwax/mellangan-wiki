@@ -217,6 +217,11 @@ export const NAV_TREE: NavTreeGroup[] = [
     color: "text-rose-400",
     badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
     items: [
+      { id: "campaign-quest-flow", shortTitle: "Campaign Quest Flow" },
+      { id: "campaign-fact-ledger", shortTitle: "Local Knowledge Ledger" },
+      { id: "campaign-cookery", shortTitle: "Cookery & Sharing" },
+      { id: "campaign-experience", shortTitle: "Campaign Experience" },
+      { id: "campaign-standing", shortTitle: "Faction Standing" },
       { id: "campaign-farming", shortTitle: "Campaign Farming" },
       { id: "gems-and-sockets", shortTitle: "Gems & Sockets" },
       { id: "runes-and-words", shortTitle: "Runes & Rune Words" },
