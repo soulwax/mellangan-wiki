@@ -354,3 +354,16 @@
 .wiki-shell button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 639px) { .wiki-title { font-size: 2rem; } }
 @media (prefers-reduced-motion: reduce) { .wiki-shell button, .wiki-shell a { transition-duration: .01ms; } }
+
+/* Reading and diagram surfaces follow the same type and color system. */
+.wiki-prose { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; line-height: 1.75; }
+.wiki-prose.prose-serif { font-family: "Source Serif 4", Georgia, serif; }
+.wiki-prose h3, .wiki-prose h4, .wiki-prose h5 { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; font-weight: 600; letter-spacing: 0; }
+.wiki-prose h3 { font-size: 24px; line-height: 32px; border-top: 0; border-bottom-color: #3e4451; }
+.wiki-prose h4 { font-size: 18px; line-height: 26px; }
+.wiki-prose h5 { font-size: 16px; line-height: 22px; }
+.wiki-prose h3 a:focus-visible + a, .wiki-prose h3 a:focus-visible, .wiki-prose h4 a:focus-visible { opacity: 1; }
+.wiki-prose h3 a:focus-visible, .wiki-prose h4 a:focus-visible { outline-offset: 2px; }
+.mermaid svg { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif !important; }
+#architecture-diagrams-anchor button { min-height: 32px; padding-inline: 10px; }
+#interactive-lab-anchor > div:first-child { background: #21252b; border-color: #3e4451; }

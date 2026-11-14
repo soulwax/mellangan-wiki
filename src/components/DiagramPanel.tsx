@@ -19,13 +19,13 @@ export function DiagramPanel({ sectionId, diagrams, activeDiagramTab, setActiveD
                 className="scroll-mt-20 mt-10 pt-6 border-t border-dark-800/80"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="text-xs font-mono uppercase tracking-wider text-sky-400 font-semibold flex items-center gap-1.5">
+                  <div className="text-sm text-slate-200 font-semibold flex items-center gap-1.5">
                     <GitBranch className="w-3.5 h-3.5" />
-                    <span>Architecture &amp; Control-Flow Diagrams</span>
+                    <span>Diagrams</span>
                   </div>
 
                   {diagrams.length > 1 && (
-                    <div className="flex flex-wrap items-center gap-1 bg-dark-900 p-1 rounded-lg border border-dark-800 text-[11px] font-mono">
+                    <div className="flex flex-wrap items-center gap-1 bg-dark-900 p-1 rounded-lg border border-dark-800 text-xs">
                       <button
                         onClick={() => setActiveDiagramTab("all")}
                         aria-pressed={activeDiagramTab === "all"}
@@ -35,7 +35,7 @@ export function DiagramPanel({ sectionId, diagrams, activeDiagramTab, setActiveD
                             : "text-slate-400 hover:text-slate-200"
                         }`}
                       >
-                        Stacked ({diagrams.length})
+                        All ({diagrams.length})
                       </button>
                       {diagrams.map((_d, idx) => (
                         <button
