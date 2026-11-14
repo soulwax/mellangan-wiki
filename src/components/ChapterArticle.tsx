@@ -3,15 +3,14 @@ import { renderMarkdownToHtml } from "../utils/markdown";
 
 interface ChapterArticleProps {
   content: string;
-  proseFont: "sans" | "serif";
   onAnchor: (slug: string, event: MouseEvent<HTMLElement>) => void;
 }
 
-export function ChapterArticle({ content, proseFont, onAnchor }: ChapterArticleProps) {
+export function ChapterArticle({ content, onAnchor }: ChapterArticleProps) {
   const formattedHtml = useMemo(() => renderMarkdownToHtml(content), [content]);
   return (
     <article
-      className={`wiki-prose ${proseFont === "serif" ? "prose-serif" : ""}`}
+      className="wiki-prose"
       onClick={(e) => {
         const copyBtn = (e.target as HTMLElement).closest(
           "[data-copy-code]",

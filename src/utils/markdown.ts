@@ -116,7 +116,7 @@ export function renderMarkdownToHtml(markdown: string): string {
                 : lang === "bash" || lang === "sh" || lang === "shell"
                   ? "SHELL / CLI"
                   : lang.toUpperCase();
-      const html = `<div class="my-5 rounded-xl overflow-hidden border border-dark-750 bg-[#0a0811] shadow-lg"><div class="px-3.5 py-2 bg-dark-950/90 border-b border-dark-800 flex items-center justify-between text-[11px] font-mono text-slate-400"><div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gold-400/80"></span><span class="font-semibold text-gold-300 uppercase tracking-wider">${label}</span></span><span class="text-slate-600">•</span><span class="text-slate-500">Mellangan Source</span></div><button type="button" data-copy-code="${encodedRaw}" class="px-2 py-0.5 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-gold-500/40 text-[10px] font-mono text-slate-300 hover:text-gold-300 transition-colors">Copy Code</button></div><pre class="py-3.5 px-2 overflow-x-auto text-[13px] font-mono text-slate-200 leading-[1.68]">${highlighted}</pre></div>`;
+      const html = `<div class="my-4 rounded-xl overflow-hidden border border-dark-750 bg-[#0a0811] shadow-lg"><div class="px-3.5 py-1.5 bg-dark-950/90 border-b border-dark-800 flex items-center justify-between text-[11px] font-mono text-slate-400"><div class="flex items-center gap-2"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gold-400/80"></span><span class="font-semibold text-gold-300 uppercase tracking-wider">${label}</span></span><span class="text-slate-600">•</span><span class="text-slate-500">Mellangan Source</span></div><button type="button" data-copy-code="${encodedRaw}" class="px-2 py-0.5 rounded bg-dark-850 hover:bg-dark-800 border border-dark-700 hover:border-gold-500/40 text-[10px] font-mono text-slate-300 hover:text-gold-300 transition-colors">Copy Code</button></div><pre class="py-3 px-2 overflow-x-auto text-[12.5px] font-mono text-slate-200 leading-[1.62]">${highlighted}</pre></div>`;
       const idx = codeBlocks.length;
       codeBlocks.push(html);
       return `\n\n@@CODE_BLOCK_${idx}@@\n\n`;
@@ -136,7 +136,7 @@ export function renderMarkdownToHtml(markdown: string): string {
       } catch {
         rendered = `<code class="text-rose-400 font-mono">${escapeHtml(tex.trim())}</code>`;
       }
-      const html = `<div class="my-5 overflow-x-auto py-3 text-center text-slate-100 flex justify-center bg-dark-900/40 rounded-lg border border-dark-800/60 shadow-inner px-4">${rendered}</div>`;
+      const html = `<div class="my-4 overflow-x-auto py-2.5 text-center text-slate-100 flex justify-center bg-dark-900/40 rounded-lg border border-dark-800/60 shadow-inner px-4">${rendered}</div>`;
       const idx = mathBlocks.length;
       mathBlocks.push(html);
       return `\n\n@@MATH_BLOCK_${idx}@@\n\n`;
@@ -235,7 +235,7 @@ export function renderMarkdownToHtml(markdown: string): string {
       closeLists();
       const h = line.slice(6).trim();
       out.push(
-        `<h5 id="${slugify(h)}" class="scroll-mt-20 text-sm font-bold text-emerald-400 mt-6 mb-2 font-mono">${formatInlineMarkdown(h)}</h5>`,
+        `<h5 id="${slugify(h)}" class="scroll-mt-20 text-xs font-bold text-emerald-400 mt-5 mb-1.5 font-mono uppercase tracking-wider">${formatInlineMarkdown(h)}</h5>`,
       );
       continue;
     }
@@ -246,7 +246,7 @@ export function renderMarkdownToHtml(markdown: string): string {
       const h = line.slice(5).trim();
       const slug = slugify(h);
       out.push(
-        `<h4 id="${slug}" class="group scroll-mt-20 text-[17px] font-bold text-gold-400 mt-7 mb-2.5 leading-snug flex items-center gap-2"><a href="#${slug}" class="hover:underline">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-xs font-mono text-slate-500 hover:text-gold-300 transition-opacity" title="Permalink to section">#</a></h4>`,
+        `<h4 id="${slug}" class="group scroll-mt-20 text-base font-bold text-gold-400 mt-6 mb-2 leading-snug flex items-center gap-2"><a href="#${slug}" class="hover:underline">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-xs font-mono text-slate-500 hover:text-gold-300 transition-opacity" title="Permalink to section">#</a></h4>`,
       );
       continue;
     }
@@ -257,7 +257,7 @@ export function renderMarkdownToHtml(markdown: string): string {
       const h = line.slice(4).trim();
       const slug = slugify(h);
       out.push(
-        `<h3 id="${slug}" class="group scroll-mt-20 text-xl sm:text-[22px] font-bold text-slate-100 mt-9 mb-3.5 font-display border-b border-dark-800 pb-2 leading-snug flex items-center justify-between gap-2"><a href="#${slug}" class="hover:text-gold-300 transition-colors">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-sm font-mono text-slate-500 hover:text-gold-300 transition-opacity shrink-0" title="Permalink to section">#</a></h3>`,
+        `<h3 id="${slug}" class="group scroll-mt-20 text-xl font-bold text-slate-100 mt-8 mb-3 font-display border-b border-dark-800 pb-2 leading-snug flex items-center justify-between gap-2"><a href="#${slug}" class="hover:text-gold-300 transition-colors">${formatInlineMarkdown(h)}</a><a href="#${slug}" class="opacity-0 group-hover:opacity-100 text-sm font-mono text-slate-500 hover:text-gold-300 transition-opacity shrink-0" title="Permalink to section">#</a></h3>`,
       );
       continue;
     }

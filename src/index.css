@@ -5,6 +5,7 @@
 @layer base {
   body {
     @apply bg-dark-950 text-slate-200 antialiased font-sans;
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
     background-image:
@@ -17,13 +18,13 @@
     background-attachment: fixed;
   }
 
-  /* Custom scrollbar */
+  /* Sleek modern scrollbars */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-track {
-    background: #0c0a13;
+    background: #09070f;
   }
   ::-webkit-scrollbar-thumb {
     background: #231f33;
@@ -34,30 +35,24 @@
   }
 }
 
+/* Mandatory crisp sans for display headings */
 .font-display {
-  font-family: "Newsreader", "Plus Jakarta Sans", Georgia, serif;
-  letter-spacing: -0.012em;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.015em;
 }
 
 .code-block {
   font-family: "JetBrains Mono", monospace;
 }
 
-/* Readable documentation measure and list styling */
+/* Readable documentation measure and typographic hierarchy */
 .wiki-prose {
-  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 1rem; /* 16px */
-  line-height: 1.84;
-  letter-spacing: -0.006em;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 0.95rem; /* 15.2px optimal information density */
+  line-height: 1.76;
+  letter-spacing: -0.005em;
   color: #e2e8f0;
   width: 100%;
-}
-
-.wiki-prose.prose-serif {
-  font-family: "Source Serif 4", Georgia, Cambria, serif;
-  font-size: 1.045rem; /* 16.7px */
-  line-height: 1.86;
-  letter-spacing: -0.003em;
 }
 
 .wiki-prose p,
@@ -67,30 +62,30 @@
 }
 
 .wiki-prose p {
-  margin-top: 1.05rem;
-  margin-bottom: 1.05rem;
+  margin-top: 0.85rem;
+  margin-bottom: 0.85rem;
   color: #d6e0ec;
 }
 
 .wiki-prose ul {
-  margin-top: 0.9rem;
-  margin-bottom: 1.2rem;
-  padding-left: 1.4rem;
+  margin-top: 0.75rem;
+  margin-bottom: 1rem;
+  padding-left: 1.35rem;
   list-style-type: disc;
 }
 
 .wiki-prose ol {
-  margin-top: 0.9rem;
-  margin-bottom: 1.2rem;
-  padding-left: 1.5rem;
+  margin-top: 0.75rem;
+  margin-bottom: 1rem;
+  padding-left: 1.45rem;
   list-style-type: decimal;
 }
 
 .wiki-prose li {
-  margin-top: 0.48rem;
-  margin-bottom: 0.48rem;
-  padding-left: 0.25rem;
-  line-height: 1.78;
+  margin-top: 0.35rem;
+  margin-bottom: 0.35rem;
+  padding-left: 0.2rem;
+  line-height: 1.72;
   color: #d6e0ec;
 }
 
@@ -101,34 +96,34 @@
 
 .wiki-table-scroll {
   overflow-x: auto;
-  margin: 1.5rem 0;
-  border: 1px solid #342f4c;
-  border-radius: 0.75rem;
+  margin: 1.25rem 0;
+  border: 1px solid #2d2740;
+  border-radius: 0.5rem;
 }
 
 .wiki-prose table {
   width: 100%;
-  min-width: 38rem;
+  min-width: 36rem;
   border-collapse: collapse;
-  font-size: 0.875rem;
-  line-height: 1.55;
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .wiki-prose th,
 .wiki-prose td {
-  padding: 0.7rem 0.9rem;
+  padding: 0.55rem 0.75rem;
   vertical-align: top;
-  border-bottom: 1px solid #342f4c;
+  border-bottom: 1px solid #2d2740;
 }
 
 .wiki-prose th {
-  background: #1b1728;
+  background: #171324;
   color: #f6c324;
   font-weight: 600;
 }
 
 .wiki-prose tbody tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .wiki-prose tbody tr:last-child td {
@@ -143,7 +138,7 @@
 .code-line {
   display: flex;
   align-items: baseline;
-  min-height: 1.55rem;
+  min-height: 1.5rem;
 }
 
 .code-line:hover {
@@ -152,8 +147,8 @@
 
 .code-ln {
   user-select: none;
-  width: 2.25rem;
-  padding-right: 0.85rem;
+  width: 2.2rem;
+  padding-right: 0.8rem;
   text-align: right;
   color: #475569;
   font-size: 11px;

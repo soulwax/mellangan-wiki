@@ -67,13 +67,6 @@ export const App: React.FC = () => {
     () => parseLocationRoute().hash,
   );
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
-  const [proseFont, setProseFont] = useState<"sans" | "serif">(() => {
-    if (typeof window !== "undefined") {
-      const saved = window.localStorage.getItem("mellangan-wiki-font");
-      if (saved === "serif" || saved === "sans") return saved;
-    }
-    return "sans";
-  });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [isTopicsOpen, setIsTopicsOpen] = useState<boolean>(false);
@@ -314,9 +307,9 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#07050b] text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
-      <header className="sticky top-0 z-40 h-[58px] bg-[#09070f] border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
-        <div className="max-w-[1340px] w-full mx-auto flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#07050b] text-slate-200 flex flex-col font-sans selection:bg-gold-500/30 selection:text-gold-200">
+      <header className="sticky top-0 z-40 h-14 bg-[#09070f] border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
+        <div className="max-w-[1440px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -334,9 +327,11 @@ export const App: React.FC = () => {
               onClick={(e) => selectChapter("overview", e)}
               className="flex items-center gap-2.5 text-left group"
             >
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-gold-400 to-amber-600 flex items-center justify-center shadow-lg shadow-gold-500/20 font-display font-black text-dark-950 text-base group-hover:scale-105 transition-transform">
-                M
-              </div>
+              <img
+                src="/icon.png"
+                alt="Mellangan Game Icon"
+                className="w-7 h-7 rounded-md object-contain shadow-md shadow-gold-500/10 border border-gold-500/30 group-hover:border-gold-400 group-hover:scale-105 transition-all"
+              />
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-display font-bold text-base tracking-normal text-slate-100">
@@ -351,39 +346,6 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <div
-              className="hidden sm:flex items-center bg-[#110d1c] p-0.5 rounded-lg border border-dark-750 text-[11px] font-mono"
-              title="Switch article reading typography between Plus Jakarta Sans and Source Serif 4"
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  setProseFont("sans");
-                  window.localStorage.setItem("mellangan-wiki-font", "sans");
-                }}
-                className={`px-2 py-1 rounded-md transition-colors ${
-                  proseFont === "sans"
-                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                Sans
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setProseFont("serif");
-                  window.localStorage.setItem("mellangan-wiki-font", "serif");
-                }}
-                className={`px-2 py-1 rounded-md font-serif transition-colors ${
-                  proseFont === "serif"
-                    ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                Serif
-              </button>
-            </div>
             {/* Direct Quick Link 1: Contribute */}
             <a
               href="/contribute-basics"
@@ -434,7 +396,7 @@ export const App: React.FC = () => {
 
               {isTopicsOpen && (
                 <div
-                  className="fixed left-3 right-3 top-[64px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-80px)] overflow-y-auto bg-[#0a0712] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
+                  className="fixed left-3 right-3 top-[60px] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[680px] md:w-[760px] max-h-[calc(100vh-76px)] overflow-y-auto bg-[#0a0712] border border-dark-750 rounded-2xl shadow-2xl shadow-black z-50 flex flex-col"
                   role="menu"
                 >
                   {/* Menu header */}
@@ -573,32 +535,32 @@ export const App: React.FC = () => {
         {/* Mobile menu backdrop */}
         {isMobileMenuOpen && (
           <div
-            className="fixed inset-0 top-[58px] bg-black/80 z-20 lg:hidden"
+            className="fixed inset-0 top-14 bg-black/80 z-20 lg:hidden"
             onClick={() => setIsMobileMenuOpen(false)}
             aria-hidden="true"
           />
         )}
         <aside
-          className={`fixed lg:sticky top-[58px] z-30 w-72 shrink-0 h-[calc(100vh-58px)] bg-[#09070f] border-r border-dark-800 flex flex-col transition-transform duration-200 ${
+          className={`fixed lg:sticky top-14 z-30 w-64 shrink-0 h-[calc(100vh-3.5rem)] bg-[#09070f] border-r border-dark-800 flex flex-col transition-transform duration-200 ${
             isMobileMenuOpen
               ? "translate-x-0"
               : "-translate-x-full lg:translate-x-0"
           }`}
         >
-          <div className="p-3 border-b border-dark-800 bg-[#09070f] space-y-2">
+          <div className="p-2.5 border-b border-dark-800 bg-[#09070f] space-y-1.5">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={`Filter ${orderedSectionIds.length} chapters, files...`}
-                className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
+                className="w-full pl-8 pr-7 py-1 rounded-md bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200"
                   title="Clear search"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -611,7 +573,7 @@ export const App: React.FC = () => {
                 <ListTree className="w-3 h-3 text-gold-400" />
                 Manual Contents
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setAllGroups(true)}
                   className="hover:text-gold-300 flex items-center gap-0.5 transition-colors"
@@ -633,7 +595,7 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          <nav className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+          <nav className="flex-1 overflow-y-auto p-2 space-y-1">
             {filteredTree.map((group) => {
               const Icon = group.icon;
               const isOpen =
@@ -645,38 +607,38 @@ export const App: React.FC = () => {
               return (
                 <div
                   key={group.key}
-                  className="rounded-xl border border-dark-800/70 bg-dark-900/30 overflow-hidden"
+                  className="rounded-lg border border-dark-800/80 bg-dark-900/30 overflow-hidden"
                 >
                   <button
                     onClick={() => toggleGroup(group.key)}
-                    className={`w-full px-2.5 py-2 flex items-center justify-between gap-2 text-left transition-colors ${
+                    className={`w-full px-2 py-1.5 flex items-center justify-between gap-1.5 text-left transition-colors ${
                       hasActiveChild
                         ? "bg-dark-850/90 text-slate-100"
                         : "hover:bg-dark-900/80 text-slate-300"
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <Icon className={`w-3.5 h-3.5 shrink-0 ${group.color}`} />
-                      <span className="text-xs font-display font-bold tracking-wide truncate">
+                      <span className="text-[11.5px] font-display font-bold tracking-tight truncate">
                         {group.label}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span
-                        className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${group.badgeColor}`}
+                        className={`text-[9px] font-mono px-1 py-0.2 rounded border ${group.badgeColor}`}
                       >
                         {group.items.length}
                       </span>
                       {isOpen ? (
-                        <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                        <ChevronDown className="w-3 h-3 text-slate-400" />
                       ) : (
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
+                        <ChevronRight className="w-3 h-3 text-slate-500" />
                       )}
                     </div>
                   </button>
 
                   {isOpen && (
-                    <div className="px-1.5 pb-1.5 pt-1 space-y-0.5 border-t border-dark-850">
+                    <div className="px-1 pb-1 pt-0.5 space-y-0.5 border-t border-dark-850/80">
                       {group.items.map((item) => {
                         const sec = sectionById.get(item.id);
                         if (!sec) return null;
@@ -687,7 +649,7 @@ export const App: React.FC = () => {
                             <a
                               href={`/${item.id}`}
                               onClick={(e) => selectChapter(item.id, e)}
-                              className={`w-full text-left px-2 py-1.5 rounded-lg text-xs transition-all flex items-center justify-between gap-1.5 ${
+                              className={`w-full text-left px-2 py-1 rounded-md text-[11.5px] leading-snug transition-all flex items-center justify-between gap-1.5 ${
                                 isActive
                                   ? "bg-gold-500/15 text-gold-300 font-semibold border border-gold-500/40 shadow-sm"
                                   : "text-slate-400 hover:text-slate-100 hover:bg-dark-850/60 border border-transparent"
@@ -698,7 +660,7 @@ export const App: React.FC = () => {
                               </span>
                               {sec.interactiveComponent && (
                                 <span
-                                  className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0"
+                                  className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0"
                                   title="Includes Interactive Simulator"
                                 >
                                   Lab
@@ -707,17 +669,17 @@ export const App: React.FC = () => {
                             </a>
 
                             {isActive && activeHeadings.length > 0 && (
-                              <div className="ml-3 mt-1 mb-1.5 pl-2 border-l border-gold-500/30 space-y-0.5">
+                              <div className="ml-2.5 mt-0.5 mb-1 pl-1.5 border-l border-gold-500/30 space-y-0.5">
                                 {activeHeadings.map((h) => (
                                   <a
                                     key={h.slug}
                                     href={`/${activeSection.id}#${h.slug}`}
                                     onClick={(e) => scrollToAnchor(h.slug, e)}
-                                    className={`w-full text-left py-1 px-1.5 rounded text-[11px] hover:text-gold-300 hover:bg-dark-850 transition-colors block truncate ${
+                                    className={`w-full text-left py-0.5 px-1.5 rounded text-[10.5px] hover:text-gold-300 hover:bg-dark-850 transition-colors block truncate ${
                                       activeHash === h.slug
                                         ? "text-gold-300 bg-dark-850/80 font-semibold"
                                         : h.level === 4
-                                          ? "pl-2.5 text-slate-400 font-mono text-[10px]"
+                                          ? "pl-2 text-slate-400 font-mono text-[10px]"
                                           : "text-slate-300 font-medium"
                                     }`}
                                     title={h.text}
@@ -734,11 +696,11 @@ export const App: React.FC = () => {
                                         e,
                                       )
                                     }
-                                    className="w-full text-left py-1 px-1.5 rounded text-[11px] font-mono text-emerald-300 hover:bg-dark-850 flex items-center gap-1.5 truncate"
+                                    className="w-full text-left py-0.5 px-1.5 rounded text-[10.5px] font-mono text-emerald-300 hover:bg-dark-850 flex items-center gap-1 truncate"
                                   >
-                                    <Sparkles className="w-3 h-3 shrink-0" />
+                                    <Sparkles className="w-2.5 h-2.5 shrink-0" />
                                     <span className="truncate">
-                                      Interactive Simulator
+                                      Simulator
                                     </span>
                                   </a>
                                 )}
@@ -754,15 +716,15 @@ export const App: React.FC = () => {
             })}
           </nav>
 
-          <div className="p-2.5 border-t border-dark-800 bg-[#09070f] text-[10px] font-mono text-slate-400">
-            <div className="flex items-center justify-between text-gold-400 font-semibold mb-1">
+          <div className="p-2 border-t border-dark-800 bg-[#09070f] text-[9.5px] font-mono text-slate-400">
+            <div className="flex items-center justify-between text-gold-400 font-semibold mb-0.5">
               <span className="flex items-center gap-1.5">
                 <Terminal className="w-3 h-3" />
                 <span>Engine Invariants</span>
               </span>
               <span className="text-slate-500">60 Hz DT</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+            <div className="grid grid-cols-2 gap-x-1.5 gap-y-0.5">
               <div>
                 Pool: <span className="text-slate-200">32 Slabs</span>
               </div>
@@ -779,8 +741,8 @@ export const App: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
-          <div className="max-w-[820px] xl:max-w-[860px] mx-auto">
+        <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6">
+          <div className="max-w-[840px] xl:max-w-[880px] mx-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
               <div className="flex items-center gap-1.5 min-w-0">
                 <a
@@ -886,18 +848,18 @@ export const App: React.FC = () => {
               )}
             </div>
 
-            <ChapterArticle content={activeSection.content} proseFont={proseFont} onAnchor={scrollToAnchor} />
+            <ChapterArticle content={activeSection.content} onAnchor={scrollToAnchor} />
             {activeSection.id === "gallery" && <GalleryPage />}
             <SimulationPanel name={activeSection.interactiveComponent} sourceFiles={activeSection.sourceFiles} />
 
             <DiagramPanel sectionId={activeSection.id} diagrams={diagrams} activeDiagramTab={activeDiagramTab} setActiveDiagramTab={setActiveDiagramTab} />
 
-            <div className="mt-12 pt-6 border-t border-dark-800 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div className="mt-10 pt-5 border-t border-dark-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {prevSection ? (
                 <a
                   href={`/${prevSection.id}`}
                   onClick={(e) => selectChapter(prevSection.id, e)}
-                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-left transition-all group block"
+                  className="p-3 rounded-lg border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-left transition-all group block"
                 >
                   <div className="text-[10px] uppercase font-mono text-slate-400 mb-1 flex items-center justify-between">
                     <span>← Previous Chapter</span>
@@ -915,7 +877,7 @@ export const App: React.FC = () => {
                 <a
                   href={`/${nextSection.id}`}
                   onClick={(e) => selectChapter(nextSection.id, e)}
-                  className="p-3.5 rounded-xl border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-right transition-all group sm:col-start-2 block"
+                  className="p-3 rounded-lg border border-dark-800 hover:border-dark-700 bg-dark-900/60 hover:bg-dark-900 text-right transition-all group sm:col-start-2 block"
                 >
                   <div className="text-[10px] uppercase font-mono text-slate-400 mb-1 flex items-center justify-between">
                     <span className="text-slate-600">/{nextSection.id}</span>
@@ -930,13 +892,13 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <aside className="hidden xl:block sticky top-[58px] w-60 shrink-0 h-[calc(100vh-58px)] border-l border-dark-800 bg-[#09070f] p-4 overflow-y-auto">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-3 flex items-center gap-1.5">
+        <aside className="hidden xl:block sticky top-14 w-56 shrink-0 h-[calc(100vh-3.5rem)] border-l border-dark-800 bg-[#09070f] p-3.5 overflow-y-auto">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-2.5 flex items-center gap-1.5">
             <Hash className="w-3.5 h-3.5 text-gold-400" />
             <span>On This Page</span>
           </div>
 
-          <div className="space-y-0.5 border-l border-dark-800 pl-2.5">
+          <div className="space-y-0.5 border-l border-dark-800 pl-2">
             {activeHeadings.map((h) => {
               const isActive = activeHash === h.slug;
               return (
@@ -944,12 +906,12 @@ export const App: React.FC = () => {
                   key={h.slug}
                   href={`/${activeSection.id}#${h.slug}`}
                   onClick={(e) => scrollToAnchor(h.slug, e)}
-                  className={`w-full text-left py-1 px-1.5 rounded transition-all block truncate ${
+                  className={`w-full text-left py-0.5 px-1.5 rounded transition-all block truncate ${
                     isActive
-                      ? "text-gold-300 font-semibold -ml-[11px] pl-2 border-l-2 border-gold-400 bg-gold-500/10"
+                      ? "text-gold-300 font-semibold -ml-[9px] pl-2 border-l-2 border-gold-400 bg-gold-500/10"
                       : h.level === 4
-                        ? "pl-2.5 text-[11px] font-mono text-slate-400 hover:text-slate-200 hover:bg-dark-850/60"
-                        : "text-xs text-slate-300 hover:text-gold-300 font-medium hover:bg-dark-850/60"
+                        ? "pl-2 text-[10.5px] font-mono text-slate-400 hover:text-slate-200 hover:bg-dark-850/60"
+                        : "text-[11.5px] text-slate-300 hover:text-gold-300 font-medium hover:bg-dark-850/60"
                   }`}
                   title={h.text}
                 >
@@ -982,7 +944,7 @@ export const App: React.FC = () => {
         </aside>
       </div>
 
-      <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono bg-[#09070f]">
+      <footer className="border-t border-dark-800 py-5 px-4 text-center text-xs text-slate-500 font-mono bg-[#09070f]">
         <p>
           Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT •
           SDL3
