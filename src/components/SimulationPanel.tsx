@@ -23,12 +23,10 @@ export function SimulationPanel({ name, sourceFiles }: SimulationPanelProps) {
           <div>
             <div className="text-emerald-400 font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Interactive Systems Laboratory Online</span>
+              <span>Interactive lab</span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Manipulate runtime parameters below to observe
-              deterministic state transitions, memory layout, and
-              engine math.
+              Explore this chapter with an interactive example.
             </div>
           </div>
         </div>
@@ -38,7 +36,7 @@ export function SimulationPanel({ name, sourceFiles }: SimulationPanelProps) {
             href={`https://github.com/soulwax/Mellangan/blob/main/${sourceFiles[0]}`}
             target="_blank"
             rel="noreferrer"
-            className="px-2.5 py-1 rounded-lg bg-dark-900 hover:bg-dark-850 border border-dark-750 hover:border-gold-500/40 text-[11px] text-gold-300 transition-colors flex items-center gap-1.5 shrink-0"
+            className="px-2.5 py-1 rounded-lg bg-dark-900 hover:bg-dark-850 border border-dark-750 hover:border-gold-500/40 text-[11px] text-gold-300 transition-colors flex items-center gap-1.5 min-w-0 break-all"
           >
             <FileCode2 className="w-3.5 h-3.5 text-gold-400" />
             <span>Inspect {sourceFiles[0]}</span>

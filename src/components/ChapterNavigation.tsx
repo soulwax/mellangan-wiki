@@ -41,6 +41,8 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
 
   return (
     <aside
+      id="chapter-navigation"
+      aria-label="Chapter navigation"
       className={`wiki-sidebar fixed lg:sticky top-[58px] z-30 w-72 max-w-[85vw] shrink-0 h-[calc(100vh-58px)] flex flex-col transition-transform duration-200 ${
         isMobileMenuOpen
           ? "translate-x-0"
@@ -49,7 +51,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
     >
       <div className="wiki-sidebar-tools p-4 space-y-3">
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
@@ -63,6 +65,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
               onClick={() => setSearchQuery("")}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200"
               title="Clear search"
+              aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -96,7 +99,8 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+      <nav aria-label="Wiki chapters" className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+        {filteredTree.length === 0 && <p role="status" className="px-3 py-4 text-sm text-slate-400">No chapters match “{searchQuery}”. Try another term.</p>}
         {filteredTree.map((group) => {
           const Icon = group.icon;
           const isOpen =
@@ -112,6 +116,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
             >
               <button
                 onClick={() => toggleGroup(group.key)}
+                aria-expanded={isOpen}
                 className={`w-full px-2.5 py-2 flex items-center justify-between gap-2 text-left transition-colors ${
                   hasActiveChild
                     ? "bg-dark-850/90 text-slate-100"
@@ -157,7 +162,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
                               : "text-slate-400 hover:text-slate-100 hover:bg-dark-850/60 border border-transparent"
                           }`}
                         >
-                          <span className="truncate">
+                          <span className="wiki-nav-title">
                             {item.shortTitle}
                           </span>
                           {sec.interactiveComponent && (
@@ -171,7 +176,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
                         </a>
 
                         {isActive && activeHeadings.length > 0 && (
-                          <div className="ml-3 mt-1 mb-1.5 pl-2 border-l border-gold-500/30 space-y-0.5">
+                          <div className="wiki-nav-headings ml-3 mt-1 mb-1.5 pl-2 border-l border-gold-500/30 space-y-0.5">
                             {activeHeadings.map((h) => (
                               <a
                                 key={h.slug}

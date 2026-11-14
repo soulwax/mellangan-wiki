@@ -25,9 +25,10 @@ export function DiagramPanel({ sectionId, diagrams, activeDiagramTab, setActiveD
                   </div>
 
                   {diagrams.length > 1 && (
-                    <div className="flex items-center gap-1 bg-dark-900 p-1 rounded-lg border border-dark-800 text-[11px] font-mono">
+                    <div className="flex flex-wrap items-center gap-1 bg-dark-900 p-1 rounded-lg border border-dark-800 text-[11px] font-mono">
                       <button
                         onClick={() => setActiveDiagramTab("all")}
+                        aria-pressed={activeDiagramTab === "all"}
                         className={`px-2 py-0.5 rounded transition-colors ${
                           activeDiagramTab === "all"
                             ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
@@ -40,6 +41,7 @@ export function DiagramPanel({ sectionId, diagrams, activeDiagramTab, setActiveD
                         <button
                           key={idx}
                           onClick={() => setActiveDiagramTab(idx)}
+                          aria-pressed={activeDiagramTab === idx}
                           className={`px-2 py-0.5 rounded transition-colors ${
                             activeDiagramTab === idx
                               ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"

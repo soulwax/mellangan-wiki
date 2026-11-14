@@ -306,3 +306,15 @@
 .wiki-hero a { overflow-wrap: anywhere; }
 .wiki-main > div { min-width: 0; }
 .wiki-prose :is(p, li, td, th) { overflow-wrap: anywhere; }
+
+/* Navigation and reading refinements */
+.skip-link { position: fixed; z-index: 100; top: .5rem; left: .5rem; padding: .7rem 1rem; color: #101310; background: #f1d69b; border-radius: 4px; transform: translateY(-160%); }
+.skip-link:focus { transform: translateY(0); }
+.wiki-nav-title { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.wiki-nav-group a[aria-current="page"] { border-radius: 3px; }
+.wiki-nav-group > div > div > a { min-height: 36px; }
+.wiki-header button, .wiki-header a { min-height: 36px; }
+.wiki-toc a { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.wiki-main:focus { outline: none; }
+@media (min-width: 1280px) { .wiki-nav-headings { display: none; } }
+@media (max-width: 1023px) { .wiki-sidebar.-translate-x-full { visibility: hidden; } }

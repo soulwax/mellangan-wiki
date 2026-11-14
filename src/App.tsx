@@ -147,6 +147,15 @@ export const App: React.FC = () => {
     };
   }, [isTopicsOpen]);
 
+  useEffect(() => {
+    if (!isMobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMobileMenuOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isMobileMenuOpen]);
+
   // Listen to browser Back/Forward (popstate) and in-page hash navigation
   useEffect(() => {
     const onPopState = () => {
@@ -259,6 +268,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="wiki-shell min-h-screen text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="wiki-header sticky top-0 z-40 h-[58px] px-4 lg:px-6 flex items-center justify-between gap-4">
         <div className="max-w-[1340px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -266,6 +276,8 @@ export const App: React.FC = () => {
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="lg:hidden p-2 rounded-lg bg-[#120e1e] border border-dark-750 text-slate-300 hover:text-slate-100 hover:bg-[#1a1429] transition-colors"
               aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="chapter-navigation"
             >
               {isMobileMenuOpen ? (
                 <X className="w-4 h-4" />
@@ -302,6 +314,7 @@ export const App: React.FC = () => {
                   setProseFont("sans");
                   window.localStorage.setItem("mellangan-wiki-font", "sans");
                 }}
+                aria-pressed={proseFont === "sans"}
                 className={`px-2 py-1 rounded-md transition-colors ${
                   proseFont === "sans"
                     ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
@@ -316,6 +329,7 @@ export const App: React.FC = () => {
                   setProseFont("serif");
                   window.localStorage.setItem("mellangan-wiki-font", "serif");
                 }}
+                aria-pressed={proseFont === "serif"}
                 className={`px-2 py-1 rounded-md font-serif transition-colors ${
                   proseFont === "serif"
                     ? "bg-gold-500/20 text-gold-300 border border-gold-500/40 font-semibold"
@@ -530,7 +544,7 @@ export const App: React.FC = () => {
           scrollToAnchor={scrollToAnchor}
         />
 
-        <main className="wiki-main flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
+        <main id="main-content" tabIndex={-1} className="wiki-main flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
           <div className="max-w-[820px] xl:max-w-[860px] mx-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -559,6 +573,7 @@ export const App: React.FC = () => {
 
               <button
                 onClick={copyCanonicalUrl}
+                aria-label={copiedUrl ? "Link copied" : "Copy link to this page"}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-dark-900 hover:bg-dark-800 border border-dark-750 text-[11px] font-mono text-slate-300 hover:text-gold-300 transition-colors"
                 title="Copy direct page or section URL"
               >
