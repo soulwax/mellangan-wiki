@@ -258,8 +258,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#07050b] text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
-      <header className="sticky top-0 z-40 h-[58px] bg-[#09070f] border-b border-dark-800 px-4 lg:px-6 flex items-center justify-between gap-4">
+    <div className="wiki-shell min-h-screen text-slate-200 flex flex-col selection:bg-gold-500/30 selection:text-gold-200">
+      <header className="wiki-header sticky top-0 z-40 h-[58px] px-4 lg:px-6 flex items-center justify-between gap-4">
         <div className="max-w-[1340px] w-full mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
@@ -278,16 +278,13 @@ export const App: React.FC = () => {
               onClick={(e) => selectChapter("overview", e)}
               className="flex items-center gap-2.5 text-left group"
             >
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-gold-400 to-amber-600 flex items-center justify-center shadow-lg shadow-gold-500/20 font-display font-black text-dark-950 text-base group-hover:scale-105 transition-transform">
+              <div className="wiki-mark flex items-center justify-center font-display font-black text-base">
                 M
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-display font-bold text-base tracking-normal text-slate-100">
-                    Mellangan <span className="hidden sm:inline">Docs</span>
-                  </span>
-                  <span className="hidden sm:inline text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 font-semibold">
-                    v0.6.5+
+                    Mellangan <span className="wiki-brand-sub hidden sm:inline">/ FIELD GUIDE</span>
                   </span>
                 </div>
               </div>
@@ -367,7 +364,7 @@ export const App: React.FC = () => {
                 <Layers className="w-3.5 h-3.5 text-gold-400" />
                 <span className="hidden sm:inline">Topics</span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px] font-semibold">
-                  12 Labs
+                  Labs
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
@@ -389,7 +386,7 @@ export const App: React.FC = () => {
                         <div className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
                           <span>Featured Topics &amp; Labs</span>
                           <span className="px-1.5 py-0.2 rounded bg-gold-500/15 text-gold-300 border border-gold-500/30 text-[10px]">
-                            12 Labs Online
+                            Interactive Labs
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-400 font-sans mt-0.5">
@@ -513,7 +510,7 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex-1 flex max-w-[1440px] w-full mx-auto relative">
+      <div className="wiki-layout flex-1 flex w-full mx-auto relative">
         {/* Mobile menu backdrop */}
         {isMobileMenuOpen && (
           <div
@@ -533,7 +530,7 @@ export const App: React.FC = () => {
           scrollToAnchor={scrollToAnchor}
         />
 
-        <main className="flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
+        <main className="wiki-main flex-1 min-w-0 px-4 sm:px-8 lg:px-10 py-7">
           <div className="max-w-[820px] xl:max-w-[860px] mx-auto">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-slate-400 mb-3">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -582,11 +579,12 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="border-b border-dark-800 pb-5 mb-6">
-              <h1 className="text-2xl sm:text-[28px] leading-tight font-display font-black text-slate-100 tracking-wide mb-2.5">
+            <div className="wiki-hero pb-7 mb-8">
+              <div className="wiki-kicker"><span className="wiki-kicker-dot" /> THE MELLANGAN FIELD GUIDE <span className="wiki-kicker-line" /> {String(currentIndex + 1).padStart(2, "0")} / {String(orderedSectionIds.length).padStart(2, "0")}</div>
+              <h1 className="wiki-title font-display text-slate-100">
                 {activeSection.title}
               </h1>
-              <p className="text-[15px] text-slate-300/90 leading-relaxed mb-4">
+              <p className="wiki-deck text-slate-300/90 leading-relaxed">
                 {activeSection.summary}
               </p>
 
@@ -684,7 +682,7 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <aside className="hidden xl:block sticky top-[58px] w-60 shrink-0 h-[calc(100vh-58px)] border-l border-dark-800 bg-[#09070f] p-4 overflow-y-auto">
+        <aside className="wiki-toc hidden xl:block sticky top-[58px] w-60 shrink-0 h-[calc(100vh-58px)] p-5 overflow-y-auto">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold mb-3 flex items-center gap-1.5">
             <Hash className="w-3.5 h-3.5 text-gold-400" />
             <span>On This Page</span>
@@ -736,7 +734,7 @@ export const App: React.FC = () => {
         </aside>
       </div>
 
-      <footer className="border-t border-dark-800 py-6 px-4 text-center text-xs text-slate-500 font-mono bg-[#09070f]">
+      <footer className="wiki-footer py-6 px-4 text-center text-xs text-slate-500 font-mono">
         <p>
           Mellangan Systems Architecture Wiki • C++20 / C11 • Vulkan2D • EnTT •
           SDL3

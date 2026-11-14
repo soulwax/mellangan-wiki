@@ -224,3 +224,85 @@
 .glow-purple {
   box-shadow: 0 0 20px -3px rgba(168, 85, 247, 0.2);
 }
+
+/* Field guide: a quiet three-column reading surface. */
+.wiki-shell {
+  --guide-bg: #101310;
+  --guide-panel: #151a16;
+  --guide-line: #303a31;
+  --guide-ink: #eeeade;
+  --guide-accent: #d9bb7b;
+  background: var(--guide-bg);
+  color: var(--guide-ink);
+}
+.wiki-header {
+  background: rgba(16, 19, 16, .96);
+  border-bottom: 1px solid var(--guide-line);
+  backdrop-filter: blur(16px);
+}
+.wiki-header > div { max-width: 1600px; }
+.wiki-mark {
+  width: 32px; height: 32px;
+  color: #151a16;
+  background: #d9bb7b;
+  border: 1px solid #ead19b;
+  border-radius: 3px 10px 3px 10px;
+}
+.wiki-brand-sub { font: 600 10px/1.2 "JetBrains Mono", monospace; letter-spacing: .12em; color: #a2aa9c; }
+.wiki-layout { max-width: 1600px; }
+.wiki-sidebar, .wiki-toc { background: #141915; border-color: var(--guide-line); }
+.wiki-sidebar { border-right: 1px solid var(--guide-line); }
+.wiki-sidebar-tools, .wiki-sidebar-foot { background: #141915; border-color: var(--guide-line); }
+.wiki-sidebar-tools { border-bottom: 1px solid var(--guide-line); }
+.wiki-sidebar-foot { border-top: 1px solid var(--guide-line); }
+.wiki-sidebar input { background: #1b211b; border-color: #39443a; min-height: 40px; }
+.wiki-nav-group { border: 0; border-bottom: 1px solid #2a332b; border-radius: 0; background: transparent; }
+.wiki-nav-group > button { min-height: 42px; background: transparent; }
+.wiki-nav-group > button span.font-display { font-family: "Plus Jakarta Sans", sans-serif; letter-spacing: .01em; }
+.wiki-nav-group > div { border-color: #303a31; }
+.wiki-nav-group a[aria-current="page"] { background: #33372a; color: #f5dfaa; border-color: #88754d; box-shadow: inset 2px 0 #d9bb7b; }
+.wiki-toc { border-left: 1px solid var(--guide-line); }
+.wiki-main { background: linear-gradient(90deg, rgba(217,187,123,.035) 1px, transparent 1px) 0 0 / 100% 100%, #101310; }
+.wiki-hero {
+  position: relative;
+  padding-top: 3rem;
+  border-bottom: 1px solid var(--guide-line);
+}
+.wiki-hero::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 64px; height: 2px;
+  background: var(--guide-accent);
+}
+.wiki-kicker {
+  display: flex; align-items: center; gap: .65rem;
+  margin-bottom: 1.3rem;
+  color: #bcaa84;
+  font: 600 10px/1.4 "JetBrains Mono", monospace;
+  letter-spacing: .14em;
+}
+.wiki-kicker-dot { width: 7px; height: 7px; flex: none; background: #d9bb7b; transform: rotate(45deg); }
+.wiki-kicker-line { width: 30px; height: 1px; background: #665c42; }
+.wiki-title { max-width: 19ch; margin: 0 0 1rem; font-size: clamp(2.25rem, 4vw, 4rem); line-height: 1.03; font-weight: 600; letter-spacing: -.035em; text-wrap: balance; }
+.wiki-deck { max-width: 65ch; margin-bottom: 1.5rem; font-size: 1rem; line-height: 1.75; color: #b8c2b5; }
+.wiki-prose { color: #e2e7dd; }
+.wiki-prose p, .wiki-prose li { color: #cdd6cb; }
+.wiki-prose h3, .wiki-prose h4 { scroll-margin-top: 5rem; }
+.wiki-prose h3 { padding-top: .7rem; border-top: 1px solid #303a31; }
+.wiki-table-scroll { border-color: #39443a; border-radius: 4px; }
+.wiki-prose th { background: #202a20; color: #ead09a; }
+.wiki-prose td, .wiki-prose th { border-color: #303a31; }
+.wiki-footer { border-top: 1px solid #303a31; background: #141915; }
+.wiki-shell :focus-visible { outline: 2px solid #edca80; outline-offset: 3px; }
+@media (max-width: 639px) {
+  .wiki-hero { padding-top: 2rem; }
+  .wiki-title { font-size: 2.25rem; }
+  .wiki-kicker { letter-spacing: .08em; font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wiki-shell *, .wiki-shell *::before, .wiki-shell *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+.wiki-hero a { overflow-wrap: anywhere; }
+.wiki-main > div { min-width: 0; }
+.wiki-prose :is(p, li, td, th) { overflow-wrap: anywhere; }

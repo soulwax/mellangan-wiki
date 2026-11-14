@@ -41,20 +41,21 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
 
   return (
     <aside
-      className={`fixed lg:sticky top-[58px] z-30 w-72 shrink-0 h-[calc(100vh-58px)] bg-[#09070f] border-r border-dark-800 flex flex-col transition-transform duration-200 ${
+      className={`wiki-sidebar fixed lg:sticky top-[58px] z-30 w-72 max-w-[85vw] shrink-0 h-[calc(100vh-58px)] flex flex-col transition-transform duration-200 ${
         isMobileMenuOpen
           ? "translate-x-0"
           : "-translate-x-full lg:translate-x-0"
       }`}
     >
-      <div className="p-3 border-b border-dark-800 bg-[#09070f] space-y-2">
+      <div className="wiki-sidebar-tools p-4 space-y-3">
         <div className="relative">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`Filter ${chapterCount} chapters, files...`}
+            placeholder={`Search ${chapterCount} chapters...`}
+            aria-label="Search chapters and files"
             className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-[#110d1c] border border-dark-750 text-xs font-mono text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-gold-500/60 transition-colors"
           />
           {searchQuery && (
@@ -107,7 +108,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
           return (
             <div
               key={group.key}
-              className="rounded-xl border border-dark-800/70 bg-dark-900/30 overflow-hidden"
+              className="wiki-nav-group overflow-hidden"
             >
               <button
                 onClick={() => toggleGroup(group.key)}
@@ -147,6 +148,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
                     return (
                       <div key={item.id}>
                         <a
+                          aria-current={isActive ? "page" : undefined}
                           href={`/${item.id}`}
                           onClick={(e) => selectChapter(item.id, e)}
                           className={`w-full text-left px-2 py-1.5 rounded-lg text-xs transition-all flex items-center justify-between gap-1.5 ${
@@ -216,7 +218,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         })}
       </nav>
 
-      <div className="p-2.5 border-t border-dark-800 bg-[#09070f] text-[10px] font-mono text-slate-400">
+      <div className="wiki-sidebar-foot p-3 text-[10px] font-mono text-slate-400">
         <div className="flex items-center justify-between text-gold-400 font-semibold mb-1">
           <span className="flex items-center gap-1.5">
             <Terminal className="w-3 h-3" />
