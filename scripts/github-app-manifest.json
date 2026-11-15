@@ -1,0 +1,22 @@
+{
+  "name": "mellangan-community-bridge",
+  "url": "https://mel.bluesix.dev",
+  "hook_attributes": {
+    "url": "https://mel.bluesix.dev/api/webhook",
+    "active": false
+  },
+  "redirect_url": "http://127.0.0.1:3001/api/auth/github/manifest-callback",
+  "callback_urls": [
+    "https://mel.bluesix.dev/api/auth/callback",
+    "http://127.0.0.1:3001/api/auth/callback",
+    "http://127.0.0.1:3001/api/auth/github/manifest-callback",
+    "http://localhost:5173/api/auth/callback"
+  ],
+  "public": false,
+  "default_permissions": {
+    "issues": "write",
+    "contents": "read",
+    "metadata": "read"
+  },
+  "default_events": []
+}

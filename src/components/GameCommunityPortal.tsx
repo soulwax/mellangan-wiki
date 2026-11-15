@@ -430,6 +430,16 @@ export function GameCommunityPortal() {
     owner: "subagent",
   });
 
+  // --- OAuth & Cloud Integrations State ---
+  const [oauthStatus, setOauthStatus] = useState<{
+    oauthConfigured: boolean;
+    clientId: string | null;
+    neonDbConfigured: boolean;
+  }>({ oauthConfigured: false, clientId: null, neonDbConfigured: true });
+  const [manualClientId, setManualClientId] = useState<string>("");
+  const [manualClientSecret, setManualClientSecret] = useState<string>("");
+  const [isSyncingOauth, setIsSyncingOauth] = useState<boolean>(false);
+
   // --- SessionStorage State ---
   const [pollResponses, setPollResponses] = useState<Record<string, UserPollResponse>>(() =>
     getSessionData("MELLANGAN_POLL_RESPONSES", {})
@@ -546,6 +556,15 @@ export function GameCommunityPortal() {
         if (statusRes.ok) {
           const statusJson = await statusRes.json();
           if (statusJson.ghUser) setGhUser(statusJson.ghUser);
+        }
+        const authRes = await fetch(`${active}/auth/status`);
+        if (authRes.ok) {
+          const authJson = await authRes.json();
+          setOauthStatus({
+            oauthConfigured: Boolean(authJson.oauthConfigured),
+            clientId: authJson.clientId || null,
+            neonDbConfigured: Boolean(authJson.neonDbConfigured),
+          });
         }
       } catch {
         // Ignored
@@ -729,6 +748,49 @@ export function GameCommunityPortal() {
       }
     } catch (err) {
       showFlash(`Error connecting to git sync: ${String(err)}`);
+    }
+  };
+
+  const handleConfigureOauth = async () => {
+    if (!manualClientId.trim() || !manualClientSecret.trim()) {
+      showFlash("Please provide both Client ID and Client Secret");
+      return;
+    }
+    setIsSyncingOauth(true);
+    try {
+      const res = await fetch(`${bridgeUrl}/auth/configure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: manualClientId.trim(),
+          clientSecret: manualClientSecret.trim(),
+        }),
+      });
+      if (res.ok) {
+        showFlash("OAuth credentials stored and synced to Vercel!");
+        setManualClientSecret("");
+        try {
+          const authRes = await fetch(`${bridgeUrl}/auth/status`);
+          if (authRes.ok) {
+            const authJson = await authRes.json();
+            setOauthStatus({
+              oauthConfigured: Boolean(authJson.oauthConfigured),
+              clientId: authJson.clientId || null,
+              neonDbConfigured: Boolean(authJson.neonDbConfigured),
+            });
+          }
+        } catch {
+          // ignore
+        }
+      } else {
+        const err = await res.json();
+        showFlash(`Sync failed: ${err.error || "Unknown error"}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showFlash(`Sync error: ${msg}`);
+    } finally {
+      setIsSyncingOauth(false);
     }
   };
 
@@ -1918,6 +1980,107 @@ export function GameCommunityPortal() {
               Direct connection between your local game executable and wiki documentation. Configure development flags,
               analyze runtime logs, and inspect engine hotkeys.
             </p>
+          </div>
+
+          {/* Cloud Connectors: Neon Postgres & GitHub OAuth */}
+          <div className="rounded-xl border border-dark-800 bg-dark-900 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Cloud Integrations: Neon Postgres &amp; GitHub OAuth</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  <span>Neon DB Connected</span>
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono border flex items-center gap-1 ${
+                    oauthStatus.oauthConfigured
+                      ? "bg-emerald-950/70 text-emerald-300 border-emerald-800/60"
+                      : "bg-amber-950/70 text-amber-300 border-amber-800/60"
+                  }`}
+                >
+                  {oauthStatus.oauthConfigured ? (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      <span>OAuth Active</span>
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="w-3 h-3 text-amber-400" />
+                      <span>OAuth Pending</span>
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Neon DB Info */}
+              <div className="p-3.5 rounded-lg bg-dark-950 border border-dark-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Neon Serverless Postgres</span>
+                  </span>
+                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                    Free Tier
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Provisioned via Vercel Marketplace (<code>mellangan-db</code>). Injected into production, preview, and local <code>.env.local</code>.
+                </p>
+                <div className="text-[11px] font-mono text-slate-400 bg-dark-900 p-2 rounded border border-dark-850 truncate">
+                  Host: ep-noisy-waterfall-b9ec8un4-pooler.c-7.eu-central-1.aws.neon.tech
+                </div>
+              </div>
+
+              {/* GitHub OAuth Flow */}
+              <div className="p-3.5 rounded-lg bg-dark-950 border border-dark-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <GitBranch className="w-3.5 h-3.5 text-gold-400" />
+                    <span>GitHub OAuth App</span>
+                  </span>
+                  <a
+                    href="http://127.0.0.1:3001/api/auth/manifest"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] font-bold px-2 py-0.5 rounded bg-gold-950 hover:bg-gold-900 text-gold-300 border border-gold-800 flex items-center gap-1"
+                  >
+                    <span>1-Click Setup</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Registers GitHub App via manifest, captures Client ID &amp; Secret, and syncs directly to Vercel via CLI.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    placeholder="Client ID (Iv1...)"
+                    value={manualClientId}
+                    onChange={(e) => setManualClientId(e.target.value)}
+                    className="flex-1 bg-dark-900 border border-dark-850 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-gold-500/60 font-mono"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Client Secret"
+                    value={manualClientSecret}
+                    onChange={(e) => setManualClientSecret(e.target.value)}
+                    className="flex-1 bg-dark-900 border border-dark-850 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-gold-500/60 font-mono"
+                  />
+                  <button
+                    onClick={handleConfigureOauth}
+                    disabled={isSyncingOauth}
+                    className="px-2.5 py-1 rounded bg-dark-850 hover:bg-dark-800 text-gold-300 border border-dark-750 text-xs font-bold whitespace-nowrap"
+                  >
+                    {isSyncingOauth ? "Syncing..." : "Sync Vercel"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="rounded-xl border border-dark-800 bg-dark-900 p-4 space-y-4">

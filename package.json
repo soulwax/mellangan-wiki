@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "bridge": "node scripts/bridge-server.mjs",
+    "oauth:setup": "node scripts/setup-github-oauth.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "node scripts/verify-all.js",
