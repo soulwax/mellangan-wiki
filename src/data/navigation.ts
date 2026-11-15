@@ -17,6 +17,19 @@ interface NavTreeGroup {
 
 export const NAV_TREE: NavTreeGroup[] = [
   {
+    key: "community-portal",
+    label: "Roadmap & Community Hub",
+    icon: Compass,
+    color: "text-gold-400",
+    badgeColor: "bg-gold-500/15 text-gold-300 border-gold-500/30",
+    items: [
+      {
+        id: "plan-and-todo",
+        shortTitle: "Master Plan, TODO & Community Poll",
+      },
+    ],
+  },
+  {
     key: "showcase",
     label: "Game Showcase",
     icon: Sparkles,
@@ -346,6 +359,13 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
   {
     groupName: "Gameplay & Workshop",
     topics: [
+      {
+        id: "plan-and-todo",
+        title: "Master Plan & Community Poll",
+        subtitle: "Vote on design dilemmas, submit art & analyze logs",
+        icon: Compass,
+        badge: "POLL",
+      },
       {
         id: "diablo-loot-runrules",
         title: "Diablo Loot & Item Affixes",

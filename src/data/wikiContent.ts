@@ -40,7 +40,8 @@ export interface WikiSection {
     | "weather"
     | "engine-math"
     | "input-response"
-    | "status-resistance";
+    | "status-resistance"
+    | "game-interface";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -6005,9 +6006,109 @@ flowchart LR
     Ledger --> Share[Share with permitted recipient once]
     Ledger --> Save[Save fact and disclosure rows]
     Share --> Save
-    Save --> Load[Load rows in either order]
-    Load --> Link[Remove orphan disclosures]
+     Save --> Load[Load rows in either order]
+     Load --> Link[Remove orphan disclosures]
 ` }],
   },
+  {
+    id: "plan-and-todo",
+    title: "52. Master Plan, Living TODO & Community Interface",
+    category: "contribute",
+    summary:
+      "Master development roadmap, active TODO tasks, zero-login community poll on open game design dilemmas, pixel art submission pipeline, and in-engine telemetry bridge.",
+    sourceFiles: [
+      "TODO.md",
+      "README.md",
+      "CHANGELOG.md",
+      "CMakeLists.txt",
+      "src/main.cpp",
+      "src/DevStart.cpp",
+    ],
+    interactiveComponent: "game-interface",
+    content: `
+### The Master Development Plan & Architectural Vision
 
+**Mellangan** began as an uncompromising survival arena prototype and has matured into an expansive, atmosphere-rich action RPG. Its design fuses the subterranean mystery of Caves of Qud, the unrelenting progression pace of Risk of Rain, the gun-feel and kinetic dodges of Enter the Gungeon, and the room-by-room item synergies of The Binding of Isaac.
+
+#### The Dual-Pillar Architecture: Campaign vs. Survival
+
+The game maintains two fundamentally distinct, mode-aware game loops:
+
+1. **Campaign Mode (Main Narrative Spine):**
+   * Features a four-slot persistent character ledger (\`campaign.txt\` through \`campaign-4.txt\`).
+   * Spans Acts I through V across procedurally stitched Voronoi biomes, ancient groves, and deep subterranean cave delves.
+   * Emphasizes regional situations such as The Splintered Ford, settlement hubs like Hearthwick and Kettlestaithe, local fact ledgers, and culinary craft.
+   * Introduces real-time d20 spell attacks (Star Lance, Cinder Bloom, Winter Grasp, Verdant Ward) alongside martial weapons and class Arts.
+   * Full pacifist route support through stowed weapons (Key 2), parleying, rite gifts, and founder name invocations.
+
+2. **Survival Mode (Pure Arcade Loop):**
+   * A relentless nocturnal arena test: survive the oncoming midnight horde across expanding biome tiers.
+   * Locate and rekindle stone shrines to hold back the encroaching dark.
+   * Unpolluted competitive leaderboards: Campaign-only equipment bases and quest relics never contaminate the survival drop tables.
+
+#### The Upcoming Engine and Game Repository Decoupling
+
+When the Vulkan rendering and entity infrastructure reaches full maturity:
+* The core rendering layer (**Vulkan2D**, pre-compiled SPIR-V pipeline, MoltenVK support, and high-refresh fractional easing) will split into a dedicated, public open-source engine repository.
+* The proprietary game assets, campaign narrative tables, and commercial mechanics will move to an independent game repository, paving the way for official Steam release and Steam Deck verification.
+
+### Living Development Tasks & Sprint Priorities
+
+Active engineering tasks are tracked directly in \`TODO.md\`. Each item maintains strict code ownership, clear verification criteria, and zero-defect requirements:
+
+* **Unique Weapon Tooltip Attack Grants (\`src/gui/Tooltip.cpp\`):**
+  Unique items currently display rich narrative lore but omit their active granted attack profile. The goal is showing both for Oathblade, Farsong, Grim Harvest, and all base-grant uniques without altering rune-word tooltips.
+* **Mode-Aware Gambling Deterministic Verification (\`src/test/VendorTest.cpp\`):**
+  Rigorous tests for \`gamble(base, rng, campaign)\` ensuring Campaign never rolls Survival-exclusive relics, and Survival never yields Campaign-exclusive equipment bases.
+* **Content Mode Declaration Fault Assertions (\`src/meta/Content.cpp\`):**
+  Extending \`contentFaults()\` to enforce that Campaign-only uniques must use Campaign-only bases, Survival-only items reject Campaign bases, and all references resolve at boot.
+* **32-Voice LRU Audio Mixer with Voice Stealing (\`src/audio/AudioMixer.cpp\`):**
+  Dynamic channel culling and distance attenuation to maintain crystal-clear audio during 10,000 entity soak tests without distortion or buffer underruns.
+
+### Community Bridge: Zero-Login Polls, RFCs & Asset Submissions
+
+Community collaboration directly shapes Mellangan. The interactive portal below provides four key capabilities:
+
+1. **Session-Backed Community Polls:**
+   Cast votes on pressing design dilemmas (such as unique weapon discovery, meal spoilage, and shrine counter-assaults) and supply written feedback. All votes and rationales persist seamlessly in browser \`sessionStorage\` with zero accounts or logins required.
+2. **RFC Proposal Export:**
+   Compile your votes, custom comments, and balance priorities into clean Markdown ready to submit as a GitHub Discussion RFC or share in community Discord channels.
+3. **Artwork & Pixel Art Submission:**
+   Inspect, upload, or paint 16×16 pixel art directly in the browser with real-time palette analysis, dimension verification, and automatic PR submission manifest generation for \`res/\`.
+4. **Engine Telemetry & Command Line Configurator:**
+   Paste runtime logs from \`mellangan.log\` for instant diagnostic parsing, or configure launch flags (\`--dev\`, \`--seed\`, \`--hero\`, \`--bench-gate\`) with one-click terminal copy.
+`,
+    mermaidCharts: [
+      {
+        title: "Mellangan Development Lifecycle & Community Loop",
+        chart: `
+flowchart TD
+    subgraph Community["Player & Community Interface"]
+        Poll["Open Design Polls<br/>(SessionStorage / No Login)"]
+        Art["Asset Submission<br/>(16x16 Pixel Canvas)"]
+        LogDiag["Log & Crash Diagnostic<br/>(Telemetry Parser)"]
+    end
+
+    subgraph Roadmap["Master Plan & Living Tasks"]
+        TODO["Living TODO Board<br/>(TODO.md Sync)"]
+        Sprint["Active Sprints<br/>(Campaign & Engine)"]
+    end
+
+    subgraph Engine["Mellangan C++20 Core"]
+        Content["Content.cpp & Tooltip.cpp<br/>(Weapon Grants & Lore)"]
+        Vendor["VendorTest.cpp<br/>(Mode-Aware Pools)"]
+        Vulkan2D["Vulkan2D Submodule<br/>(Standalone Engine Split)"]
+    end
+
+    Poll --> TODO
+    Art --> Content
+    LogDiag --> Engine
+    TODO --> Sprint
+    Sprint --> Content
+    Sprint --> Vendor
+    Sprint --> Vulkan2D
+`,
+      },
+    ],
+  },
 ];
