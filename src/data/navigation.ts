@@ -150,6 +150,43 @@ export const NAV_TREE: NavTreeGroup[] = [
     ],
   },
   {
+    key: "vulkan2d",
+    label: "Vulkan2D Subsystem (extern/Vulkan2d)",
+    icon: Layers,
+    color: "text-cyan-400",
+    badgeColor: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+    items: [
+      {
+        id: "vk2d-architecture",
+        shortTitle: "Renderer Architecture & Frame Lifecycle",
+      },
+      {
+        id: "vk2d-devices-memory",
+        shortTitle: "Devices, VMA & Paged DescriptorBuffers",
+      },
+      {
+        id: "vk2d-descriptors-textures",
+        shortTitle: "Bindless Texture Array & DescriptorControl",
+      },
+      {
+        id: "vk2d-sprite-batching",
+        shortTitle: "Compute Sprite Batching & Instanced Draws",
+      },
+      {
+        id: "vk2d-pipelines-shaders",
+        shortTitle: "Pipelines, Blend Modes & Slang Compiler",
+      },
+      {
+        id: "vk2d-targets-cameras",
+        shortTitle: "Render Targets, 3 Passes & 10-Camera UBO",
+      },
+      {
+        id: "vk2d-primitives-shadows-gui",
+        shortTitle: "Polygons, 2D Shadows, 3D Models & Nuklear",
+      },
+    ],
+  },
+  {
     key: "world-terrain",
     label: "World & Terrain Synthesis",
     icon: Compass,

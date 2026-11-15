@@ -19,7 +19,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     "getting-started": true, tutorials: true, "ai-concurrency": true,
-    rendering: true, "world-terrain": true, "core-memory": true, "gameplay-ai": true,
+    rendering: true, vulkan2d: true, "world-terrain": true, "core-memory": true, "gameplay-ai": true,
   });
   const activeGroup = NAV_TREE.find(group => group.items.some(item => item.id === activeSection.id));
   useEffect(() => {
