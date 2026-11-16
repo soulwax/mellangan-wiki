@@ -10133,4 +10133,1497 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "vk2d-renderer-book-instance-device-swapchain",
+    title: "74. Vulkan Renderer Book IX: Building From Scratch (Instance, Devices, Surface & Swapchain)",
+    category: "graphics",
+    summary:
+      "Leave wrapper APIs behind and build a Vulkan 1.2 renderer from scratch in pure C11 and SDL3: VkInstance validation and portability extensions, GPU scoring and pNext descriptor indexing checks, SDL3 surfaces with High-DPI fallbacks, VkSwapchainKHR creation, and Assignments 23–25.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+      "extern/Vulkan2d/VK2D/src/PhysicalDevice.c",
+      "extern/Vulkan2d/VK2D/src/LogicalDevice.c",
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+      "extern/Vulkan2d/VK2D/src/Initializers.c",
+      "extern/Vulkan2d/VK2D/include/VK2D/Opaque.h",
+    ],
+    content: `
+### Chapter 1: Leaving the Wrapper Behind (Your Renderer From Zero)
+
+In **Books I through VIII**, you mastered how GPUs think in warps and quads, and you wrote Slang shaders inside an already running Vulkan2D host. Starting in **Book IX**, we turn the camera around: **you are going to build the entire C/Vulkan host renderer itself from an empty \`main.c\` file**.
+
+Every line we write follows the real, battle-tested architecture inside \`extern/Vulkan2d\`, stripped down to its pure Vulkan 1.2 essentials so you understand *why* every handle exists and *what breaks* if you wire a flag wrong:
+
+1. **No Hidden Global State:** Unlike OpenGL, Vulkan has no implicit context. Your renderer struct (\`struct Renderer\`) explicitly owns every handle from \`VkInstance\` down to \`VkCommandPool\`.
+2. **Explicit Failure Boundaries:** Every boot step checks its \`VkResult\`. If step 7 fails, teardown unwinds steps 6 down to 1 cleanly without touching uninitialized handles (see \`VK2D_INIT_STEP\` in \`VK2D/src/Renderer.c\`).
+3. **Cross-Platform From Line 1:** Windows, Linux (X11 and Wayland), and macOS (MoltenVK) each have subtle requirements around portability extensions, \`UINT32_MAX\` swapchain extents, and deprecated device layers.
+
+---
+
+### Chapter 2: Creating \`VkInstance\`, Validation Layers & Portability Flags
+
+A \`VkInstance\` is the connection between your C executable and the Vulkan loader (\`vulkan-1.dll\` on Windows, \`libvulkan.so\` on Linux, \`libMoltenVK.dylib\` on macOS). Unlike legacy OpenGL, Vulkan refuses to assume you want debugging or windowing: you must **enumerate what the system offers** and explicitly enable what you need.
+
+#### Step 1: Query System Layers & Extensions Before Requesting Them
+
+Never blindly ask for \`VK_LAYER_KHRONOS_validation\` or optional extensions: on an end-user machine without the Vulkan SDK installed, asking for a missing layer makes \`vkCreateInstance\` fail with \`VK_ERROR_LAYER_NOT_PRESENT\`! Look at how \`Renderer.c\` (lines 91–227) handles this safely:
+
+\`\`\`c
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+#include <vulkan/vulkan.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct Renderer {
+    SDL_Window *window;
+    VkInstance instance;
+    VkDebugReportCallbackEXT debugReport;
+    VkPhysicalDevice physicalDevice;
+    uint32_t graphicsFamily;
+    VkDevice device;
+    VkQueue graphicsQueue;
+    VkCommandPool commandPool;
+    VkSurfaceKHR surface;
+    VkSurfaceFormatKHR surfaceFormat;
+    VkExtent2D extent;
+    VkSwapchainKHR swapchain;
+    uint32_t swapchainImageCount;
+    VkImage *swapchainImages;
+    VkImageView *swapchainImageViews;
+} Renderer;
+
+static bool hasLayer(const VkLayerProperties *layers, uint32_t count, const char *name) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(layers[i].layerName, name) == 0) return true;
+    }
+    return false;
+}
+
+static bool hasExt(const VkExtensionProperties *exts, uint32_t count, const char *name) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(exts[i].extensionName, name) == 0) return true;
+    }
+    return false;
+}
+\`\`\`
+
+Now assemble the instance extension and layer arrays cleanly:
+1. Call \`SDL_Vulkan_GetInstanceExtensions(&sdlCount)\` to collect the OS surface extensions (\`VK_KHR_surface\` plus \`VK_KHR_win32_surface\`, \`VK_KHR_xcb_surface\`, \`VK_KHR_wayland_surface\`, or \`VK_EXT_metal_surface\`).
+2. Check \`vkEnumerateInstanceExtensionProperties\` for \`VK_KHR_get_physical_device_properties2\` (needed to query Vulkan 1.2 descriptor indexing features and VRAM budgets) and \`VK_KHR_portability_enumeration\` (required on macOS MoltenVK!).
+3. If \`VK_KHR_portability_enumeration\` is present, add it **once** (avoiding duplicates if SDL already listed it) and OR \`VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR\` into \`VkInstanceCreateInfo::flags\`.
+4. If debug mode is requested and \`VK_LAYER_KHRONOS_validation\` exists, add it plus \`VK_EXT_DEBUG_REPORT_EXTENSION_NAME\` (or \`VK_EXT_debug_utils\`).
+
+\`\`\`c
+bool createInstance(Renderer *r, bool enableValidation) {
+    uint32_t layerCount = 0;
+    vkEnumerateInstanceLayerProperties(&layerCount, NULL);
+    VkLayerProperties *sysLayers = calloc(layerCount ? layerCount : 1, sizeof(VkLayerProperties));
+    if (layerCount) vkEnumerateInstanceLayerProperties(&layerCount, sysLayers);
+
+    uint32_t extCount = 0;
+    vkEnumerateInstanceExtensionProperties(NULL, &extCount, NULL);
+    VkExtensionProperties *sysExts = calloc(extCount ? extCount : 1, sizeof(VkExtensionProperties));
+    if (extCount) vkEnumerateInstanceExtensionProperties(NULL, &extCount, sysExts);
+
+    const char *extensions[16];
+    const char *layers[4];
+    uint32_t enabledExtCount = 0;
+    uint32_t enabledLayerCount = 0;
+
+    if (enableValidation && hasLayer(sysLayers, layerCount, "VK_LAYER_KHRONOS_validation")) {
+        layers[enabledLayerCount++] = "VK_LAYER_KHRONOS_validation";
+        extensions[enabledExtCount++] = VK_EXT_DEBUG_REPORT_EXTENSION_NAME;
+    }
+    if (hasExt(sysExts, extCount, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        extensions[enabledExtCount++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+    }
+
+    bool portability = hasExt(sysExts, extCount, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    uint32_t sdlCount = 0;
+    const char *const *sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlCount);
+    for (uint32_t i = 0; i < sdlCount; i++) {
+        if (strcmp(sdlExts[i], VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) != 0) {
+            extensions[enabledExtCount++] = sdlExts[i];
+        }
+    }
+    if (portability) {
+        extensions[enabledExtCount++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    }
+
+    VkApplicationInfo app = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "ScratchVulkan",
+        .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+        .pEngineName = "ScratchEngine",
+        .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+        .apiVersion = VK_API_VERSION_1_2,
+    };
+
+    VkInstanceCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = portability ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0,
+        .pApplicationInfo = &app,
+        .enabledLayerCount = enabledLayerCount,
+        .ppEnabledLayerNames = layers,
+        .enabledExtensionCount = enabledExtCount,
+        .ppEnabledExtensionNames = extensions,
+    };
+
+    VkResult res = vkCreateInstance(&ci, NULL, &r->instance);
+    free(sysExts);
+    free(sysLayers);
+    return res == VK_SUCCESS;
+}
+\`\`\`
+
+*(Function Loader Rule: Extension functions such as \`vkCreateDebugReportCallbackEXT\` are not exported directly by the Vulkan loader library on every platform. Always resolve them at runtime with \`(PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(r->instance, "vkCreateDebugReportCallbackEXT")\` as shown in \`VK2D/src/RendererMeta.c\` line 267!)*
+
+---
+
+### Chapter 3: Selecting a \`VkPhysicalDevice\` & Building \`VkDevice\`
+
+With an instance alive, call \`vkEnumeratePhysicalDevices\` to discover all GPUs on the machine. A laptop often exposes **two** physical devices: an integrated GPU (\`VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU\`) and a discrete GPU (\`VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\`).
+
+#### 1. Queue Families & GPU Selection (\`PhysicalDevice.c\`)
+
+A GPU splits hardware engines into **Queue Families**. For a modern 2D/3D sprite renderer, we want a queue family that supports **both** \`VK_QUEUE_GRAPHICS_BIT\` and \`VK_QUEUE_COMPUTE_BIT\` (plus presentation to our \`VkSurfaceKHR\`). Putting graphics and compute on the same queue family avoids cross-family queue ownership transfers on every sprite batch!
+
+\`\`\`c
+static bool findQueueFamily(VkPhysicalDevice pd, VkSurfaceKHR surface, uint32_t *outFamily) {
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &count, NULL);
+    VkQueueFamilyProperties *q = calloc(count, sizeof(VkQueueFamilyProperties));
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &count, q);
+
+    bool found = false;
+    for (uint32_t i = 0; i < count; i++) {
+        VkBool32 presentSupport = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, surface, &presentSupport);
+        VkQueueFlags want = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+        if (q[i].queueCount > 0 && (q[i].queueFlags & want) == want && presentSupport) {
+            *outFamily = i;
+            found = true;
+            break;
+        }
+    }
+    free(q);
+    return found;
+}
+\`\`\`
+
+When picking among multiple valid GPUs (\`_vk2dPhysicalDeviceGetBestDevice\` in \`PhysicalDevice.c\` line 93), remember the golden priority rule:
+- Prefer \`VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\` first, breaking out immediately once found.
+- Fall back to integrated or virtual GPUs if no discrete card exists.
+
+#### 2. Querying Descriptor Indexing via \`pNext\` & Creating \`VkDevice\` (\`LogicalDevice.c\`)
+
+Vulkan 1.2 **never turns on optional GPU features automatically**. Even if the hardware supports bindless texture arrays or wide lines, leaving them disabled causes validation errors or undefined behavior!
+
+Look closely at how \`VK2D/src/LogicalDevice.c\` (lines 66–137) validates and activates Vulkan 1.2 descriptor indexing using the \`pNext\` chain:
+
+\`\`\`c
+bool createLogicalDevice(Renderer *r) {
+    // 1. Check device extensions (swapchain + MoltenVK portability subset if advertised)
+    uint32_t devExtCount = 0;
+    vkEnumerateDeviceExtensionProperties(r->physicalDevice, NULL, &devExtCount, NULL);
+    VkExtensionProperties *devExts = calloc(devExtCount, sizeof(VkExtensionProperties));
+    vkEnumerateDeviceExtensionProperties(r->physicalDevice, NULL, &devExtCount, devExts);
+    bool hasPortabilitySubset = hasExt(devExts, devExtCount, "VK_KHR_portability_subset");
+    free(devExts);
+
+    // 2. Query Vulkan 1.2 descriptor indexing features via pNext
+    VkPhysicalDeviceDescriptorIndexingFeatures supported = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES
+    };
+    VkPhysicalDeviceFeatures2 feats2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &supported
+    };
+    vkGetPhysicalDeviceFeatures2(r->physicalDevice, &feats2);
+
+    if (!supported.shaderSampledImageArrayNonUniformIndexing ||
+        !supported.runtimeDescriptorArray ||
+        !supported.descriptorBindingVariableDescriptorCount ||
+        !supported.descriptorBindingPartiallyBound ||
+        !supported.descriptorBindingUpdateUnusedWhilePending ||
+        !supported.descriptorBindingSampledImageUpdateAfterBind) {
+        return false; // Fail loudly with the exact missing capability!
+    }
+
+    VkPhysicalDeviceDescriptorIndexingFeatures enableIndexing = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = VK_TRUE,
+        .descriptorBindingPartiallyBound = VK_TRUE,
+        .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
+        .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+        .descriptorBindingUniformBufferUpdateAfterBind = supported.descriptorBindingUniformBufferUpdateAfterBind,
+    };
+
+    const char *exts[4];
+    uint32_t extN = 0;
+    exts[extN++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    if (hasPortabilitySubset) {
+        exts[extN++] = "VK_KHR_portability_subset";
+    }
+
+    float priority = 1.0f;
+    VkDeviceQueueCreateInfo qci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = r->graphicsFamily,
+        .queueCount = 1,
+        .pQueuePriorities = &priority,
+    };
+
+    VkPhysicalDeviceFeatures coreFeats = {0};
+    VkDeviceCreateInfo dci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &enableIndexing,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &qci,
+        .enabledLayerCount = 0,          // Device layers are deprecated in Vulkan!
+        .ppEnabledLayerNames = NULL,
+        .enabledExtensionCount = extN,
+        .ppEnabledExtensionNames = exts,
+        .pEnabledFeatures = &coreFeats,
+    };
+
+    if (vkCreateDevice(r->physicalDevice, &dci, NULL, &r->device) != VK_SUCCESS) {
+        return false;
+    }
+    vkGetDeviceQueue(r->device, r->graphicsFamily, 0, &r->graphicsQueue);
+
+    VkCommandPoolCreateInfo pci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = r->graphicsFamily,
+    };
+    return vkCreateCommandPool(r->device, &pci, NULL, &r->commandPool) == VK_SUCCESS;
+}
+\`\`\`
+
+*(Why \`enabledLayerCount = 0\`? Early Vulkan 1.0 tutorials set \`enabledLayerCount\` on \`VkDeviceCreateInfo\`, which modern validation layers and MoltenVK warn against as deprecated. Validation is strictly an instance-level concern.)*
+
+---
+
+### Chapter 4: Window Surface, High-DPI Extents & \`VkSwapchainKHR\`
+
+A **Swapchain** is the circular conveyor belt of backbuffer images shared between your GPU and the operating system's compositor. When the GPU finishes drawing into image $i$, it hands image $i$ to the display controller while immediately starting work on image $(i + 1) \\bmod N$.
+
+#### 1. Surface Format, Present Mode & Wayland/Retina \`UINT32_MAX\` Extents
+
+Inside \`_vk2dRendererCreateWindowSurface()\` and \`_vk2dRendererCreateSwapchain()\` (\`RendererMeta.c\` lines 309–440), three checks keep swapchain creation rock-solid across OS compositors:
+
+1. **Color Format:** Query \`vkGetPhysicalDeviceSurfaceFormatsKHR\`. Prefer \`VK_FORMAT_B8G8R8A8_SRGB\` paired with \`VK_COLOR_SPACE_SRGB_NONLINEAR_KHR\` (universally supported on desktop and MoltenVK, giving automatic hardware linear-to-sRGB encoding when writing pixels).
+2. **Present Mode Fallback:** Scan \`vkGetPhysicalDeviceSurfacePresentModesKHR\`. If you want tear-free low-latency triple buffering (\`VK_PRESENT_MODE_MAILBOX_KHR\`) or uncapped frames (\`VK_PRESENT_MODE_IMMEDIATE_KHR\`) and the driver lacks it, fall back to \`VK_PRESENT_MODE_FIFO_KHR\`, which the Vulkan spec guarantees on **100% of swapchain implementations**.
+3. **High-DPI & Wayland Extent Guard:** Look at \`_vk2dRendererGetSurfaceSize()\` (\`RendererMeta.c\` line 315): on Wayland and some Retina setups, \`caps.currentExtent.width\` equals \`UINT32_MAX\` (\`0xFFFFFFFF\`) as a signal that *you* must supply the pixel dimensions! Query \`SDL_GetWindowSizeInPixels(window, &w, &h)\` and clamp to \`[minImageExtent, maxImageExtent]\`.
+
+#### 2. Swapchain Image Count Clamping Formula
+
+We want at least $3$ images for triple buffering so the GPU never waits for vsync to acquire a new frame, clamped safely inside hardware bounds:
+
+$$\\text{imageCount} = \\begin{cases} \\min\\bigl(\\max(\\text{minImageCount}, 3),\\; \\text{maxImageCount}\\bigr) & \\text{if } \\text{maxImageCount} > 0 \\\\ \\max(\\text{minImageCount}, 3) & \\text{if } \\text{maxImageCount} = 0 \\end{cases}$$
+
+*(Remember: \`maxImageCount == 0\` in Vulkan means **no upper bound**, not zero allowed images!)*
+
+\`\`\`c
+bool createSwapchain(Renderer *r, VkPresentModeKHR desiredMode, VkSwapchainKHR oldSwapchain) {
+    VkSurfaceCapabilitiesKHR caps;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->physicalDevice, r->surface, &caps);
+
+    if (caps.currentExtent.width == UINT32_MAX || caps.currentExtent.height == UINT32_MAX) {
+        int pxW = 0, pxH = 0;
+        SDL_GetWindowSizeInPixels(r->window, &pxW, &pxH);
+        r->extent.width  = (uint32_t)pxW;
+        r->extent.height = (uint32_t)pxH;
+    } else {
+        r->extent = caps.currentExtent;
+    }
+
+    // Clamp inside hardware min/max extents
+    if (r->extent.width  < caps.minImageExtent.width)  r->extent.width  = caps.minImageExtent.width;
+    if (r->extent.width  > caps.maxImageExtent.width)  r->extent.width  = caps.maxImageExtent.width;
+    if (r->extent.height < caps.minImageExtent.height) r->extent.height = caps.minImageExtent.height;
+    if (r->extent.height > caps.maxImageExtent.height) r->extent.height = caps.maxImageExtent.height;
+
+    uint32_t imageCount = caps.minImageCount > 3 ? caps.minImageCount : 3;
+    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
+        imageCount = caps.maxImageCount;
+    }
+
+    r->surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+    r->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    VkSwapchainCreateInfoKHR sci = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = r->surface,
+        .minImageCount = imageCount,
+        .imageFormat = r->surfaceFormat.format,
+        .imageColorSpace = r->surfaceFormat.colorSpace,
+        .imageExtent = r->extent,
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = caps.currentTransform,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = desiredMode,
+        .clipped = VK_TRUE,
+        .oldSwapchain = oldSwapchain,
+    };
+
+    if (vkCreateSwapchainKHR(r->device, &sci, NULL, &r->swapchain) != VK_SUCCESS) {
+        return false;
+    }
+
+    vkGetSwapchainImagesKHR(r->device, r->swapchain, &r->swapchainImageCount, NULL);
+    r->swapchainImages = calloc(r->swapchainImageCount, sizeof(VkImage));
+    r->swapchainImageViews = calloc(r->swapchainImageCount, sizeof(VkImageView));
+    vkGetSwapchainImagesKHR(r->device, r->swapchain, &r->swapchainImageCount, r->swapchainImages);
+
+    for (uint32_t i = 0; i < r->swapchainImageCount; i++) {
+        VkImageViewCreateInfo iv = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = r->swapchainImages[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = r->surfaceFormat.format,
+            .components = {
+                VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY
+            },
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0, .levelCount = 1,
+                .baseArrayLayer = 0, .layerCount = 1,
+            },
+        };
+        if (vkCreateImageView(r->device, &iv, NULL, &r->swapchainImageViews[i]) != VK_SUCCESS) {
+            return false;
+        }
+    }
+    return true;
+}
+\`\`\`
+
+Notice the \`VkImageView\` loop at the bottom: in Vulkan, shaders and framebuffers **never read or write a raw \`VkImage\` directly**. They always access a \`VkImageView\`, which acts as a typed lens over mip levels, array layers, and color channels!
+
+---
+
+### Chapter 5: Graded Assignments 23–25 (With Starter Code & Full Solutions)
+
+#### Assignment 23: GPU Capability & Hardware Report Utility
+- **Objective:** Write a standalone C function \`printDeviceReport(VkInstance instance)\` that enumerates all \`VkPhysicalDevice\` handles, prints each GPU's name, type (\`Discrete\`, \`Integrated\`, \`Other\`), Vulkan API version, total \`DEVICE_LOCAL\` VRAM in megabytes, and queries \`VkPhysicalDeviceDescriptorIndexingProperties::maxDescriptorSetUpdateAfterBindSampledImages\`.
+- **Reference Solution:**
+\`\`\`c
+void printDeviceReport(VkInstance instance) {
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(instance, &count, NULL);
+    VkPhysicalDevice *devs = calloc(count, sizeof(VkPhysicalDevice));
+    vkEnumeratePhysicalDevices(instance, &count, devs);
+
+    for (uint32_t i = 0; i < count; i++) {
+        VkPhysicalDeviceDescriptorIndexingProperties idxProps = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES
+        };
+        VkPhysicalDeviceProperties2 props2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &idxProps
+        };
+        vkGetPhysicalDeviceProperties2(devs[i], &props2);
+
+        VkPhysicalDeviceMemoryProperties mem;
+        vkGetPhysicalDeviceMemoryProperties(devs[i], &mem);
+        VkDeviceSize vramBytes = 0;
+        for (uint32_t h = 0; h < mem.memoryHeapCount; h++) {
+            if (mem.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                vramBytes += mem.memoryHeaps[h].size;
+            }
+        }
+
+        const char *kind = props2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "Discrete" :
+                           props2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "Integrated" : "Other";
+        printf("[%u] %s (%s) | Vulkan %u.%u.%u | VRAM: %.0f MB | MaxBindlessTextures: %u\\n",
+               i, props2.properties.deviceName, kind,
+               VK_VERSION_MAJOR(props2.properties.apiVersion),
+               VK_VERSION_MINOR(props2.properties.apiVersion),
+               VK_VERSION_PATCH(props2.properties.apiVersion),
+               (double)vramBytes / (1024.0 * 1024.0),
+               idxProps.maxDescriptorSetUpdateAfterBindSampledImages);
+    }
+    free(devs);
+}
+\`\`\`
+
+#### Assignment 24: Fail-Safe Present Mode Picker & High-DPI Extent Helper
+- **Objective:** Implement \`choosePresentMode(pd, surface, preferred)\` and \`queryExtent(pd, surface, window)\` matching \`_vk2dRendererGetPresentMode\` and \`_vk2dRendererGetSurfaceSize\` so your renderer handles Wayland/Retina windows and falls back to \`VK_PRESENT_MODE_FIFO_KHR\` automatically.
+- **Reference Solution:**
+\`\`\`c
+VkPresentModeKHR choosePresentMode(VkPhysicalDevice pd, VkSurfaceKHR surface, VkPresentModeKHR preferred) {
+    uint32_t count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(pd, surface, &count, NULL);
+    VkPresentModeKHR *modes = calloc(count ? count : 1, sizeof(VkPresentModeKHR));
+    if (count) vkGetPhysicalDeviceSurfacePresentModesKHR(pd, surface, &count, modes);
+
+    VkPresentModeKHR picked = VK_PRESENT_MODE_FIFO_KHR;
+    for (uint32_t i = 0; i < count; i++) {
+        if (modes[i] == preferred) {
+            picked = preferred;
+            break;
+        }
+    }
+    free(modes);
+    return picked;
+}
+
+VkExtent2D queryExtent(VkPhysicalDevice pd, VkSurfaceKHR surface, SDL_Window *window) {
+    VkSurfaceCapabilitiesKHR caps;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pd, surface, &caps);
+    if (caps.currentExtent.width != UINT32_MAX && caps.currentExtent.height != UINT32_MAX) {
+        return caps.currentExtent;
+    }
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    VkExtent2D ext = { (uint32_t)w, (uint32_t)h };
+    if (ext.width < caps.minImageExtent.width)   ext.width = caps.minImageExtent.width;
+    if (ext.width > caps.maxImageExtent.width)   ext.width = caps.maxImageExtent.width;
+    if (ext.height < caps.minImageExtent.height) ext.height = caps.minImageExtent.height;
+    if (ext.height > caps.maxImageExtent.height) ext.height = caps.maxImageExtent.height;
+    return ext;
+}
+\`\`\`
+
+#### Assignment 25: Ordered Boot & Teardown Skeleton With Validation Cleanliness
+- **Objective:** Wire \`createInstance\`, \`SDL_Vulkan_CreateSurface\`, GPU selection, \`createLogicalDevice\`, and \`createSwapchain\` inside a single boot function using a strict \`INIT_STEP\` macro pattern, then tear down every object in exact reverse dependency order (\`vkDestroyImageView\` -> \`vkDestroySwapchainKHR\` -> \`vkDestroyCommandPool\` -> \`vkDestroyDevice\` -> \`vkDestroySurfaceKHR\` -> \`vkDestroyInstance\`) with zero validation layer leaks!
+- **Reference Solution:**
+\`\`\`c
+void destroyRendererBoot(Renderer *r) {
+    if (r->device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(r->device);
+        for (uint32_t i = 0; i < r->swapchainImageCount; i++) {
+            if (r->swapchainImageViews && r->swapchainImageViews[i] != VK_NULL_HANDLE) {
+                vkDestroyImageView(r->device, r->swapchainImageViews[i], NULL);
+            }
+        }
+        free(r->swapchainImageViews);
+        free(r->swapchainImages);
+        if (r->swapchain != VK_NULL_HANDLE) {
+            vkDestroySwapchainKHR(r->device, r->swapchain, NULL);
+        }
+        if (r->commandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(r->device, r->commandPool, NULL);
+        }
+        vkDestroyDevice(r->device, NULL);
+    }
+    if (r->instance != VK_NULL_HANDLE) {
+        if (r->surface != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(r->instance, r->surface, NULL);
+        }
+        vkDestroyInstance(r->instance, NULL);
+    }
+    memset(r, 0, sizeof(*r));
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Scratch Vulkan Renderer Boot Dependency Chain",
+        chart: `
+flowchart TD
+    classDef step fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef dev fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef swap fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Inst["1. VkInstance<br/>SDL Exts + Validation + Portability"]:::step
+    Surf["2. VkSurfaceKHR<br/>SDL_Vulkan_CreateSurface"]:::step
+    PD["3. VkPhysicalDevice<br/>Prefer Discrete GPU + Gfx/Compute/Present Queue"]:::dev
+    LD["4. VkDevice + VkQueue + VkCommandPool<br/>pNext DescriptorIndexingFeatures + KHR_swapchain"]:::dev
+    SC["5. VkSwapchainKHR<br/>B8G8R8A8_SRGB + FIFO/MAILBOX + 3 Images"]:::swap
+    IV["6. VkImageView Array<br/>COLOR_BIT Lens for Each Swapchain VkImage"]:::swap
+
+    Inst --> Surf --> PD --> LD --> SC --> IV
+`,
+      },
+      {
+        title: "Physical Device Feature Probing & Swapchain Image Count Clamping",
+        chart: `
+flowchart LR
+    classDef probe fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef check fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Caps["vkGetPhysicalDeviceFeatures2<br/>Chain DescriptorIndexingFeatures via pNext"]:::probe
+    Gate{"All Required Bindless<br/>Flags Supported?"}:::check
+    Fail["Abort Early With Exact<br/>Missing Feature Name"]:::probe
+    Extent["Query Surface Caps<br/>Handle UINT32_MAX on Wayland/Retina"]:::check
+    Clamp["Clamp imageCount in 3..maxImageCount<br/>Create Swapchain + Views"]:::out
+
+    Caps --> Gate
+    Gate -->|"No"| Fail
+    Gate -->|"Yes"| Extent --> Clamp
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-renderer-book-passes-pipelines-sync",
+    title: "75. Vulkan Renderer Book X: Render Passes, Graphics Pipelines & Frames-in-Flight Sync",
+    category: "graphics",
+    summary:
+      "Construct VkRenderPass attachments and subpass dependencies, allocate per-swapchain VkFramebuffer objects, compile SPIR-V into multi-blend VkPipeline factories, wire Push Constants and dynamic viewport/scissor state, implement lock-free 2-frame-in-flight sync against N swapchain images, and solve Assignments 26–28.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+      "extern/Vulkan2d/VK2D/src/Pipeline.c",
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+      "extern/Vulkan2d/VK2D/include/VK2D/BlendModes.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Initializers.h",
+    ],
+    content: `
+### Chapter 1: \`VkRenderPass\`, Attachment Layouts & \`VkFramebuffer\`
+
+Before a GPU can write a single pixel to a swapchain image, Vulkan requires you to declare a **Render Pass** (\`VkRenderPass\`). Why not just bind an image and draw like OpenGL?
+
+Modern mobile and Apple Silicon GPUs (tile-based deferred renderers, or TBDRs) keep fast on-chip **tile SRAM** right next to the pixel shaders. If the driver knows ahead of time whether you want to **clear** the tile at the start (\`VK_ATTACHMENT_LOAD_OP_CLEAR\`), **preserve** existing pixels (\`LOAD\`), or **discard** transient MSAA/depth memory at the end (\`DONT_CARE\`), it can skip copying megabytes of pixels across system memory!
+
+#### Anatomy of a 2-Attachment (Color + Depth) Render Pass
+
+Look at \`_vk2dRendererCreateRenderPass()\` in \`VK2D/src/RendererMeta.c\` (lines 555–636). For a clean 1x-sampled renderer, we attach two descriptors:
+1. **Attachment 0 (Color Swapchain Target):** Clears at frame start (\`LOAD_OP_CLEAR\`), stores final pixels (\`STORE_OP_STORE\`), starts \`UNDEFINED\` (so the driver never wastes bandwidth preserving stale pixels from two frames ago), and finishes in \`VK_IMAGE_LAYOUT_PRESENT_SRC_KHR\` ready for \`vkQueuePresentKHR\`!
+2. **Attachment 1 (Depth/Stencil Target):** Clears depth to \`1.0\` at frame start and ends in \`VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL\`.
+
+\`\`\`c
+VkRenderPass createMainRenderPass(VkDevice device, VkFormat colorFmt, VkFormat depthFmt) {
+    VkAttachmentDescription attachments[2] = {
+        {
+            .format = colorFmt,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        },
+        {
+            .format = depthFmt,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        }
+    };
+
+    VkAttachmentReference colorRef = { .attachment = 0, .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkAttachmentReference depthRef = { .attachment = 1, .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorRef,
+        .pDepthStencilAttachment = &depthRef,
+    };
+
+    // Wait for prior color/depth output before our subpass writes to the attachments
+    VkSubpassDependency dep = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = 0,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    };
+
+    VkRenderPassCreateInfo rpci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 2,
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dep,
+    };
+
+    VkRenderPass rp = VK_NULL_HANDLE;
+    vkCreateRenderPass(device, &rpci, NULL, &rp);
+    return rp;
+}
+\`\`\`
+
+Now bind each swapchain \`VkImageView\` and the shared depth \`VkImageView\` into one \`VkFramebuffer\` per swapchain image:
+
+\`\`\`c
+for (uint32_t i = 0; i < r->swapchainImageCount; i++) {
+    VkImageView views[2] = { r->swapchainImageViews[i], depthView };
+    VkFramebufferCreateInfo fbci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = mainRenderPass,
+        .attachmentCount = 2,
+        .pAttachments = views,
+        .width = r->extent.width,
+        .height = r->extent.height,
+        .layers = 1,
+    };
+    vkCreateFramebuffer(r->device, &fbci, NULL, &framebuffers[i]);
+}
+\`\`\`
+
+*(Key Mental Rule: A \`VkRenderPass\` is only a **blueprint** describing formats and operations. A \`VkFramebuffer\` plugs actual \`VkImageView\` textures into that blueprint!)*
+
+---
+
+### Chapter 2: Compiling SPIR-V Into a Multi-Blend \`VkPipeline\`
+
+In OpenGL, you toggle blending, depth testing, or culling mid-frame with global setters like \`glEnable(GL_BLEND)\`. In Vulkan, drivers compile the entire GPU state vector (shaders, vertex input layout, triangle topology, rasterizer, MSAA, depth test, and color blend equations) into an **immutable** \`VkPipeline\` object at startup so draw calls run with zero shader patching stalls.
+
+#### 1. Dynamic State Saves You From Rebuilding Pipelines on Resize
+
+Notice \`Pipeline.c\` lines 73–79: if viewport and scissor rectangles were baked statically into every \`VkPipeline\`, resizing the window would force you to destroy and recompile every shader pipeline! Instead, mark \`VK_DYNAMIC_STATE_VIEWPORT\`, \`VK_DYNAMIC_STATE_SCISSOR\`, and \`VK_DYNAMIC_STATE_LINE_WIDTH\` as dynamic, then call \`vkCmdSetViewport\` and \`vkCmdSetScissor\` inside the command buffer.
+
+#### 2. Pre-Building All 4 Blend Modes From One SPIR-V Pair
+
+Look at \`VK2D/include/VK2D/BlendModes.h\` and \`VK2D/src/Pipeline.c\` lines 121–144. Because a single sprite pipeline needs alpha blending, opaque overwrite, additive glow, and subtractive shadows, \`Pipeline.c\` loops 4 times over \`VK2D_BLEND_MODES[]\` using the **same** \`vertShader\`, \`fragShader\`, and \`VkPipelineLayout\`, then immediately calls \`vkDestroyShaderModule\`:
+
+\`\`\`c
+// Once VkPipeline objects are created, the GPU holds compiled machine code;
+// VkShaderModule wrappers can be destroyed immediately!
+vkDestroyShaderModule(device, vertModule, NULL);
+vkDestroyShaderModule(device, fragModule, NULL);
+\`\`\`
+
+| Blend Mode | \`blendEnable\` | \`srcColor\` / \`dstColor\` / \`colorOp\` | Best Use Case |
+| --- | --- | --- | --- |
+| **Blend (0)** | \`VK_TRUE\` | \`SRC_ALPHA\` / \`ONE_MINUS_SRC_ALPHA\` / \`ADD\` | Standard sprites, UI, text |
+| **None (1)** | \`VK_FALSE\` | Ignored (overwrites destination directly) | Opaque tilemaps, clearing targets |
+| **Add (2)** | \`VK_TRUE\` | \`SRC_ALPHA\` / \`ONE\` / \`ADD\` | Fire, sparks, additive light glows |
+| **Subtract (3)** | \`VK_TRUE\` | \`DST_ALPHA\` / \`DST_ALPHA\` / \`MAX\` (color), \`REVERSE_SUBTRACT\` (alpha) | Dark masks, shadow cutout passes |
+
+*(Note: Notice \`BlendModes.h\` line 32 sets \`VK_BLEND_OP_REVERSE_SUBTRACT\` on alpha and \`MAX\` on color for subtract mode, while \`Add\` uses \`ADD\` on color and \`MAX\` on alpha so transparent glow sprites never erode destination alpha!)*
+
+#### 3. Wiring \`VkPipelineLayout\` With Push Constants
+
+Push constants bypass buffers completely by stuffing up to $128$ bytes right inside the command packet. When declaring \`VkPushConstantRange\`, \`stageFlags\` must include **every shader stage that reads it** (for instance \`VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT\`), matching the exact byte size and offset declared in your shader!
+
+---
+
+### Chapter 3: The Math & Sync of Frames-in-Flight
+
+Imagine a beginner's naive Vulkan loop:
+1. Record command buffer.
+2. Submit to GPU.
+3. Call \`vkDeviceWaitIdle()\`.
+
+Why is that terrible? While the GPU draws, the CPU sits completely idle; while the CPU prepares the next frame, the GPU sits completely idle! **Frames-in-Flight** overlap CPU Frame $(k + 1)$ with GPU Frame $k$.
+
+#### Why We Need TWO Separate Indices (\`currentFrame\` vs \`scImageIndex\`)
+
+Look at \`VK2D/src/Renderer.c\` lines 452–498 and 611–667. Most drivers create $N = 3$ swapchain images, while we limit the CPU to $M = 2$ frames in flight (\`VK2D_MAX_FRAMES_IN_FLIGHT = 2\`).
+
+Why can't \`renderFinishedSemaphores\` be indexed by \`currentFrame\` ($0..1$)?
+Because **presentation is asynchronous**! If Frame 0 used \`swapchainImage[0]\` and signaled \`renderFinished[currentFrame=0]\`, two frames later \`currentFrame\` wraps back around to \`0\` while the display engine might *still* be presenting \`swapchainImage[0]\`! Using a semaphore still referenced by a pending present causes a Vulkan validation error!
+
+The rock-solid pairing rule used in \`RendererMeta.c\` (lines 1250–1256) and \`Renderer.c\`:
+
+| Primitive | Array Length | Indexed By | Who Waits / Signals? |
+| --- | --- | --- | --- |
+| \`inFlightFences[2]\` | \`MAX_FRAMES_IN_FLIGHT\` ($2$) | \`currentFrame\` | CPU waits at start of frame; GPU signals on \`vkQueueSubmit\` |
+| \`imageAvailableSemaphores[2]\` | \`MAX_FRAMES_IN_FLIGHT\` ($2$) | \`currentFrame\` | Presentation engine signals in \`vkAcquireNextImageKHR\`; GPU waits in \`vkQueueSubmit\` |
+| \`renderFinishedSemaphores[N]\` | \`swapchainImageCount\` ($3$) | \`scImageIndex\` | GPU signals in \`vkQueueSubmit\`; Presentation engine waits in \`vkQueuePresentKHR\` |
+| \`imagesInFlight[N]\` | \`swapchainImageCount\` ($3$) | \`scImageIndex\` | Tracks which \`inFlightFence\` last wrote to \`scImageIndex\` |
+| \`commandBuffers[N]\` | \`swapchainImageCount\` ($3$) | \`scImageIndex\` | Safe to reset once \`imagesInFlight[scImageIndex]\` is signaled |
+
+#### Exact 7-Step Frame Synchronization Sequence
+
+Follow every step of \`vk2dRendererStartFrame\` and \`vk2dRendererEndFrame\` in order:
+1. \`vkWaitForFences(dev, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX)\` (block only if GPU is still 2 frames behind).
+2. \`vkAcquireNextImageKHR(dev, swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &scImageIndex)\`.
+3. If \`imagesInFlight[scImageIndex] != VK_NULL_HANDLE\`, call \`vkWaitForFences(dev, 1, &imagesInFlight[scImageIndex], VK_TRUE, UINT64_MAX)\` so we never overwrite a command buffer still used by that swapchain image.
+4. Assign \`imagesInFlight[scImageIndex] = inFlightFences[currentFrame]\`.
+5. Record \`vkResetCommandBuffer\` -> \`vkBeginCommandBuffer\` -> \`vkCmdBeginRenderPass\` -> draw calls -> \`vkCmdEndRenderPass\` -> \`vkEndCommandBuffer\`.
+6. **Only right before \`vkQueueSubmit\`** (so a skipped/resize frame never deadlocks a future \`vkWaitForFences\`!), call \`vkResetFences(dev, 1, &inFlightFences[currentFrame])\` and submit waiting on \`imageAvailableSemaphores[currentFrame]\` at stage \`VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT\`, signaling \`renderFinishedSemaphores[scImageIndex]\` and \`inFlightFences[currentFrame]\`.
+7. Call \`vkQueuePresentKHR\` waiting on \`renderFinishedSemaphores[scImageIndex]\`, then advance \`currentFrame = (currentFrame + 1) % 2\`.
+
+---
+
+### Chapter 4: Graded Assignments 26–28 (With Starter Code & Full Solutions)
+
+#### Assignment 26: Multi-Blend Pipeline Factory Without VBOs
+- **Objective:** Write \`createQuadPipelines(device, renderPass, vertSpv, vertBytes, fragSpv, fragBytes, layout, outPipes[4])\` that creates all 4 blend modes (\`BLEND\`, \`NONE\`, \`ADD\`, \`SUBTRACT\`) using **zero vertex buffer bindings** (vertex pulling via \`gl_VertexIndex\`), dynamic viewport/scissor, and clean module destruction.
+- **Reference Solution:**
+\`\`\`c
+bool createQuadPipelines(
+    VkDevice device, VkRenderPass renderPass,
+    const uint32_t *vertSpv, size_t vertBytes,
+    const uint32_t *fragSpv, size_t fragBytes,
+    VkPipelineLayout layout, VkPipeline outPipes[4])
+{
+    VkShaderModuleCreateInfo vci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = vertBytes, .pCode = vertSpv
+    };
+    VkShaderModuleCreateInfo fci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = fragBytes, .pCode = fragSpv
+    };
+    VkShaderModule vertMod, fragMod;
+    if (vkCreateShaderModule(device, &vci, NULL, &vertMod) != VK_SUCCESS ||
+        vkCreateShaderModule(device, &fci, NULL, &fragMod) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vertMod, .pName = "main" },
+        { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragMod, .pName = "main" },
+    };
+    VkPipelineVertexInputStateCreateInfo emptyVertInput = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo ia = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo vp = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rast = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo msaa = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkDynamicState dynStates[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dyn = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 2, .pDynamicStates = dynStates,
+    };
+
+    VkPipelineColorBlendAttachmentState blends[4] = {
+        { VK_TRUE,  VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD, 0xF },
+        { VK_FALSE, VK_BLEND_FACTOR_ONE,       VK_BLEND_FACTOR_ZERO,                VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE,       VK_BLEND_FACTOR_ZERO,                VK_BLEND_OP_ADD, 0xF },
+        { VK_TRUE,  VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE,                 VK_BLEND_OP_ADD, VK_BLEND_FACTOR_DST_ALPHA, VK_BLEND_FACTOR_DST_ALPHA,           VK_BLEND_OP_MAX, 0xF },
+        { VK_TRUE,  VK_BLEND_FACTOR_DST_ALPHA, VK_BLEND_FACTOR_DST_ALPHA,           VK_BLEND_OP_MAX, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_DST_ALPHA,           VK_BLEND_OP_REVERSE_SUBTRACT, 0xF },
+    };
+
+    bool ok = true;
+    for (int i = 0; i < 4; i++) {
+        VkPipelineColorBlendStateCreateInfo cb = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .attachmentCount = 1, .pAttachments = &blends[i],
+        };
+        VkGraphicsPipelineCreateInfo gpci = {
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .stageCount = 2, .pStages = stages,
+            .pVertexInputState = &emptyVertInput,
+            .pInputAssemblyState = &ia,
+            .pViewportState = &vp,
+            .pRasterizationState = &rast,
+            .pMultisampleState = &msaa,
+            .pColorBlendState = &cb,
+            .pDynamicState = &dyn,
+            .layout = layout,
+            .renderPass = renderPass,
+        };
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gpci, NULL, &outPipes[i]) != VK_SUCCESS) {
+            ok = false;
+            break;
+        }
+    }
+
+    vkDestroyShaderModule(device, vertMod, NULL);
+    vkDestroyShaderModule(device, fragMod, NULL);
+    return ok;
+}
+\`\`\`
+
+#### Assignment 27: Complete Frame Sync Loop With Deadlock-Free Fence Reset
+- **Objective:** Implement \`drawSyncFrame()\` using \`MAX_FRAMES_IN_FLIGHT = 2\`, checking \`imagesInFlight[scImageIndex]\`, resetting \`inFlightFences[currentFrame]\` *only* after acquire succeeds, submitting the command buffer, and presenting.
+- **Reference Solution:**
+\`\`\`c
+VkResult drawSyncFrame(SyncState *s, VkDevice dev, VkQueue queue, VkSwapchainKHR swapchain, uint32_t *outImg) {
+    vkWaitForFences(dev, 1, &s->inFlightFences[s->currentFrame], VK_TRUE, UINT64_MAX);
+
+    uint32_t imgIdx = 0;
+    VkResult acq = vkAcquireNextImageKHR(
+        dev, swapchain, UINT64_MAX,
+        s->imageAvailable[s->currentFrame], VK_NULL_HANDLE, &imgIdx
+    );
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR) return acq;
+
+    if (s->imagesInFlight[imgIdx] != VK_NULL_HANDLE) {
+        vkWaitForFences(dev, 1, &s->imagesInFlight[imgIdx], VK_TRUE, UINT64_MAX);
+    }
+    s->imagesInFlight[imgIdx] = s->inFlightFences[s->currentFrame];
+    *outImg = imgIdx;
+
+    // Record commands into s->cmd[imgIdx] here...
+    vkResetFences(dev, 1, &s->inFlightFences[s->currentFrame]);
+
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo sub = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &s->imageAvailable[s->currentFrame],
+        .pWaitDstStageMask = &waitStage,
+        .commandBufferCount = 1, .pCommandBuffers = &s->cmd[imgIdx],
+        .signalSemaphoreCount = 1, .pSignalSemaphores = &s->renderFinished[imgIdx],
+    };
+    vkQueueSubmit(queue, 1, &sub, s->inFlightFences[s->currentFrame]);
+
+    VkPresentInfoKHR pres = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &s->renderFinished[imgIdx],
+        .swapchainCount = 1, .pSwapchains = &swapchain,
+        .pImageIndices = &imgIdx,
+    };
+    VkResult presRes = vkQueuePresentKHR(queue, &pres);
+    s->currentFrame = (s->currentFrame + 1) % 2;
+    return presRes != VK_SUCCESS ? presRes : acq;
+}
+\`\`\`
+
+#### Assignment 28: Zero-VBO Orthographic Colored Quad via Push Constants
+- **Objective:** Define a 96-byte push-constant struct (\`float viewproj[16]\`, \`float rect[4]\`, \`float color[4]\`, \`uint32_t pad[4]\`) and record \`vkCmdPushConstants\` + \`vkCmdDraw(cmd, 6, 1, 0, 0)\` to draw a screen-space rectangle centered at $(x, y)$ with size $(w, h)$ using Vulkan's top-left $(0,0)$ to bottom-right $(W,H)$ coordinate convention!
+- **Reference Solution:**
+\`\`\`c
+typedef struct QuadPush {
+    float viewproj[16]; // 64 B: orthographic matrix mapping [0..W, 0..H] -> [-1..1, -1..1]
+    float rect[4];      // 16 B: (x, y, w, h) in pixels
+    float color[4];     // 16 B: RGBA tint
+} QuadPush;             // 96 B (< 128 B guaranteed minimum push constant limit)
+
+void drawPushQuad(VkCommandBuffer cmd, VkPipelineLayout layout, VkExtent2D ext, float x, float y, float w, float h, const float rgba[4]) {
+    QuadPush push = {0};
+    // Column-major 2D ortho matrix matching Vulkan NDC (Y points down!)
+    push.viewproj[0]  =  2.0f / (float)ext.width;
+    push.viewproj[5]  =  2.0f / (float)ext.height;
+    push.viewproj[10] =  1.0f;
+    push.viewproj[12] = -1.0f;
+    push.viewproj[13] = -1.0f;
+    push.viewproj[15] =  1.0f;
+    push.rect[0] = x; push.rect[1] = y; push.rect[2] = w; push.rect[3] = h;
+    memcpy(push.color, rgba, sizeof(float) * 4);
+
+    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(QuadPush), &push);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "RenderPass Attachment Lifecycle & External Subpass Dependency",
+        chart: `
+flowchart LR
+    classDef start fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef sub fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Ext["VK_SUBPASS_EXTERNAL<br/>Initial Layout: UNDEFINED<br/>LoadOp: CLEAR"]:::start
+    Sub0["Subpass 0 (Graphics)<br/>Color: COLOR_ATTACHMENT_OPTIMAL<br/>Depth: DEPTH_STENCIL_ATTACHMENT_OPTIMAL"]:::sub
+    Store["End RenderPass<br/>StoreOp: STORE<br/>Final Layout: PRESENT_SRC_KHR"]:::out
+
+    Ext -->|"Wait COLOR_ATTACHMENT_OUTPUT"| Sub0 --> Store
+`,
+      },
+      {
+        title: "2 Frames-in-Flight vs 3 Swapchain Images Synchronization Timeline",
+        chart: `
+sequenceDiagram
+    autonumber
+    participant CPU as CPU Thread (currentFrame 0..1)
+    participant Sync as Fences & Semaphores
+    participant GPU as VkQueue (Graphics + Present)
+
+    CPU->>Sync: vkWaitForFences(inFlightFences[currentFrame])
+    CPU->>GPU: vkAcquireNextImageKHR -> signal imageAvailable[currentFrame], return scImageIndex
+    CPU->>Sync: If imagesInFlight[scImageIndex] != NULL, vkWaitForFences
+    CPU->>Sync: imagesInFlight[scImageIndex] = inFlightFences[currentFrame]
+    CPU->>CPU: Record vkBeginCommandBuffer -> vkCmdDraw -> vkEndCommandBuffer
+    CPU->>Sync: vkResetFences(inFlightFences[currentFrame])
+    CPU->>GPU: vkQueueSubmit(wait imageAvailable[currentFrame], signal renderFinished[scImageIndex], signal inFlightFence)
+    CPU->>GPU: vkQueuePresentKHR(wait renderFinished[scImageIndex], present scImageIndex)
+    CPU->>CPU: currentFrame = (currentFrame + 1) % 2
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-renderer-book-memory-barriers-batching",
+    title: "76. Vulkan Renderer Book XI: VMA Memory, Pipeline Barriers, Bindless Textures & Compute Batching",
+    category: "graphics",
+    summary:
+      "Master GPU memory heaps and VMA sub-allocation, single-use command buffer uploads, exact VkImageMemoryBarrier and VkBufferMemoryBarrier stage/access masks, paged staging rings, auto-expanding descriptor pools, bindless texture arrays, 3-command-buffer compute sprite batching, and Assignments 29–31.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/Buffer.c",
+      "extern/Vulkan2d/VK2D/src/Image.c",
+      "extern/Vulkan2d/VK2D/src/Texture.c",
+      "extern/Vulkan2d/VK2D/src/DescriptorBuffer.c",
+      "extern/Vulkan2d/VK2D/src/DescriptorControl.c",
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+    ],
+    content: `
+### Chapter 1: GPU Memory Heaps, VMA & Paged Host-to-Device Streaming
+
+Graphics cards enforce a strict hardware limit called \`maxMemoryAllocationCount\` (often just **4,096** total allocations across the entire process!). If you call \`vkAllocateMemory\` separately for every sprite texture, vertex buffer, and uniform buffer, a real game crashes with \`VK_ERROR_TOO_MANY_OBJECTS\` before finishing the first level.
+
+#### 1. Why Every Real Vulkan Renderer Uses VMA (\`Vulkan Memory Allocator\`)
+
+**VMA** solves this by allocating large 64 MB to 256 MB \`VkDeviceMemory\` chunks and sub-allocating your small buffers and images inside them with TLSF block coalescing! When creating buffers in \`VK2D/src/Buffer.c\`, notice the two opposite memory tiers:
+
+- **Staging Memory (\`HOST_VISIBLE | HOST_COHERENT\`):** Lives in system RAM mapped over PCIe. The CPU can write into it directly via \`vmaMapMemory\`, and the GPU reads from it slowly across the PCIe bus during copy commands.
+- **Device-Local VRAM (\`DEVICE_LOCAL\`):** Lives directly on the graphics card's GDDR6/HBM memory ($300$ to $1{,}000+$ GB/s). Shaders read this at blazing speed, so static textures and meshes are always copied into \`DEVICE_LOCAL\` memory!
+
+#### 2. Paged Staging Ring Buffers (\`DescriptorBuffer.c\`)
+
+For data that changes **every frame** (camera matrices, sprite batches, shader uniforms), issuing hundreds of tiny \`vkQueueWaitIdle\` staging copies destroys throughput. Instead, \`VK2D/src/DescriptorBuffer.c\` uses **256 KB pages per frame in flight**:
+
+1. At frame start (\`vk2dDescriptorBufferBeginFrame\`), map all staging pages once (\`vmaMapMemory\`) and reset each page's cursor \`size = 0\`.
+2. During draw calls (\`vk2dDescriptorBufferCopyData\`), \`memcpy\` data into the active \`stageBuffer\`, return the corresponding \`deviceBuffer\` handle and aligned byte \`offset\`, and advance \`spot->size\` rounded up to the hardware's alignment requirement:
+
+$$\\text{alignedSize} = \\left\\lceil \\frac{\\text{size}}{A} \\right\\rceil \\times A, \\qquad A = \\max(\\text{minStorageBufferOffsetAlignment},\\; \\text{minUniformBufferOffsetAlignment})$$
+
+3. At frame end (\`vk2dDescriptorBufferEndFrame\`), unmap the staging pages and record **one single \`vkCmdCopyBuffer\` per active page** into \`dbCommandBuffer\`!
+
+---
+
+### Chapter 2: Image Layout Transitions & Exact Pipeline Barriers
+
+Unlike buffers (which are flat 1D byte arrays), \`VkImage\` textures live in GPU-specific Z-order swizzled layouts and carry an explicit **Image Layout** state machine. Reading a texture in a shader while its layout is still \`VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL\` triggers validation errors and garbled colors!
+
+#### Single-Use Command Buffer Texture Upload (\`Image.c\`)
+
+Uploading an RGBA PNG decoded by \`stb_image\` takes four strictly ordered GPU steps:
+1. Transition image from \`UNDEFINED\` $\\to$ \`TRANSFER_DST_OPTIMAL\`.
+2. Copy pixels from \`stageBuffer\` into the image via \`vkCmdCopyBufferToImage\`.
+3. Transition image from \`TRANSFER_DST_OPTIMAL\` $\\to$ \`SHADER_READ_ONLY_OPTIMAL\`.
+4. Submit the single-use command buffer and free \`stageBuffer\`.
+
+Look at \`_vk2dImageTransitionImageLayout\` in \`VK2D/src/Image.c\` (lines 62–120). Every barrier answers four questions: **which memory writes must finish (\`srcAccessMask\`)**, **which pipeline stage produced them (\`srcStageMask\`)**, **which pipeline stage waits (\`dstStageMask\`)**, and **how that stage reads/writes next (\`dstAccessMask\`)**:
+
+| Transition or Sync Step | \`srcStageMask\` | \`srcAccessMask\` | \`dstStageMask\` | \`dstAccessMask\` |
+| --- | --- | --- | --- | --- |
+| \`UNDEFINED\` $\\to$ \`TRANSFER_DST\` | \`TOP_OF_PIPE\` | \`0\` | \`TRANSFER\` | \`TRANSFER_WRITE\` |
+| \`TRANSFER_DST\` $\\to$ \`SHADER_READ_ONLY\` | \`TRANSFER\` | \`TRANSFER_WRITE\` | \`FRAGMENT_SHADER\` | \`SHADER_READ\` |
+| \`COLOR_ATTACHMENT\` $\\to$ \`SHADER_READ_ONLY\` | \`COLOR_ATTACHMENT_OUTPUT \| TRANSFER\` | \`COLOR_ATTACHMENT_WRITE\` | \`FRAGMENT_SHADER\` | \`SHADER_READ\` |
+| Copy Buffer $\\to$ Compute (\`DescriptorBuffer.c\`) | \`TRANSFER\` | \`TRANSFER_WRITE\` | \`COMPUTE_SHADER\` | \`SHADER_READ \| SHADER_WRITE\` |
+| Compute $\\to$ Vertex Shader (\`DescriptorBuffer.c\`) | \`COMPUTE_SHADER\` | \`SHADER_WRITE\` | \`VERTEX_INPUT \| VERTEX_SHADER\` | \`VERTEX_ATTRIBUTE_READ \| SHADER_READ\` |
+
+\`\`\`c
+void transitionImageLayout(
+    VkCommandBuffer cmd, VkImage img,
+    VkImageLayout oldLayout, VkImageLayout newLayout)
+{
+    VkImageMemoryBarrier b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = img,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+
+    VkPipelineStageFlags srcStage = 0, dstStage = 0;
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        b.srcAccessMask = 0;
+        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &b);
+}
+\`\`\`
+
+---
+
+### Chapter 3: Auto-Expanding Descriptor Pools & Global Bindless Texture Arrays
+
+A \`VkDescriptorPool\` has a fixed capacity. When a frame spawns 3,000 custom draw calls and runs out of sets (\`VK_ERROR_OUT_OF_POOL_MEMORY\`), crashing is unacceptable.
+
+#### 1. Chained Descriptor Pool Allocator (\`DescriptorControl.c\`)
+
+\`VK2D/src/DescriptorControl.c\` solves pool exhaustion in ~70 lines of C:
+- Maintain a dynamic array \`VkDescriptorPool *pools\`.
+- Try allocating from \`pools[i]\`. Whenever \`vkAllocateDescriptorSets\` returns \`VK_ERROR_OUT_OF_POOL_MEMORY\`, append a fresh pool to \`pools[]\` and retry!
+- At the start of each frame (\`vk2dDescConReset\`), call \`vkResetDescriptorPool(dev, pools[i], 0)\` on every allocated pool, reclaiming all sets in $O(1)$ without freeing individual sets!
+
+#### 2. The Global Bindless Texture Array (Set 2, Binding 2)
+
+Instead of allocating a new \`VkDescriptorSet\` for every sprite texture, bind **one giant descriptor array** for the whole application (\`RendererMeta.c\` lines 748–794):
+1. Create a \`VkDescriptorSetLayout\` with \`VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT | PARTIALLY_BOUND_BIT | UPDATE_AFTER_BIND_BIT | UPDATE_UNUSED_WHILE_PENDING_BIT\`.
+2. **MoltenVK Safety Check:** Call \`vkGetDescriptorSetLayoutSupport(dev, &texArraySetLayoutCreateInfo, &layoutSupport)\` and halve \`descriptorCount\` if the driver rejects 10,000 variable descriptors in one set!
+3. Allocate **one** \`texArrayDescriptorSet\` passing \`VkDescriptorSetVariableDescriptorCountAllocateInfo\` in \`pNext\`.
+4. Whenever a texture loads (\`_vk2dTextureAddToTextureArray\` in \`Texture.c\` line 17), find a free slot \`spot\` and write just that single slot via \`vkUpdateDescriptorSets\`. Now any shader or sprite instance simply carries an integer \`uint32_t textureIndex = spot\`!
+
+---
+
+### Chapter 4: The Three-Command-Buffer Compute Sprite Batcher
+
+Now watch everything click together into the **3-Command-Buffer Architecture** from \`Renderer.c\` and \`DescriptorBuffer.c\`:
+
+- **While Drawing Sprites:** \`vk2dRendererDrawTexture()\` just appends a compact \`VK2DDrawCommand\` struct to a CPU array.
+- **On Batch Flush (\`vk2dRendererFlushSpriteBatch\`):**
+  1. Copy \`drawCommands\` into \`descriptorBuffer[currentFrame]\` and reserve output space for \`DrawInstance[]\`.
+  2. Bind both SSBOs to a compute descriptor set and record \`vkCmdDispatch(computeCmd, (drawCount / 64) + 1, 1, 1)\` onto \`computeCommandBuffer\`.
+  3. Record \`vkCmdDraw(drawCmd, 6 * drawCount, 1, 0, 0)\` onto \`commandBuffer\`.
+- **At End of Frame:**
+  1. Record bulk \`vkCmdCopyBuffer\` calls into \`dbCommandBuffer\` + \`TRANSFER_WRITE -> COMPUTE_SHADER\` barrier.
+  2. Record \`COMPUTE_WRITE -> VERTEX_INPUT | VERTEX_SHADER\` barrier at the end of \`computeCommandBuffer\`.
+  3. Submit \`{ dbCommandBuffer, computeCommandBuffer, commandBuffer }\` in a single \`vkQueueSubmit\`!
+
+Even though \`dbCommandBuffer\` was populated **last** on the CPU, placing it **first** in \`vkQueueSubmit\` makes the GPU execute: **Copy Staging Pages $\\to$ Run Compute Sprite Matrices $\\to$ Rasterize 100,000+ Sprites** in one seamless hardware pipeline!
+
+---
+
+### Chapter 5: Graded Assignments 29–31 (With Starter Code & Full Solutions)
+
+#### Assignment 29: Single-Use Uploader & RGBA Texture Loader
+- **Objective:** Implement \`uploadTextureRGBA(device, vma, cmdPool, queue, pixels, w, h)\` using a staging \`VkBuffer\`, a \`DEVICE_LOCAL\` \`VK_FORMAT_R8G8B8A8_SRGB\` \`VkImage\`, two \`VkImageMemoryBarrier\` transitions, \`vkCmdCopyBufferToImage\`, and a \`VkImageView\`.
+- **Reference Solution:**
+\`\`\`c
+VkCommandBuffer beginSingleTime(VkDevice dev, VkCommandPool pool) {
+    VkCommandBufferAllocateInfo ai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1,
+    };
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(dev, &ai, &cmd);
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    vkBeginCommandBuffer(cmd, &bi);
+    return cmd;
+}
+
+void endSingleTime(VkDevice dev, VkCommandPool pool, VkQueue queue, VkCommandBuffer cmd) {
+    vkEndCommandBuffer(cmd);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
+    vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+    vkFreeCommandBuffers(dev, pool, 1, &cmd);
+}
+
+void uploadPixelsToImage(
+    VkDevice dev, VkCommandPool pool, VkQueue queue,
+    VkBuffer stagingBuf, VkImage dstImage, uint32_t w, uint32_t h)
+{
+    VkCommandBuffer cmd = beginSingleTime(dev, pool);
+    transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkBufferImageCopy region = {
+        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .imageExtent = { w, h, 1 },
+    };
+    vkCmdCopyBufferToImage(cmd, stagingBuf, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    transitionImageLayout(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    endSingleTime(dev, pool, queue, cmd);
+}
+\`\`\`
+
+#### Assignment 30: Hardware-Aligned Staging Page Sub-Allocator
+- **Objective:** Implement \`stageAlloc(page, data, bytes, minAlign, outDeviceBuf, outOffset)\` that enforces \`minAlign = max(minUniformBufferOffsetAlignment, minStorageBufferOffsetAlignment)\` and handles multi-page rollover cleanly when \`page->used + bytes > page->capacity\`.
+- **Reference Solution:**
+\`\`\`c
+static VkDeviceSize alignUp(VkDeviceSize v, VkDeviceSize align) {
+    return align == 0 ? v : ((v + align - 1) / align) * align;
+}
+
+bool stagePush(StagingRing *ring, const void *src, VkDeviceSize bytes, VkBuffer *outBuf, VkDeviceSize *outOff) {
+    VkDeviceSize aligned = alignUp(bytes, ring->minAlign);
+    if (aligned > ring->pageSize) return false;
+
+    StagingPage *spot = NULL;
+    for (uint32_t i = 0; i < ring->pageCount; i++) {
+        if (ring->pages[i].used + aligned <= ring->pageSize) {
+            spot = &ring->pages[i];
+            break;
+        }
+    }
+    if (!spot) {
+        spot = appendMappedStagingPage(ring);
+        if (!spot) return false;
+    }
+
+    memcpy((uint8_t *)spot->mappedHost + spot->used, src, bytes);
+    *outBuf = spot->deviceBuf;
+    *outOff = spot->used;
+    spot->used += aligned;
+    return true;
+}
+\`\`\`
+
+#### Assignment 31: 3-Command-Buffer Barrier Chain & Single Submit
+- **Objective:** Write \`flushStagingAndCompute(copyCmd, compCmd, drawCmd, queue, pages, pageCount, waitSem, sigSem, fence)\` that records the \`TRANSFER_WRITE -> COMPUTE_SHADER\` barrier on \`copyCmd\`, the \`COMPUTE_WRITE -> VERTEX_INPUT | VERTEX_SHADER\` barrier on \`compCmd\`, and submits all 3 command buffers in one \`vkQueueSubmit\` call!
+- **Reference Solution:**
+\`\`\`c
+void submitThreeStageFrame(
+    VkCommandBuffer copyCmd, VkCommandBuffer compCmd, VkCommandBuffer drawCmd,
+    VkQueue queue, VkBuffer *devicePages, const VkDeviceSize *usedBytes, uint32_t pageCount,
+    uint32_t graphicsFamily, VkSemaphore waitSem, VkSemaphore sigSem, VkFence fence)
+{
+    VkBufferMemoryBarrier barriers[16];
+    uint32_t bCount = 0;
+
+    for (uint32_t i = 0; i < pageCount && bCount < 16; i++) {
+        if (usedBytes[i] == 0) continue;
+        barriers[bCount++] = (VkBufferMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .srcQueueFamilyIndex = graphicsFamily,
+            .dstQueueFamilyIndex = graphicsFamily,
+            .buffer = devicePages[i],
+            .offset = 0,
+            .size = usedBytes[i],
+        };
+    }
+    if (bCount > 0) {
+        vkCmdPipelineBarrier(copyCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, bCount, barriers, 0, NULL);
+        for (uint32_t i = 0; i < bCount; i++) {
+            barriers[i].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barriers[i].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+        }
+        vkCmdPipelineBarrier(compCmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 0, NULL, bCount, barriers, 0, NULL);
+    }
+
+    vkEndCommandBuffer(copyCmd);
+    vkEndCommandBuffer(compCmd);
+    vkEndCommandBuffer(drawCmd);
+
+    VkCommandBuffer cmds[3] = { copyCmd, compCmd, drawCmd };
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1, .pWaitSemaphores = &waitSem, .pWaitDstStageMask = &waitStage,
+        .commandBufferCount = 3, .pCommandBuffers = cmds,
+        .signalSemaphoreCount = 1, .pSignalSemaphores = &sigSem,
+    };
+    vkQueueSubmit(queue, 1, &si, fence);
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Texture Upload & Layout Transition State Machine",
+        chart: `
+flowchart LR
+    classDef cpu fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef bar fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef gpu fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    CPU["stbi_load RGBA Pixels<br/>memcpy -> HOST_VISIBLE Stage Buffer"]:::cpu
+    B1["Barrier 1: UNDEFINED -> TRANSFER_DST_OPTIMAL<br/>TOP_OF_PIPE -> TRANSFER_WRITE"]:::bar
+    Copy["vkCmdCopyBufferToImage<br/>Upload to DEVICE_LOCAL Optimal Image"]:::gpu
+    B2["Barrier 2: TRANSFER_DST -> SHADER_READ_ONLY<br/>TRANSFER_WRITE -> FRAGMENT SHADER_READ"]:::bar
+    Bind["Assign Global Bindless Slot<br/>vkUpdateDescriptorSets(Set 2, Binding 2)"]:::gpu
+
+    CPU --> B1 --> Copy --> B2 --> Bind
+`,
+      },
+      {
+        title: "3-Command-Buffer Barrier Chain (Transfer to Compute to Vertex Pull)",
+        chart: `
+flowchart TD
+    classDef c1 fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef c2 fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef c3 fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    DB["1. dbCommandBuffer<br/>vkCmdCopyBuffer(stagePage -> devicePage)<br/>Barrier: TRANSFER_WRITE -> COMPUTE_SHADER"]:::c1
+    COMP["2. computeCommandBuffer<br/>vkCmdDispatch(spritebatch.comp)<br/>Barrier: SHADER_WRITE -> VERTEX_INPUT and VERTEX_SHADER"]:::c2
+    DRAW["3. commandBuffer<br/>vkCmdDraw(6 * count, 1) Reading SBO + Bindless Set 2"]:::c3
+
+    DB -->|"Buffer Barrier"| COMP -->|"Buffer Barrier"| DRAW
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-renderer-book-targets-resize-production",
+    title: "77. Vulkan Renderer Book XII: Offscreen Render Targets, MSAA, Swapchain Resize & Production Hardening",
+    category: "graphics",
+    summary:
+      "Complete your custom Vulkan renderer from scratch: mid-frame offscreen render targets with 3 RenderPass variants, MSAA color + depth resolve attachments, bulletproof swapchain recreation and minimization pauses, strict reverse-order teardown, and Capstone Assignments 32–34.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+      "extern/Vulkan2d/VK2D/src/Texture.c",
+      "extern/Vulkan2d/VK2D/src/Pipeline.c",
+      "extern/Vulkan2d/VK2D/src/Validation.c",
+    ],
+    content: `
+### Chapter 1: Offscreen Render Targets & Mid-Frame \`VkRenderPass\` Switching
+
+Real games cannot draw directly to the swapchain alone: you need offscreen textures for bloom bright-passes, dynamic lightmaps (like Mellangan's \`Level::renderLight\`), minimaps, or post-process shaders.
+
+#### Why One \`VkRenderPass\` Is Not Enough
+
+Look at \`_vk2dRendererCreateRenderPass()\` in \`VK2D/src/RendererMeta.c\` (lines 555–693). If you draw half your frame to the screen, switch to an offscreen lightmap texture, and then switch back to the screen to composite it, using the same \`CLEAR\` render pass would **wipe everything you already drew on screen**!
+
+That is why a multi-target Vulkan renderer maintains **three specialized \`VkRenderPass\` blueprints**:
+
+| RenderPass | When Used | Color \`initialLayout\` $\\to$ \`finalLayout\` | Color \`loadOp\` |
+| --- | --- | --- | --- |
+| **1. \`renderPass\`** | Start of every frame on the swapchain | \`UNDEFINED\` $\\to$ \`PRESENT_SRC_KHR\` (or \`COLOR_ATTACHMENT_OPTIMAL\` if MSAA) | \`CLEAR\` |
+| **2. \`midFrameSwapRenderPass\`** | Switching **back** to the swapchain mid-frame | \`PRESENT_SRC_KHR\` $\\to$ \`PRESENT_SRC_KHR\` | \`LOAD\` (preserves prior pixels!) |
+| **3. \`externalTargetRenderPass\`** | Rendering into any offscreen \`VK2DTexture\` | \`COLOR_ATTACHMENT_OPTIMAL\` $\\to$ \`COLOR_ATTACHMENT_OPTIMAL\` | \`LOAD\` |
+
+#### The Golden Rule of Mid-Frame Layout Barriers (\`vk2dRendererSetTarget\`)
+
+Read \`VK2D/src/Renderer.c\` lines 725–755 carefully! In Vulkan, **you cannot record a \`vkCmdPipelineBarrier\` between two images inside an active render pass** unless it is a declared subpass self-dependency. Whenever you switch render targets mid-frame, you must obey this strict sequence:
+1. Flush any pending sprite batch.
+2. Call \`vkCmdEndRenderPass(cmd)\` on the old pass.
+3. Insert \`_vk2dTransitionImageLayout\` **between** the passes:
+   - If leaving an offscreen texture to draw back onto the screen: transition that offscreen texture \`COLOR_ATTACHMENT_OPTIMAL\` $\\to$ \`SHADER_READ_ONLY_OPTIMAL\` so shaders can sample it!
+   - If entering an offscreen texture: transition it \`SHADER_READ_ONLY_OPTIMAL\` $\\to$ \`COLOR_ATTACHMENT_OPTIMAL\` so the rasterizer can write to it!
+4. Call \`vkCmdBeginRenderPass(cmd, ...)\` with the matching \`VkRenderPass\` and \`VkFramebuffer\`, then reset cached pipeline/descriptor bindings (\`_vk2dRendererResetBoundPointers()\`).
+
+---
+
+### Chapter 2: Depth Buffers, MSAA Resolve & Swapchain Recreation
+
+#### 1. Probing Supported Depth Formats (\`RendererMeta.c\`)
+
+Never hardcode \`VK_FORMAT_D24_UNORM_S8_UINT\`: some AMD and mobile GPUs only support \`VK_FORMAT_D32_SFLOAT\` or \`VK_FORMAT_D16_UNORM\` with optimal tiling! Always probe a candidate list with \`vkGetPhysicalDeviceFormatProperties\` and check \`props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT\` (\`RendererMeta.c\` lines 464–473).
+
+#### 2. How Hardware MSAA Works in a Render Pass
+
+When \`samples > VK_SAMPLE_COUNT_1_BIT\`:
+- **Attachment 0:** A multisampled \`VkImage\` (\`msaaImage\`) created with \`samples = 4\` (or \`8\`). Notice it is **never** presented directly to the screen!
+- **Attachment 1:** A matching multisampled depth buffer (\`samples = 4\`).
+- **Attachment 2 (\`pResolveAttachments\`):** The single-sampled swapchain \`VkImageView\` (\`samples = 1\`, \`loadOp = DONT_CARE\`, \`storeOp = STORE\`, \`finalLayout = PRESENT_SRC_KHR\`). At the end of the subpass, the GPU's ROP hardware resolves the 4x samples down into crisp anti-aliased pixels automatically!
+
+#### 3. Bulletproof Window Resize & Minimization (\`_vk2dRendererResetSwapchain\`)
+
+A window resize or alt-tab minimization can return \`VK_ERROR_OUT_OF_DATE_KHR\` or \`VK_SUBOPTIMAL_KHR\` from **either** \`vkAcquireNextImageKHR\` or \`vkQueuePresentKHR\`. Follow the recovery recipe in \`RendererMeta.c\` lines 1549–1612:
+
+\`\`\`c
+void rebuildSwapchain(Renderer *r, uint32_t newSamples) {
+    // 1. Pause cleanly while minimized (0x0 surface extent crashes vkCreateSwapchainKHR!)
+    while (SDL_GetWindowFlags(r->window) & SDL_WINDOW_MINIMIZED) {
+        SDL_PumpEvents();
+        SDL_Delay(10);
+    }
+
+    // 2. Wait for all frames in flight to finish touching swapchain resources
+    vkDeviceWaitIdle(r->device);
+
+    // 3. Destroy swapchain-dependent views, framebuffers, sync, depth, MSAA, old swapchain
+    destroySwapchainDependents(r);
+
+    // 4. Only rebuild RenderPasses & Pipelines if MSAA sample count actually changed!
+    bool msaaChanged = (newSamples != r->samples);
+    if (msaaChanged) {
+        r->samples = newSamples;
+        destroyAllPipelines(r);
+        destroyRenderPasses(r);
+    }
+
+    // 5. Recreate swapchain (passing oldSwapchain or destroying old first), depth, MSAA, framebuffers, sync
+    createSwapchainAndViews(r);
+    createDepthAndMsaaImages(r);
+    if (msaaChanged) {
+        createRenderPasses(r);
+        rebuildAllPipelines(r);
+        refreshOffscreenTargetFramebuffers(r);
+    }
+    createSwapchainFramebuffers(r);
+    createSyncObjects(r);
+}
+\`\`\`
+
+*(Crucial Tip: Notice why \`msaaChanged\` is checked! Normal window resizing changes width and height, which only requires rebuilding images, framebuffers, and the swapchain because \`VIEWPORT\` and \`SCISSOR\` are dynamic state. You do **not** need to recompile every \`VkPipeline\` on window drag unless the MSAA sample count changed!)*
+
+---
+
+### Chapter 3: Complete End-to-End Scratch Architecture Checklist
+
+At this point in Books IX through XII, you have every building block required to write a complete, production-grade Vulkan 1.2 renderer from zero without hiding behind black-box abstractions:
+
+| Subsystem | Created At Boot | Reset Per Frame | Destroyed on Resize | Destroyed at Quit (Reverse Order) |
+| --- | --- | --- | --- | --- |
+| \`VkInstance\` & \`VkSurfaceKHR\` | Once | Never | Never | Very last (after \`VkDevice\`) |
+| \`VkPhysicalDevice\` & \`VkDevice\` | Once | Never | Never | Second to last |
+| \`VmaAllocator\` & \`VkCommandPool\` | Once | Never | Never | After buffers/images/sync |
+| \`VkSwapchainKHR\` & \`VkImageView[]\` | Once | Acquired via \`scImageIndex\` | **Yes** | Before \`VkCommandPool\` |
+| \`VkRenderPass[3]\` & \`VkPipeline[]\` | Once | Bound inside cmd | Only if MSAA changes | Before \`VkRenderPass\` & \`VkDevice\` |
+| \`VkFramebuffer[]\`, MSAA & Depth | Once | Bound via \`scImageIndex\` | **Yes** | Before \`VkSwapchainKHR\` |
+| \`DescriptorBuffer[2]\` & \`DescCon[2]\` | Per frame in flight | Reset via \`currentFrame\` | Never | Before \`VmaAllocator\` |
+| \`inFlightFences[2]\`, Semaphores & Cmds | Per frame / image | Signaled & waited | Sync / Cmds rebuilt cleanly | After \`vkQueueWaitIdle\` |
+
+---
+
+### Chapter 4: Graded Assignments 32–34 (With Starter Code & Full Solutions)
+
+#### Assignment 32: Two-Pass Offscreen Render Target Switcher
+- **Objective:** Write \`switchRenderTarget(cmd, newTarget, width, height, prevImg, nextImg, pass, fbo)\` that ends the current render pass, transitions \`prevImg\` from \`COLOR_ATTACHMENT_OPTIMAL\` to \`SHADER_READ_ONLY_OPTIMAL\` (or transitions \`nextImg\` from \`SHADER_READ_ONLY_OPTIMAL\` to \`COLOR_ATTACHMENT_OPTIMAL\`), and begins the new render pass cleanly.
+- **Reference Solution:**
+\`\`\`c
+void switchRenderTarget(
+    VkCommandBuffer cmd, bool toScreen,
+    VkImage prevOffscreenImg, VkImage nextOffscreenImg,
+    VkRenderPass targetPass, VkFramebuffer targetFbo, uint32_t w, uint32_t h)
+{
+    vkCmdEndRenderPass(cmd);
+
+    VkImageMemoryBarrier b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    VkPipelineStageFlags srcStage, dstStage;
+    if (toScreen) {
+        b.image = prevOffscreenImg;
+        b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        b.image = nextOffscreenImg;
+        b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &b);
+
+    VkClearValue clear[2] = {0};
+    clear[1].depthStencil.depth = 1.0f;
+    VkRenderPassBeginInfo rpbi = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = targetPass,
+        .framebuffer = targetFbo,
+        .renderArea = { {0, 0}, {w, h} },
+        .clearValueCount = 2,
+        .pClearValues = clear,
+    };
+    vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+}
+\`\`\`
+
+#### Assignment 33: Dynamic Depth Format Selector & MSAA RenderPass Attachment Builder
+- **Objective:** Implement \`findDepthFormat(physicalDevice)\` probing \`{ VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT }\` and returning the first format supporting \`VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT\`, plus an MSAA clamp helper \`clampMaxMSAA(physicalDevice, requested)\`.
+- **Reference Solution:**
+\`\`\`c
+VkFormat findDepthFormat(VkPhysicalDevice pd) {
+    const VkFormat candidates[4] = {
+        VK_FORMAT_D16_UNORM,
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+    };
+    for (int i = 0; i < 4; i++) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(pd, candidates[i], &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return candidates[i];
+        }
+    }
+    return VK_FORMAT_UNDEFINED;
+}
+
+VkSampleCountFlagBits clampMaxMSAA(VkPhysicalDevice pd, VkSampleCountFlagBits want) {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(pd, &props);
+    VkSampleCountFlags both = props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
+    VkSampleCountFlagBits order[6] = {
+        VK_SAMPLE_COUNT_32_BIT, VK_SAMPLE_COUNT_16_BIT, VK_SAMPLE_COUNT_8_BIT,
+        VK_SAMPLE_COUNT_4_BIT,  VK_SAMPLE_COUNT_2_BIT,  VK_SAMPLE_COUNT_1_BIT,
+    };
+    for (int i = 0; i < 6; i++) {
+        if (order[i] <= want && (both & order[i])) {
+            return order[i];
+        }
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+\`\`\`
+
+#### Assignment 34: Complete Scratch Renderer Capstone Audit
+- **Objective:** Build a minimal standalone C11 + SDL3 executable using the code from Books IX through XII that opens a resizable window, uploads a $16 \\times 16$ checkerboard RGBA texture via staging buffer, draws 1,000 rotating quads via instanced/push-constant rendering into an offscreen target, composites to the swapchain with a custom Slang shader, survives window minimize/maximize/resize, and exits with **zero** \`VK_LAYER_KHRONOS_validation\` warnings or memory leaks!
+- **Reference Verification Checklist (Run with Validation Enabled):**
+\`\`\`c
+// 1. Shutdown sequence guard: never destroy any VkImage, VkBuffer, VkPipeline, or VmaAllocator
+//    until vkQueueWaitIdle / vkDeviceWaitIdle returns cleanly!
+void shutdownScratchRenderer(FullRenderer *r) {
+    if (r->device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(r->device);
+        destroyPipelines(r);
+        destroyDescriptorSetLayouts(r);
+        destroyDescriptorPools(r);
+        destroyStagingRings(r);
+        destroySwapchainDependents(r);
+        destroyRenderPasses(r);
+        destroySamplersAndTextures(r);
+        if (r->vma != VK_NULL_HANDLE) vmaDestroyAllocator(r->vma);
+        vkDestroyCommandPool(r->device, r->commandPool, NULL);
+        vkDestroyDevice(r->device, NULL);
+    }
+    if (r->instance != VK_NULL_HANDLE) {
+        if (r->surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(r->instance, r->surface, NULL);
+        if (r->debugReport && r->destroyDebug) r->destroyDebug(r->instance, r->debugReport, NULL);
+        vkDestroyInstance(r->instance, NULL);
+    }
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Mid-Frame Render Target Switch & 3-RenderPass Transition Topology",
+        chart: `
+flowchart TD
+    classDef scr fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef off fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef bar fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+
+    P1["1. Begin Frame: renderPass (CLEAR)<br/>Target = Swapchain Image"]:::scr
+    B1["vkCmdEndRenderPass + Barrier<br/>Offscreen: SHADER_READ -> COLOR_ATTACHMENT"]:::bar
+    P2["2. externalTargetRenderPass (LOAD)<br/>Target = Offscreen Texture FBO"]:::off
+    B2["vkCmdEndRenderPass + Barrier<br/>Offscreen: COLOR_ATTACHMENT -> SHADER_READ"]:::bar
+    P3["3. midFrameSwapRenderPass (LOAD)<br/>Sample Offscreen Texture back onto Swapchain"]:::scr
+
+    P1 --> B1 --> P2 --> B2 --> P3
+`,
+      },
+      {
+        title: "Swapchain Resize & MSAA Rebuild Decision Pipeline",
+        chart: `
+flowchart TD
+    classDef err fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+    classDef wait fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef chk fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef ok fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Trig["OUT_OF_DATE_KHR, SUBOPTIMAL_KHR,<br/>or Config Change"]:::err
+    Min["While Minimized: SDL_PumpEvents Loop"]:::wait
+    Wait["vkDeviceWaitIdle + Destroy Views,<br/>Framebuffers, Depth, MSAA, Sync, Swapchain"]:::wait
+    MSAA{"Did MSAA Sample<br/>Count Change?"}:::chk
+    Full["Rebuild RenderPasses + Pipelines +<br/>Refresh Offscreen Target FBOs"]:::chk
+    Recreate["Recreate Swapchain, Depth/MSAA,<br/>Framebuffers, Sync & Resume Frame"]:::ok
+
+    Trig --> Min --> Wait --> MSAA
+    MSAA -->|"Yes"| Full --> Recreate
+    MSAA -->|"No (Drag Resize Only)"| Recreate
+`,
+      },
+    ],
+  },
 ];

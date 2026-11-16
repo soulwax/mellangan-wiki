@@ -368,6 +368,22 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-shader-book-pbr-lighting-and-post",
         shortTitle: "Book VIII: 2D PBR, ACES & Procedural Noise",
       },
+      {
+        id: "vk2d-renderer-book-instance-device-swapchain",
+        shortTitle: "Book IX: Scratch Boot, Devices & Swapchain",
+      },
+      {
+        id: "vk2d-renderer-book-passes-pipelines-sync",
+        shortTitle: "Book X: RenderPasses, Pipelines & Sync",
+      },
+      {
+        id: "vk2d-renderer-book-memory-barriers-batching",
+        shortTitle: "Book XI: VMA, Barriers, Bindless & Batching",
+      },
+      {
+        id: "vk2d-renderer-book-targets-resize-production",
+        shortTitle: "Book XII: Offscreen Targets, MSAA & Resize",
+      },
     ],
   },
 ];
