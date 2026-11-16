@@ -9296,4 +9296,310 @@ flowchart TD
       },
     ],
   },
+  {
+    id: "vk2d-shader-book-vertex-pulling-color",
+    title: "71. GPU & Shader Book VI: Vertex Pulling, Color Spaces (sRGB vs Linear) & Procedural Palettes",
+    category: "graphics",
+    summary:
+      "Draw thousands of sprites with zero vertex buffers using programmable vertex pulling (dissecting instanced.vert, instanced.frag, and colour.vert line-by-line), master sRGB vs Linear light math and cosine palettes, and solve Assignments 14–16.",
+    sourceFiles: [
+      "extern/Vulkan2d/shaders/instanced.vert",
+      "extern/Vulkan2d/shaders/instanced.frag",
+      "extern/Vulkan2d/shaders/colour.vert",
+      "extern/Vulkan2d/shaders/colour.frag",
+    ],
+    content: `
+# 71. GPU & Shader Book VI: Vertex Pulling, Color Spaces (sRGB vs Linear) & Procedural Palettes
+
+In Books I–V we covered GPU hardware, Slang fragment shaders, alignment rules, compute grids, blending, SDFs, and debugging. Now in **Book VI** we uncover two secrets behind clean, fast 2D engines:
+1. **Programmable Vertex Pulling**: How Vulkan2D draws thousands of sprites in a single call *without binding a vertex buffer* (\`instanced.vert\` and \`instanced.frag\`).
+2. **Color Spaces & Procedural Palettes**: Why lighting and gradients look muddy if you mix up **sRGB** and **Linear** light, and how to generate rich palettes with 4 lines of math instead of lookup textures.
+
+---
+
+### Chapter 1: Vertex Pulling: Drawing 50,000 Quads With Zero Vertex Buffers
+
+Normally, beginners are taught to allocate a giant \`VkBuffer\` full of vertex positions and UVs, bind it with \`vkCmdBindVertexBuffers\`, and configure \`VkVertexInputAttributeDescription\`. Modern Vulkan engines often skip all of that using **Programmable Vertex Pulling**.
+
+In \`extern/Vulkan2d/shaders/instanced.vert\` (all 62 lines), the vertex shader has **zero \`in\` vertex attributes**! Instead, it invents a quad out of thin air using \`gl_VertexIndex\`:
+
+\`\`\`glsl
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
+
+struct DrawInstance {
+    vec4 texturePos;
+    vec4 colour;
+    uint textureIndex;
+    mat4 model;
+};
+
+layout(push_constant) uniform PushBuffer {
+    int cameraIndex;
+} push;
+
+layout(set = 0, binding = 0) uniform UniformBufferObject {
+    mat4 cameras[10];
+} ubo;
+
+layout(set = 3, binding = 3) readonly buffer ObjectBuffer{
+    DrawInstance objects[];
+} objectBuffer;
+
+layout(location = 1) out vec2 fragTexCoord;
+layout(location = 2) out vec4 fragColour;
+layout(location = 3) out uint textureIndex;
+
+vec2 vertices[] = {
+    vec2(0.0f, 0.0f),
+    vec2(1.0f, 0.0f),
+    vec2(1.0f, 1.0f),
+    vec2(1.0f, 1.0f),
+    vec2(0.0f, 1.0f),
+    vec2(0.0f, 0.0f),
+};
+
+vec2 texCoords[] = {
+    vec2(0.0f, 0.0f),
+    vec2(1.0f, 0.0f),
+    vec2(1.0f, 1.0f),
+    vec2(1.0f, 1.0f),
+    vec2(0.0f, 1.0f),
+    vec2(0.0f, 0.0f),
+};
+
+out gl_PerVertex {
+    vec4 gl_Position;
+};
+
+void main() {
+    vec2 newPos;
+    int instance = gl_VertexIndex / 6;
+    int vertexIndex = gl_VertexIndex % 6;
+    newPos.x = vertices[vertexIndex].x * objectBuffer.objects[instance].texturePos.z;
+    newPos.y = vertices[vertexIndex].y * objectBuffer.objects[instance].texturePos.w;
+    gl_Position = ubo.cameras[push.cameraIndex] * objectBuffer.objects[instance].model * vec4(newPos, 1.0, 1.0);
+    fragTexCoord.x = objectBuffer.objects[instance].texturePos.x + (texCoords[vertexIndex].x * objectBuffer.objects[instance].texturePos.z);
+    fragTexCoord.y = objectBuffer.objects[instance].texturePos.y + (texCoords[vertexIndex].y * objectBuffer.objects[instance].texturePos.w);
+    fragColour = objectBuffer.objects[instance].colour;
+    textureIndex = objectBuffer.objects[instance].textureIndex;
+}
+\`\`\`
+
+#### Line-by-Line Breakdown
+
+- **Lines 21–23 (\`ObjectBuffer\`)**: Reads the \`DrawInstance\` array written milliseconds earlier by \`spritebatch.comp\` (Book IV!).
+- **Lines 29–45 (\`vertices[]\` & \`texCoords[]\`)**: Two 6-entry constant arrays forming 2 triangles (one quad). No VRAM vertex buffer fetch needed; these live right in shader constants!
+- **Lines 53–54 (The Trick!)**: When the CPU calls \`vkCmdDraw(cmd, drawCount * 6, 1, 0, 0)\`:
+  - \`instance = gl_VertexIndex / 6\` tells the shader **which sprite** ($0, 1, 2, \\dots$) this vertex belongs to.
+  - \`vertexIndex = gl_VertexIndex % 6\` tells the shader **which corner** ($0..5$) of that sprite's quad this vertex is.
+- **Lines 55–57**: Scales the unit quad \`[0..1]\` by the sprite's UV width/height (\`texturePos.zw\`), multiplies by the sprite's \`model\` matrix and camera \`viewproj\`, and emits \`gl_Position\`.
+- **Lines 58–61**: Computes the atlas UV and forwards \`fragColour\` and \`textureIndex\` to the fragment shader.
+
+Now look at \`extern/Vulkan2d/shaders/instanced.frag\` (all 22 lines):
+
+\`\`\`glsl
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_nonuniform_qualifier : enable
+
+layout(set = 1, binding = 1) uniform sampler texSampler;
+layout(set = 2, binding = 2) uniform texture2D tex[];
+
+layout(location = 1) in vec2 fragTexCoord;
+layout(location = 2) in vec4 fragColour;
+layout(location = 3) in flat uint instanceTextureIndex;
+
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    vec4 colour = texture(sampler2D(tex[nonuniformEXT(instanceTextureIndex)], texSampler), fragTexCoord);
+    outColor = vec4(
+            colour.r * fragColour.r,
+            colour.g * fragColour.g,
+            colour.b * fragColour.b,
+            colour.a * fragColour.a);
+}
+\`\`\`
+
+- **Line 11 (\`flat uint instanceTextureIndex\`)**: Why is \`flat\` mandatory here? Normally, the rasterizer smoothly blends vertex outputs across a triangle using barycentric weights (that is how \`fragTexCoord\` varies smoothly from \`0\` to \`1\`). You **cannot** interpolate an integer texture ID (what would texture \`3.47\` mean?), so Vulkan requires \`flat\` on all integer fragment inputs, copying the ID straight from the triangle's provoking vertex.
+- **Line 16 (\`nonuniformEXT(...)\`)**: Because sprite A might use \`tex[2]\` and adjacent sprite B in the **same 32-lane warp** might use \`tex[7]\`, \`nonuniformEXT\` tells the SPIR-V compiler to generate a hardware **waterfall loop** so every pixel reads its exact texture safely without undefined behavior!
+
+---
+
+### Chapter 2: \`UNIT_VIEW\` & Screen-Space Matrix Tricks (\`colour.vert\`)
+
+How does Vulkan2D draw colored rectangles or shapes even when you pass \`cameraIndex = -1\` (ignoring all 10 game cameras)? Look at \`extern/Vulkan2d/shaders/colour.vert\` (lines 23–34):
+
+\`\`\`glsl
+const mat4 UNIT_VIEW = {
+    { 2.0, 0.0, 0.0, 0.0 },
+    { 0.0, 2.0, 0.0, 0.0 },
+    { 0.0, 0.0, 0.10101, 0.0 },
+    { -1.0, -1.0, 0.191919, 1.0 }
+};
+
+void main() {
+    mat4 camera = pushBuffer.cameraIndex == -1 ? UNIT_VIEW : ubo.viewproj[pushBuffer.cameraIndex];
+    gl_Position = camera * pushBuffer.model * vec4(inPosition, 1.0);
+    fragColor = inColor;
+}
+\`\`\`
+
+Remember from Book IV that GLSL \`mat4\` constructors take **4 columns**. Multiply \`UNIT_VIEW\` by a unit-square point $(x, y, 0, 1)$ where $x, y \\in [0, 1]$:
+- $X_{\\text{ndc}} = 2x - 1 \\in [-1, +1]$ (left edge to right edge of the screen)
+- $Y_{\\text{ndc}} = 2y - 1 \\in [-1, +1]$ (top edge to bottom edge in Vulkan!)
+
+So \`cameraIndex = -1\` turns normalized \`[0..1]\` coordinates straight into fullscreen Vulkan NDC without touching any camera UBO!
+
+---
+
+### Chapter 3: sRGB vs Linear Color Space & Cosine Palettes
+
+Human vision is logarithmic: we are far more sensitive to small differences in dark shadows than in bright highlights. To save bits in 8-bit PNG files, image formats store colors in **sRGB** (roughly $\\text{sRGB} \\approx \\text{Linear}^{1/2.2}$).
+
+#### Why Mixing Up sRGB and Linear Breaks Lighting
+
+- **The Golden Rule**: All **physics and math** (lighting, bloom, alpha blending, color tinting) belong in **Linear space**. Only **storage and display** use **sRGB**.
+- When Vulkan2D creates its swapchain with \`VK_FORMAT_B8G8R8A8_SRGB\`, the GPU hardware does two things for free:
+  1. **TMU Read**: Automatically decodes sRGB textures to **Linear** when \`Sample()\` runs.
+  2. **ROP Write**: Automatically encodes your shader's Linear \`outColor\` back to **sRGB** before writing to the screen!
+- **Trap with Custom Math**: If you hand-pick an sRGB hex color like \`#808080\` (50% gray in Paint, \`0.502\`) and pass it inside \`UserData\`, it is **not** half as bright in Linear light! In Linear space, 50% perceptual gray is \`pow(0.502, 2.2) = 0.219\`.
+
+\`\`\`hlsl
+// Helper functions when converting raw UserData colors or UNORM render targets
+float3 srgbToLinear(float3 c) { return pow(max(c, 0.0), 2.2); }
+float3 linearToSrgb(float3 c) { return pow(max(c, 0.0), 1.0 / 2.2); }
+\`\`\`
+
+#### Procedural Cosine Color Palettes (Zero Texture Reads!)
+
+Instead of uploading a 1D gradient texture to color plasma, fire, or shockwaves, you can compute an infinitely smooth, custom RGB gradient in **3 ALU instructions** using Inigo Quilez's cosine palette formula:
+
+$$\\mathbf{C}(t) = \\mathbf{a} + \\mathbf{b} \\cdot \\cos\\bigl(2\\pi (\\mathbf{c} \\cdot t + \\mathbf{d})\\bigr)$$
+
+\`\`\`hlsl
+float3 cosinePalette(float t, float3 a, float3 b, float3 c, float3 d) {
+    return a + b * cos(6.2831853 * (c * t + d));
+}
+// Sunset / Magma ramp for t in [0..1]:
+float3 fire = cosinePalette(t, float3(0.5), float3(0.5), float3(1.0, 1.0, 0.5), float3(0.80, 0.90, 0.30));
+\`\`\`
+
+---
+
+### Chapter 4: Graded Assignments 14–16 (With Starter Code & Full Solutions)
+
+#### Assignment 14: Dynamic Palette-Swapped Retro Sprite (1D Lookup or Cosine Ramp)
+- **Objective:** Convert any grayscale sprite (using its luminance \`c.r\` or \`dot(c.rgb, lumaWeights)\`) into a vibrant animated color-cycled sprite using \`cosinePalette\` shifted by \`userData.time\`, preserving original alpha \`c.a\`.
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float time; float cycleSpeed; float pad0; float pad1; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float3 cosinePalette(float t, float3 a, float3 b, float3 c, float3 d) {
+    return a + b * cos(6.2831853 * (c * t + d));
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float luma = dot(tex.rgb, float3(0.299, 0.587, 0.114));
+    float t = luma + userData.time * userData.cycleSpeed;
+    float3 pal = cosinePalette(t, float3(0.5), float3(0.5), float3(1.0), float3(0.00, 0.33, 0.67));
+    return float4(pal * push.colour.rgb, tex.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 15: Gamma-Correct Inverse-Square Spotlight
+- **Objective:** Light a sprite with a radial spotlight at \`userData.lightPosLocal\` ($0..1$) using physically based inverse-square falloff $I = 1 / (1 + k \\cdot d^2)$, keeping lighting math in Linear space!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float2 lightPosLocal; float radius; float intensity; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float d = length(localUV - userData.lightPosLocal) / max(userData.radius, 0.001);
+    float atten = userData.intensity / (1.0 + 4.0 * d * d);
+
+    float3 linearAlbedo = pow(max(tex.rgb, 0.0), 2.2);
+    float3 litLinear = linearAlbedo * (0.06 + atten * float3(1.0, 0.85, 0.6));
+    float3 outRGB = pow(max(litLinear, 0.0), 1.0 / 2.2);
+    return float4(outRGB * push.colour.rgb, tex.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 16: Vertex-Pulled Procedural Starfield Grid (\`vk2dShaderFrom\`)
+- **Objective:** Write a GLSL 450 vertex shader with **zero vertex buffers** that uses \`gl_VertexIndex / 6\` (star ID) and \`gl_VertexIndex % 6\` (corner ID) to scatter 64 animated twinkling star quads across NDC space using a simple deterministic hash!
+- **Reference Solution (GLSL 450 Vertex Shader):**
+\`\`\`glsl
+#version 450
+layout(set = 3, binding = 3) uniform UserData { float time; float sizeNdc; } userData;
+layout(location = 0) out vec2 fragLocal;
+
+vec2 corners[6] = vec2[](
+    vec2(-1, -1), vec2(1, -1), vec2(1, 1),
+    vec2(1, 1), vec2(-1, 1), vec2(-1, -1)
+);
+
+float hash11(float p) {
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    return fract(p * (p + p));
+}
+
+void main() {
+    int id = gl_VertexIndex / 6;
+    int corner = gl_VertexIndex % 6;
+    vec2 center = vec2(hash11(float(id) * 1.7), hash11(float(id) * 3.1)) * 2.0 - 1.0;
+    float twinkle = 0.5 + 0.5 * sin(userData.time * 4.0 + float(id));
+    vec2 pos = center + corners[corner] * userData.sizeNdc * twinkle;
+
+    gl_Position = vec4(pos, 0.0, 1.0);
+    fragLocal = corners[corner];
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Programmable Vertex Pulling: Zero Vertex Buffer to Non-Uniform Bindless Texture",
+        chart: `
+flowchart LR
+    classDef cpu fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef vert fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef rast fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef frag fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Draw["CPU: vkCmdDraw(drawCount * 6)<br/>Zero Vertex Buffers Bound"]:::cpu
+    VS["instanced.vert<br/>instance = gl_VertexIndex / 6<br/>corner = gl_VertexIndex % 6<br/>Reads ObjectBuffer SSBO"]:::vert
+    Rast["Rasterizer<br/>Interpolates fragTexCoord<br/>Copies flat instanceTextureIndex"]:::rast
+    FS["instanced.frag<br/>tex[nonuniformEXT(idx)]<br/>Waterfall Loop Across Warp"]:::frag
+
+    Draw --> VS --> Rast --> FS
+`,
+      },
+      {
+        title: "sRGB vs Linear Light Pipeline: Where Gamma Conversion Happens",
+        chart: `
+flowchart LR
+    classDef disk fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef lin fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    PNG["PNG / Texture on Disk<br/>Encoded in sRGB (~gamma 2.2)"]:::disk
+    TMU["GPU Texture Unit<br/>Auto-Decodes SRGB -> Linear"]:::lin
+    Math["Shader Math & ROP Blending<br/>Lighting, Bloom, Tint in Linear"]:::lin
+    Swap["Swapchain B8G8R8A8_SRGB<br/>Auto-Encodes Linear -> sRGB"]:::out
+
+    PNG --> TMU --> Math --> Swap
+`,
+      },
+    ],
+  },
 ];

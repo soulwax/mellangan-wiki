@@ -356,6 +356,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-shader-book-debugging-and-performance",
         shortTitle: "Book V: SDFs, Profiling & Debugging",
       },
+      {
+        id: "vk2d-shader-book-vertex-pulling-color",
+        shortTitle: "Book VI: Vertex Pulling & Color Math",
+      },
     ],
   },
 ];
