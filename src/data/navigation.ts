@@ -360,6 +360,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-shader-book-vertex-pulling-color",
         shortTitle: "Book VI: Vertex Pulling & Color Math",
       },
+      {
+        id: "vk2d-shader-book-3d-depth-raymarching",
+        shortTitle: "Book VII: 3D Depth, Raymarching & Parallax",
+      },
     ],
   },
 ];

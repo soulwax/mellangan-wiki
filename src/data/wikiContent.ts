@@ -9602,4 +9602,275 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "vk2d-shader-book-3d-depth-raymarching",
+    title: "72. GPU & Shader Book VII: 3D Depth Buffers, Raymarching & Parallax Relief",
+    category: "graphics",
+    summary:
+      "Step into 3D inside Vulkan2D: dissect model.vert and model.frag line-by-line, understand hardware Z-buffering and Early-Z culling, build real-time 3D sphere-traced raymarching and parallax heightmaps inside a 2D quad, and solve Assignments 17–19.",
+    sourceFiles: [
+      "extern/Vulkan2d/shaders/model.vert",
+      "extern/Vulkan2d/shaders/model.frag",
+      "extern/Vulkan2d/assets/shader.slang",
+    ],
+    content: `
+# 72. GPU & Shader Book VII: 3D Depth Buffers, Raymarching & Parallax Relief
+
+In Books I–VI we explored 2D pixels, compute grids, shadows, SDFs, and vertex pulling. In **Book VII**, we cross the bridge into **3D**: first by dissecting Vulkan2D's built-in 3D model shaders and hardware depth buffer, and then by embedding a **real-time 3D raymarcher** and **parallax heightmap** right inside a standard 2D \`PixelShader\`!
+
+---
+
+### Chapter 1: 3D Geometry & The Z-Buffer (\`model.vert\` & \`model.frag\`)
+
+Even though Vulkan2D is primarily a 2D renderer, it ships a full 3D mesh pipeline (\`VK2DModel\`). Look at \`extern/Vulkan2d/shaders/model.vert\` (all 27 lines):
+
+\`\`\`glsl
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 0, binding = 0) uniform UniformBufferObject {
+    mat4 viewproj[10];
+} ubo;
+
+layout(push_constant) uniform PushBuffer {
+    mat4 model;
+    vec4 colourMod;
+    uint textureIndex;
+    int cameraIndex;
+} pushBuffer;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec2 inTexCoord;
+
+layout(location = 0) out vec2 fragTexCoord;
+
+out gl_PerVertex {
+    vec4 gl_Position;
+};
+
+void main() {
+    gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * pushBuffer.model * vec4(inPosition, 1.0);
+    fragTexCoord = inTexCoord;
+}
+\`\`\`
+
+#### Line-by-Line Breakdown
+
+- **Line 15 (\`vec3 inPosition\`)**: Unlike 2D quads (\`vec2\`), 3D vertices carry a \`z\` coordinate for depth.
+- **Line 25 (Right-to-Left MVP Multiplication)**:
+  1. \`pushBuffer.model * vec4(inPosition, 1.0)\` moves the vertex from **Model Space** (e.g., a crate centered at \`(0,0,0)\`) into **World Space**.
+  2. \`ubo.viewproj[cameraIndex] * ...\` moves it from **World Space** into **Camera Space** and applies perspective projection into **4D Clip Space**.
+- **\`model.frag\` (Lines 20–28)**:
+\`\`\`glsl
+void main() {
+    vec4 colour = texture(sampler2D(tex[pushBuffer.textureIndex], texSampler), fragTexCoord);
+    outColor = vec4(
+        colour.r * pushBuffer.colourMod.r,
+        colour.g * pushBuffer.colourMod.g,
+        colour.b * pushBuffer.colourMod.b,
+        colour.a * pushBuffer.colourMod.a
+    );
+}
+\`\`\`
+
+#### How the Hardware Z-Buffer & Early-Z Work
+
+In 2D, you sort sprites back-to-front on the CPU (Painter's Algorithm). In 3D, triangles intersect and overlap in complex ways, so sorting on the CPU fails. Instead, the GPU uses a **Depth Buffer (Z-Buffer)** (e.g., \`VK_FORMAT_D16_UNORM\` or \`D24_UNORM_S8_UINT\`):
+1. Every pixel on screen stores a depth value $z \\in [0.0, 1.0]$ (\`0.0\` = near camera, \`1.0\` = far away).
+2. Before running \`model.frag\`, the **Early-Z** hardware unit checks if the incoming triangle pixel's $z$ is *closer* than the Z-buffer value currently stored at that pixel.
+3. If it is behind an already-drawn wall ($z_{\\text{new}} > z_{\\text{stored}}$), the GPU **skips running the fragment shader completely**! That is why drawing opaque 3D objects **front-to-back** makes 3D games dramatically faster.
+
+---
+
+### Chapter 2: 3D Raymarching (Sphere Tracing) Inside a 2D Quad
+
+What if you want a spinning 3D crystal, planet, or hologram *inside a 2D sprite* without loading a 3D \`.obj\` mesh? You can run a **Sphere Tracer (Raymarcher)** inside \`PixelShader\`!
+
+#### How Sphere Tracing Works
+
+For each pixel inside your 2D quad:
+1. Convert \`localUV\` to centered screen coordinates $p \\in [-1, +1]^2$.
+2. Place a virtual camera at $\\mathbf{o} = (0, 0, -2.5)$ looking toward $+Z$.
+3. Shoot a ray through pixel $p$: $\\mathbf{d} = \\operatorname{normalize}(\\text{float3}(p, 1.6))$.
+4. Loop up to 48 steps:
+   - Evaluate the 3D Signed Distance Function $d = \\text{mapSDF}(\\mathbf{o} + t \\cdot \\mathbf{d})$.
+   - Because an SDF tells you the **exact safe distance to the nearest surface in any direction**, you can jump forward by $t \\mathrel{+}= d$ without ever clipping through geometry!
+   - If $d < 0.001$, you **hit** the 3D surface! If $t > 10.0$, the ray missed into empty space.
+
+#### Computing 3D Surface Normals Without Triangles
+
+To light a 3D surface, you need its surface normal vector $\\mathbf{N}$. With an SDF, you estimate the 3D gradient using a tiny offset $\\varepsilon = 0.001$:
+
+$$\\mathbf{N} = \\operatorname{normalize}\\begin{pmatrix} f(p + \\varepsilon \\hat{x}) - f(p - \\varepsilon \\hat{x}) \\\\ f(p + \\varepsilon \\hat{y}) - f(p - \\varepsilon \\hat{y}) \\\\ f(p + \\varepsilon \\hat{z}) - f(p - \\varepsilon \\hat{z}) \\end{pmatrix}$$
+
+\`\`\`hlsl
+float3 calcNormal(float3 p, float time) {
+    float2 e = float2(0.001, 0.0);
+    return normalize(float3(
+        mapSDF(p + e.xyy, time) - mapSDF(p - e.xyy, time),
+        mapSDF(p + e.yxy, time) - mapSDF(p - e.yxy, time),
+        mapSDF(p + e.yyx, time) - mapSDF(p - e.yyx, time)
+    ));
+}
+\`\`\`
+
+---
+
+### Chapter 3: 2D Parallax Heightmap Relief (Steep Parallax Mapping)
+
+Even flat 2D dungeon tiles or brick walls can look deeply 3D if you supply a grayscale **Heightmap** (where \`1.0\` = raised brick face, \`0.0\` = deep mortar crack) in a second bindless texture slot \`userData.heightTexID\`:
+- Given a 2D view offset \`float2 viewDir\` (from the camera center to the sprite), step 8 times through the heightmap along \`viewDir\`.
+- Stop when your current ray depth exceeds the heightmap sample at that UV.
+- Sample the color texture at the shifted UV! Bricks jut forward over the mortar cracks as the player walks past!
+
+---
+
+### Chapter 4: Graded Assignments 17–19 (With Starter Code & Full Solutions)
+
+#### Assignment 17: Real-Time 3D Raymarched Rotating Box + Specular Highlight
+- **Objective:** Raymarch a 3D rounded box rotating around the Y axis by \`userData.time\` inside a normal VK2D \`PixelShader\`, compute its 3D normal with \`calcNormal\`, and shade it with Lambertian diffuse + Blinn-Phong specular + Fresnel rim glow!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float time; float pad0; float pad1; float pad2; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float sdBox3D(float3 p, float3 b) {
+    float3 q = abs(p) - b;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float mapSDF(float3 p, float t) {
+    float c = cos(t), s = sin(t);
+    p.xz = float2(c * p.x - s * p.z, s * p.x + c * p.z);
+    p.xy = float2(c * p.x - s * p.y, s * p.x + c * p.y);
+    return sdBox3D(p, float3(0.45, 0.45, 0.45)) - 0.08;
+}
+
+float3 calcNormal(float3 p, float t) {
+    float2 e = float2(0.001, 0.0);
+    return normalize(float3(
+        mapSDF(p + e.xyy, t) - mapSDF(p - e.xyy, t),
+        mapSDF(p + e.yxy, t) - mapSDF(p - e.yxy, t),
+        mapSDF(p + e.yyx, t) - mapSDF(p - e.yyx, t)
+    ));
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float2 p = localUV * 2.0 - 1.0;
+
+    float3 ro = float3(0.0, 0.0, -2.2);
+    float3 rd = normalize(float3(p, 1.5));
+    float t = 0.0;
+    bool hit = false;
+
+    for (int i = 0; i < 40; ++i) {
+        float d = mapSDF(ro + rd * t, userData.time);
+        if (d < 0.002) { hit = true; break; }
+        t += d;
+        if (t > 6.0) break;
+    }
+
+    if (!hit) return float4(0.0, 0.0, 0.0, 0.0);
+
+    float3 pos = ro + rd * t;
+    float3 N = calcNormal(pos, userData.time);
+    float3 L = normalize(float3(0.6, -0.8, -0.7));
+    float3 H = normalize(L - rd);
+
+    float diff = max(dot(N, L), 0.0);
+    float spec = pow(max(dot(N, H), 0.0), 32.0);
+    float fresnel = pow(1.0 - max(dot(N, -rd), 0.0), 3.0);
+
+    float3 col = float3(0.15, 0.45, 0.95) * (0.2 + diff) + float3(1.0) * spec + float3(0.3, 0.9, 1.0) * fresnel;
+    return float4(col * push.colour.rgb, push.colour.a);
+}
+\`\`\`
+
+#### Assignment 18: 8-Step Parallax Occlusion Relief Shader
+- **Objective:** Use a secondary bindless heightmap \`textures[userData.heightTexID]\` and \`userData.viewDir\` (normalized screen-space camera offset) to march 8 layers deep and shift \`uv\` safely within \`push.texturePos\`.
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float2 viewDir; uint heightTexID; float depthScale; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 minUV = push.texturePos.xy + 0.5;
+    float2 maxUV = push.texturePos.xy + push.texturePos.zw - 0.5;
+
+    float numLayers = 8.0;
+    float layerDepth = 1.0 / numLayers;
+    float curLayerDepth = 0.0;
+    float2 deltaUV = (userData.viewDir * userData.depthScale) / numLayers;
+
+    float2 curUV = uv;
+    float heightVal = 1.0 - textures[userData.heightTexID].Sample(sampler, clamp(curUV, minUV, maxUV)).r;
+
+    for (int i = 0; i < 8; ++i) {
+        if (curLayerDepth >= heightVal) break;
+        curUV -= deltaUV;
+        heightVal = 1.0 - textures[userData.heightTexID].Sample(sampler, clamp(curUV, minUV, maxUV)).r;
+        curLayerDepth += layerDepth;
+    }
+    return textures[push.textureIndex].Sample(sampler, clamp(curUV, minUV, maxUV)) * push.colour;
+}
+\`\`\`
+
+#### Assignment 19: Quantized Cel-Shaded 3-Band Lighting
+- **Objective:** Replace smooth Lambertian shading with 3 crisp cartoon shadow bands (\`0.25\`, \`0.60\`, \`1.0\`) using \`floor(diff * 3.0) / 2.0\` or \`step()\` thresholds, plus a hard crisp rim highlight!
+- **Reference Solution:**
+\`\`\`hlsl
+float toonShade(float diff) {
+    float band1 = step(0.20, diff);
+    float band2 = step(0.65, diff);
+    return 0.25 + 0.35 * band1 + 0.40 * band2; // Crisp 0.25, 0.60, 1.00 steps!
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Sphere Tracing (3D Raymarching) Loop Inside a Single 2D Fragment",
+        chart: `
+flowchart LR
+    classDef ray fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef sdf fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef hit fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef miss fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+
+    Init["Pixel UV -> Ray Origin ro & Direction rd"]:::ray
+    March["Step i: d = mapSDF(ro + rd * t)"]:::sdf
+    Check{"d < 0.002?"}:::sdf
+    Hit["Hit Surface! Compute calcNormal(pos)<br/>Shade Diffuse + Specular + Fresnel"]:::hit
+    Advance["Safe Jump: t += d<br/>(Never Overshoots!)"]:::ray
+    Miss["t > 6.0 -> Transparent Alpha 0.0"]:::miss
+
+    Init --> March --> Check
+    Check -->|"Yes"| Hit
+    Check -->|"No & t <= 6.0"| Advance --> March
+    Check -->|"t > 6.0"| Miss
+`,
+      },
+      {
+        title: "3D MVP Transform Chain & Hardware Early-Z Depth Culling",
+        chart: `
+flowchart LR
+    classDef vert fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef zbuf fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef frag fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef cull fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+
+    MVP["model.vert<br/>gl_Position = viewproj * model * vec4(pos, 1.0)"]:::vert
+    EarlyZ{"Hardware Early-Z Test<br/>z_new < z_buffer?"}:::zbuf
+    Skip["Culled! Fragment Shader Skipped"]:::cull
+    RunFS["Run model.frag & Update Z-Buffer"]:::frag
+
+    MVP --> EarlyZ
+    EarlyZ -->|"No (Occluded)"| Skip
+    EarlyZ -->|"Yes (Closer)"| RunFS
+`,
+      },
+    ],
+  },
 ];
