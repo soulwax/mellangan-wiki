@@ -7804,4 +7804,865 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "vk2d-gpu-architecture-book",
+    title: "66. GPU & Shader Book I: How Modern GPUs Actually Work",
+    category: "graphics",
+    summary:
+      "A complete mental model of modern GPU silicon written for 2D/3D engine programmers: CPU latency vs GPU throughput, 32/64-lane SIMT warps, branch divergence, zero-cost warp switching, Morton-tiled VRAM textures, and the 2x2 pixel quad rasterizer.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/PhysicalDevice.c",
+      "extern/Vulkan2d/VK2D/src/LogicalDevice.c",
+      "extern/Vulkan2d/VK2D/src/DescriptorBuffer.c",
+      "extern/Vulkan2d/VK2D/src/Pipeline.c",
+      "extern/Vulkan2d/shaders/spritebatch.comp",
+      "extern/Vulkan2d/shaders/instanced.vert",
+      "extern/Vulkan2d/shaders/instanced.frag",
+    ],
+    content: `
+### Chapter 1: CPU vs GPU: Two Opposite Philosophies of Silicon
+
+If you think of a **CPU** as a **Formula 1 race car**, a **GPU** is a **hundred-car freight train**. They are both made of silicon transistors, yet they spend their chip area and electricity on completely opposite goals.
+
+#### Why Your CPU Has Huge Caches & Complex Control Logic
+
+A modern desktop CPU core spends most of its transistors on **minimizing latency** for a single, unpredictable thread (game AI, pathfinding, file I/O, or OS scheduling):
+- **Branch Predictors & Speculative Execution:** Guesses which way an \`if\` statement will go 20 instructions ahead so the pipeline stays full.
+- **Out-of-Order Execution Engines:** Reorders unrelated instructions on the fly while waiting for memory.
+- **Giant Multi-Level Caches (L1/L2/L3):** Tens of megabytes of fast SRAM sit right next to the ALU so a single core rarely waits 200+ clock cycles for system RAM.
+- **Result:** Only a tiny fraction of CPU die area is actual math circuitry (ALUs); most of the chip is smart control logic keeping 8 to 16 threads blazingly fast one instruction at a time.
+
+#### Why Your GPU Gives Up Control Logic for Thousands of Math Lanes
+
+When drawing a $1920 \\times 1080$ screen at 60 FPS, the GPU computes color for **$2{,}073{,}600$ pixels every 16.67 milliseconds** ($124$ million pixels per second), and each pixel runs nearly the exact same math program (a **shader**). Instead of building smart branch predictors for each pixel:
+- A GPU shrinks control logic and L3 cache to a bare minimum and stamps down dozens of **Streaming Multiprocessors (SMs)** (NVIDIA) or **Compute Units (CUs)** (AMD) / **GPU Cores** (Apple Silicon).
+- Inside each SM sit **dozens of simple math lanes (ALUs)** paired with an enormous **register file** (typically $256\\text{ KB}$ per SM!) and a **hardware warp scheduler**.
+- **Result:** A GPU cannot run a single thread as fast as a CPU core, yet its total math throughput and memory bandwidth dwarf a CPU by $10\\times$ to $50\\times$ when thousands of pixels or sprites run in parallel.
+
+| Silicon Design Feature | Modern CPU (Latency-Oriented) | Modern GPU (Throughput-Oriented) | What It Means for VK2D Code |
+| --- | --- | --- | --- |
+| **Control & Branch Logic** | Huge out-of-order engine + branch predictor | Minimal shared fetch/decode unit per warp | Avoid unpredictable \`if\` branches inside pixel shaders |
+| **On-Chip Memory** | Large coherent L1/L2/L3 caches (~32–96 MB) | Huge register file (~256 KB per SM) + small L1/shared RAM | Keep live shader variables compact so more warps fit in registers |
+| **Latency Hiding Strategy** | Cache hits + out-of-order execution | Instant 1-cycle context switch between 32+ active warps | Dispatch large batches (\`vkCmdDispatch\`, many pixels) so SMs stay fed |
+| **Main Memory Bus** | 64-bit / 128-bit DDR5 (~50–90 GB/s) | Wide 128-bit to 512-bit GDDR6/HBM (~300–1,000+ GB/s) | Stream vertex/instance buffers in bulk via \`VK2DDescriptorBuffer\` |
+
+### Chapter 2: SIMT Execution, Warps (32 Lanes) & Wavefronts (64 Lanes)
+
+Here is the single biggest mental leap in GPU programming: **a GPU does not execute one shader invocation per instruction decoder**. Instead, the hardware bundles neighboring pixels, vertices, or compute threads into groups of **32** (called a **Warp** on NVIDIA and Apple GPUs) or **64** (called a **Wavefront** on AMD GCN/RDNA in wave64 mode).
+
+Look at \`extern/Vulkan2d/shaders/spritebatch.comp\` line 32:
+\`\`\`glsl
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+\`\`\`
+VK2D chooses \`local_size_x = 64\` specifically because \`64\` fills **exactly two 32-lane NVIDIA warps or one 64-lane AMD wavefront** per workgroup with zero wasted hardware lanes!
+
+#### How **SIMT (Single Instruction, Multiple Threads)** Works Clock-by-Clock
+
+Inside one 32-lane warp:
+1. All 32 lanes share **one Program Counter (\`PC\`)** and fetch the **same instruction** at the exact same clock cycle.
+2. Each lane \`0..31\` owns its own private registers (\`r0..rN\`) holding different values (for instance, pixel $(10, 4)$ vs pixel $(11, 4)$).
+3. On a uniform instruction like \`c = texColor * push.colour;\`, all 32 lanes multiply their own colors simultaneously in a single step.
+
+#### Branch Divergence: Why \`if / else\` Inside a Warp Costs Both Paths
+
+What happens when 16 pixels in a warp take the \`if\` branch and the other 16 pixels take the \`else\` branch? Because a warp only has **one Program Counter (\`PC\`)**, the 32 lanes cannot jump to two different lines of code at the same time! Instead, the SM executes **both paths sequentially** using a 32-bit **Active Execution Mask (\`exec_mask\`)**:
+
+\`\`\`text
+Suppose a 32-pixel warp runs:
+  if (uv.x < 128.0) { color = expensiveBlur(); }   // Only pixels 0..15 true
+  else              { color = fastTint(); }        // Only pixels 16..31 true
+
+Hardware execution timeline inside the SM:
+  Step 1: Push exec_mask = 0x0000FFFF (lanes 0..15 ON, lanes 16..31 SLEEPING)
+          Execute expensiveBlur() -> 16 lanes compute, 16 lanes sit idle!
+  Step 2: Flip exec_mask = 0xFFFF0000 (lanes 0..15 SLEEPING, lanes 16..31 ON)
+          Execute fastTint()      -> 16 lanes compute, 16 lanes sit idle!
+  Step 3: Restore exec_mask = 0xFFFFFFFF (all 32 lanes reconverge)
+\`\`\`
+
+Notice the cost: **the warp paid \`cost(if) + cost(else)\`**, cutting hardware efficiency in half! On the other hand, if *every* pixel in the 32-lane warp agrees (e.g., \`if (userData.mode == 1)\`, a uniform check), the mask is either \`0xFFFFFFFF\` or \`0x00000000\`, so the SM skips the untaken branch completely with **zero divergence penalty**.
+
+#### Eliminating Divergence with Branchless Shader Math
+
+Experienced shader authors replace per-pixel \`if\` statements with arithmetic intrinsics that execute identically on all 32 lanes:
+- \`step(edge, x)\`: Returns \`0.0\` if \`x < edge\`, else \`1.0\` (single GPU compare instruction, zero branches).
+- \`smoothstep(e0, e1, x)\`: Smooth Hermite interpolation from \`0.0\` to \`1.0\` between \`e0\` and \`e1\`.
+- \`lerp(a, b, t)\` (Slang) / \`mix(a, b, t)\` (GLSL): Blends between \`a\` and \`b\` without branching: $a + t(b - a)$.
+- \`saturate(x)\` / \`clamp(x, 0.0, 1.0)\`: Compiled for free as an output modifier on many GPU ALU instructions!
+
+#### Zero-Cost Warp Switching (How SMs Hide 400-Cycle VRAM Latency)
+
+Reading a texel from VRAM texture memory (\`textures[push.textureIndex].Sample(sampler, uv)\`) is slow—often **200 to 450 GPU clock cycles** if it misses L1/L2 cache! A CPU would stall or rely on out-of-order execution. A GPU does something much simpler:
+1. Warp 0 issues a texture sample instruction and is immediately marked **stalled waiting on memory**.
+2. On the **very next clock cycle** (1 cycle = zero context-switch overhead, because every warp's registers stay live in the SM's 256 KB register file!), the warp scheduler swaps in **Warp 1** to execute math instructions.
+3. Then **Warp 2**, **Warp 3**, up to 48 or 64 warps rotate through the ALU while Warp 0's texture fetch travels back from GDDR6.
+4. By the time the scheduler loops back to Warp 0, its pixel data has arrived in registers and it resumes seamlessly. *(This is why small "hello world" draws of 1 sprite underutilize a GPU, whereas batching 2,000 sprites through \`vk2dRendererFlushSpriteBatch\` saturates the warp scheduler cleanly!)*
+
+### Chapter 3: The GPU Memory Hierarchy & Why Layout Matters
+
+Understanding where your shader's data physically lives explains every binding rule inside VK2D:
+
+| Memory Tier | Approx. Latency | Bandwidth | Where VK2D Uses It |
+| --- | --- | --- | --- |
+| **Per-Lane Registers** | ~1 cycle | ~20–80 TB/s aggregate | Local variables inside \`PixelShader\`, loop counters, sampled \`float4\` results |
+| **Push Constants** | ~1–4 cycles | Broadcast from SM constant bank | \`VK2DShaderPushBuffer\` (**112 B**), \`VK2DPushBuffer\` (**84 B**), \`cameraIndex\` |
+| **L1 / Texture Cache** | ~20–30 cycles | Multi-TB/s per SM | Recently sampled $2 \\times 2$ texture tiles & \`ConstantBuffer<UserData>\` |
+| **L2 Cache** | ~100–200 cycles | ~1–4 TB/s shared | Cross-SM sharing of \`VK2DDrawInstance\` SSBO & swapchain render target writes |
+| **Device-Local VRAM** | ~250–450 cycles | ~300–1,000+ GB/s | \`VK2DDescriptorBuffer\` \`deviceBuffer\`, loaded textures, shadow/model VBOs |
+| **PCIe System RAM** | ~1,000+ cycles | ~16–32 GB/s (PCIe 4.0/5.0) | \`stageBuffer\` mapped by CPU during frame; DMA-copied once at \`vk2dRendererEndFrame\` |
+
+#### Push Constants vs \`ConstantBuffer<UserData>\` vs Storage Buffers
+
+- **Push Constants (\`[[vk::push_constant]]\`):** Vulkan guarantees at least **128 bytes** of ultra-fast inline data embedded directly in the command buffer packet itself (VK2D uses up to **112 bytes** for custom shaders). Updating push constants never allocates GPU buffers or descriptor sets.
+- **Uniform / Constant Buffers (\`[[vk::binding(3, 3)]] ConstantBuffer<UserData>\`):** Read-only per draw call (\`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER\`, up to 64 KB). SMs broadcast reads cleanly when all lanes read the same offset (\`userData.time\`), which is why \`ConstantBuffer\` is fast—and why fields must obey 16-byte \`vec4\` alignment!
+- **Storage Buffers (SSBOs, \`Set 3 Binding 3\` in \`instanced.vert\`):** Arbitrarily large read/write arrays (\`VK_BUFFER_USAGE_STORAGE_BUFFER_BIT\`). VK2D's compute shader \`spritebatch.comp\` reads \`DrawCommand draws[]\` and writes \`DrawInstance draws[]\` through aligned slices of the 256 KB \`VK2DDescriptorBuffer\` pages.
+
+#### Why \`VK_IMAGE_TILING_OPTIMAL\` Uses 2D Morton / Z-Order Swizzling
+
+When VK2D calls \`vk2dInitImageCreateInfo()\` in \`Initializers.c\`, it always sets \`imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL\`. Why not store pixels row-by-row like a C array (\`VK_IMAGE_TILING_LINEAR\`)?
+- In a normal 2D C array, moving 1 pixel down on screen jumps by \`width * 4\` bytes (often several kilobytes away, causing a cache miss on diagonal sprite rotations!).
+- Under \`OPTIMAL\` tiling, the GPU driver shuffles pixels into **2D space-filling Z-order (Morton) curves** inside $2 \\times 2$, $4 \\times 4$, and $8 \\times 8$ blocks! That means any pixel's neighbors *up, down, left, right, and diagonal* sit in the exact same L1 cache line—which is essential when bilinear texture filtering (\`VK_FILTER_LINEAR\`) samples 4 neighboring texels at once!
+
+### Chapter 4: The Hardware Graphics Pipeline & The $2 \\times 2$ Pixel Quad Rule
+
+When \`vk2dRendererDrawShader()\` records \`vkCmdDraw(buf, 6, 1, 0, 0)\` into \`commandBuffer\`, here is what happens inside the silicon:
+
+1. **Input Assembler / Vertex Puller:** Reads \`gl_VertexIndex\` from \`0\` to \`5\`, forming two clockwise/counter-clockwise triangles (\`VERTICES[0..2]\` and \`VERTICES[3..5]\`). Notice no VBO memory fetch occurs!
+2. **Vertex Shader (\`usershader.vert\`):** Runs 6 vertex invocations in a warp, multiplying \`newPos\` by \`push.model\` and \`ubo.viewproj[push.cameraIndex]\` to output \`gl_Position\` and pixel-space \`fragTexCoord\`.
+3. **Viewport Transform & Scissor Culling:** Clips triangles outside $[-1, +1]^2$ NDC (and $z \\in [0, 1]$), converts to screen pixels inside \`viewport\`, and discards pixels outside \`scissor\`.
+4. **Rasterizer & Barycentric Interpolation:** Walks across the triangles and spawns fragments—**never 1 pixel at a time, always in $2 \\times 2$ blocks called Pixel Quads**!
+
+#### Why GPUs Always Execute Pixel Shaders in $2 \\times 2$ Quads (Helper Lanes)
+
+Even if a tiny 1-pixel sprite corner only touches **1 pixel** inside a $2 \\times 2$ tile, the hardware **still launches all 4 threads** (1 visible lane + 3 hidden **helper lanes** whose outputs are thrown away before blending):
+- **Why?** Because hardware texture mipmapping and screen-space derivative functions (\`ddx(v)\` / \`ddy(v)\`, or GLSL \`dFdx\` / \`dFdy\`) work by subtracting adjacent lanes inside the $2 \\times 2$ quad!
+  $$\\operatorname{ddx}(v) = v_{(x+1,y)} - v_{(x,y)}, \\qquad \\operatorname{ddy}(v) = v_{(x,y+1)} - v_{(x,y)}$$
+- **Practical Rule for 2D Pixel Art:** Tiny 1-pixel or thin-sliver triangles suffer up to **75% helper-lane waste** inside $2 \\times 2$ quads. Combining sprites into full quads (as VK2D does with 6-vertex quads) keeps quad occupancy high and avoids edge helper-lane overhead!
+5. **ROP (Render Output Unit) & Hardware Color Blending:** Finally, surviving fragment outputs flow into fixed-function **ROP** units, which execute VK2D's 4 pre-built \`VkPipelineColorBlendAttachmentState\` formulas (\`BLEND\`, \`NONE\`, \`ADD\`, \`SUBTRACT\`) using hardware MSAA resolve buffers and write the final BGRA pixels to the framebuffer.
+
+### Chapter 5: Hardware Mental-Model Exercises & Solutions
+
+Test your understanding of GPU hardware before writing your first Slang shader:
+
+#### Exercise 1: Calculating Warp Branch Divergence Cost
+Suppose a $32 \\times 32$ sprite tile has a diagonal slash across it, so inside every $8 \\times 4$ screen pixel warp, half the pixels (\`uv.y < uv.x\`) execute a 20-cycle **fire glow** formula and the other half execute an 8-cycle **ice tint** formula using \`if / else\`.
+- **Question:** How many compute cycles does that divergent warp take compared to a uniform warp, and how would you rewrite it to eliminate the divergence?
+- **Solution:** Because all 32 lanes share one \`PC\`, the warp runs both paths back-to-back: $20 + 8 = 28$ cycles (instead of $20$ or $8$), leaving half the SIMT lanes idle on every cycle. Rewrite it branchlessly using \`step\`:
+\`\`\`hlsl
+float mask = step(localUV.y, localUV.x); // 1.0 when y <= x, else 0.0
+float4 finalCol = lerp(iceTint(), fireGlow(), mask);
+\`\`\`
+  Wait—notice one subtle catch! In \`lerp(iceTint(), fireGlow(), mask)\`, *both* functions are still evaluated per lane (costing ~28 cycles anyway unless one path can reuse the same math!). True savings happen when you parameterize a single shared calculation with \`mask\` (e.g., \`float tint = lerp(float3(0.4, 0.8, 1.0), float3(1.0, 0.4, 0.1), mask);\`), dropping the whole warp down to **~10 cycles with zero divergence**!
+
+#### Exercise 2: Why \`VK2DDescriptorBuffer\` Copies Pages Instead of Single Sprites
+Suppose you call \`vk2dRendererDrawShader\` 300 times in a frame with a 16-byte \`UserData\` struct.
+- **Question:** How many Vulkan DMA copy calls does VK2D issue over the PCIe bus to transfer all 300 uniforms?
+- **Solution:** **One single \`vkCmdCopyBuffer\` call per 256 KB page!** Each of the 300 writes goes sequentially into CPU-mapped \`stageBuffer\` RAM (aligned up to the GPU's \`minUniformBufferOffsetAlignment\`, e.g., 64 B $\\times 300 = 19{,}200$ bytes < $256{,}000$ bytes), so all 300 structs fit inside Page 0. At \`vk2dRendererEndFrame()\`, \`vk2dDescriptorBufferEndFrame()\` transfers the entire active slice in **1 bulk DMA copy** on \`dbCommandBuffer\`.
+
+#### Exercise 3: Predicting Helper-Lane Effects in a Fragment Shader
+- **Question:** If a shader writes a debug counter to a storage buffer inside a triangle edge pixel, could the helper lanes outside the triangle also execute your shader math?
+- **Solution:** **Yes!** All 4 threads of the $2 \\times 2$ pixel quad execute the fragment shader instructions (including texture fetches and ALU ops, so derivatives \`ddx\`/\`ddy\` remain valid), and the hardware simply masks out framebuffer writes and side effects from helper lanes! Never sample adjacent pixels outside your sprite atlas frame without clamping first!
+`,
+    mermaidCharts: [
+      {
+        title: "GPU Streaming Multiprocessor (SM), Warp Scheduler & Memory Hierarchy",
+        chart: `
+flowchart TD
+    classDef cpu fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef sm fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef mem fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef vram fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    HOST["CPU Staging RAM (stageBuffer)<br/>Mapped Host Memory -> 1 Bulk DMA per Frame"]:::cpu
+    VRAM["Device-Local VRAM (GDDR6 / HBM)<br/>Textures in Z-Order Optimal Tiling + SSBOs"]:::vram
+    L2["Shared GPU L2 Cache<br/>Feeds All Streaming Multiprocessors"]:::mem
+
+    subgraph SM_Core ["Single Streaming Multiprocessor (SM / CU)"]
+        WS["Warp Scheduler (1-Cycle Context Switch)<br/>Holds 32 to 64 Resident Warps"]:::sm
+        REG["256 KB On-Chip Register File<br/>Push Constants + Private Per-Lane Registers"]:::mem
+        ALU["32 or 64 SIMT Math Lanes<br/>Shared PC + Active Execution Mask"]:::sm
+        TEX["L1 Texture Cache & Filtering Units<br/>Bilinear / Nearest + Unnormalized Pixel Addressing"]:::mem
+    end
+
+    HOST -->|"PCIe Bulk Copy (dbCommandBuffer)"| VRAM --> L2 --> TEX
+    WS --> ALU
+    REG <--> ALU
+    TEX --> REG
+`,
+      },
+      {
+        title: "Hardware Graphics Pipeline: Vertex Puller to 2x2 Pixel Quad & ROP Blender",
+        chart: `
+flowchart LR
+    classDef ia fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef vert fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef rast fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef rop fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    IA["1. Vertex Puller<br/>gl_VertexIndex 0..5<br/>Zero VBO needed for Shaders"]:::ia
+    VS["2. Vertex Shader<br/>usershader.vert<br/>NDC Clip + Pixel UV Out"]:::vert
+    RAST["3. Triangle Rasterizer<br/>Viewport, Scissor & Barycentrics<br/>Spawns 2x2 Pixel Quads"]:::rast
+    FS["4. Pixel Shader (SIMT Warps)<br/>PixelShader(float2 uv)<br/>Sample Textures + Compute RGBA"]:::vert
+    ROP["5. ROP Hardware Blend Unit<br/>BLEND, NONE, ADD, SUBTRACT<br/>MSAA Resolve -> Framebuffer"]:::rop
+
+    IA --> VS --> RAST --> FS --> ROP
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-shader-book-fundamentals",
+    title: "67. GPU & Shader Book II: Step-by-Step Vulkan2D Shader Guide (Line-by-Line)",
+    category: "graphics",
+    summary:
+      "Your hands-on Vulkan2D shader textbook: every line of shaders/usershader.vert, every required Slang binding checked by ShaderCompiler.cpp, pixel vs local [0,1] UV math, complete C host code, and 3 starter-to-solution assignments.",
+    sourceFiles: [
+      "extern/Vulkan2d/docs/Shaders.md",
+      "extern/Vulkan2d/assets/shader.slang",
+      "extern/Vulkan2d/shaders/usershader.vert",
+      "extern/Vulkan2d/VK2D/src/ShaderCompiler.cpp",
+      "extern/Vulkan2d/VK2D/src/Shader.c",
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+      "extern/Vulkan2d/examples/testing/main.c",
+    ],
+    content: `
+### Chapter 1: How a Custom Shader Lives Inside Vulkan2D
+
+In raw Vulkan, writing a custom shader means creating a vertex shader, fragment shader, descriptor set layout, pipeline layout, 4 blend-mode \`VkPipeline\` objects, and per-frame uniform buffer uploads. **Vulkan2D compresses all of that into Slang Fragment Shaders**:
+- You only write the **Pixel (Fragment) Shader** in **Slang** (\`.slang\`).
+- When you call \`vk2dSlangFrom(source, len)\` or \`vk2dSlangLoad("assets/shader.slang")\`, \`_vk2dShaderCompile()\` in \`VK2D/src/ShaderCompiler.cpp\` compiles your Slang code to SPIR-V (\`SLANG_SPIRV\`, profile \`glsl_450\`), inspects its global variables with Slang reflection, verifies the 3 required bindings + optional \`ConstantBuffer\`, and auto-detects \`userDataSize\`.
+- \`VK2D/src/Shader.c\` then pairs your fragment SPIR-V with VK2D's built-in vertex shader (\`VK2DVertUsershader\`, compiled from \`extern/Vulkan2d/shaders/usershader.vert\`) and pre-builds all 4 blend mode pipelines inside \`vk2dPipelineCreate(..., VK2D_PIPELINE_TYPE_USER_SHADER)\`!
+
+*(Important Gotcha in \`VK2D/src/Shader.c\`! Look at line 97 of \`VK2D/src/Shader.c\` inside \`vk2dSlangLoad(const char *slangFile)\`: in this bundled snapshot of Vulkan2d, \`vk2dSlangLoad\` passes the hardcoded literal \`"assets/shader.slang"\` to \`_vk2dLoadFile()\`. To load **any** custom \`.slang\` filename reliably from disk in your own project, use this tiny 12-line helper around \`vk2dSlangFrom()\`:)*
+
+\`\`\`c
+VK2DShader loadCustomSlangFile(const char *path) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return NULL;
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  rewind(f);
+  char *src = malloc((size_t)size + 1);
+  fread(src, 1, (size_t)size, f);
+  fclose(f);
+  src[size] = '\\0';
+  VK2DShader shader = vk2dSlangFrom(src, (int)size);
+  free(src);
+  return shader;
+}
+\`\`\`
+
+### Chapter 2: Line-by-Line Dissection of \`shaders/usershader.vert\`
+
+Before your Slang \`PixelShader(float2 uv)\` runs, VK2D's built-in vertex shader \`extern/Vulkan2d/shaders/usershader.vert\` runs for all 6 vertices of your sprite quad. Understanding every line here tells you **exactly what \`uv\` and \`push\` contain** when they arrive in your pixel shader:
+
+\`\`\`glsl
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+const vec2 VERTICES[] = {
+    vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f),
+    vec2(1.0f, 1.0f), vec2(0.0f, 1.0f), vec2(0.0f, 0.0f),
+};
+
+const vec2 TEX_COORDS[] = {
+    vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f),
+    vec2(1.0f, 1.0f), vec2(0.0f, 1.0f), vec2(0.0f, 0.0f),
+};
+
+layout(push_constant) uniform PushBuffer {
+    int cameraIndex;   // Offset 0  (4 B)
+    uint textureIndex; // Offset 4  (4 B) + 8 B implicit std430 alignment pad
+    vec4 texturePos;   // Offset 16 (16 B): xInTex, yInTex, texW, texH
+    vec4 colour;       // Offset 32 (16 B): global colourMod RGBA
+    mat4 model;        // Offset 48 (64 B): scale/rotate/translate around origin
+} push;                // Total = 112 B
+
+layout(set = 0, binding = 0) uniform UniformBufferObject {
+    mat4 viewproj[10];
+} ubo;
+
+layout(location = 0) out vec2 fragTexCoord;
+
+void main() {
+    vec2 newPos;
+    newPos.x = VERTICES[gl_VertexIndex].x * push.texturePos.z;
+    newPos.y = VERTICES[gl_VertexIndex].y * push.texturePos.w;
+    gl_Position = ubo.viewproj[push.cameraIndex] * push.model * vec4(newPos, 1.0, 1.0);
+    fragTexCoord.x = push.texturePos.x + (TEX_COORDS[gl_VertexIndex].x * push.texturePos.z);
+    fragTexCoord.y = push.texturePos.y + (TEX_COORDS[gl_VertexIndex].y * push.texturePos.w);
+}
+\`\`\`
+
+Walk through the two critical lines inside \`main()\`:
+- **Line 46–48 (Screen Position):** \`VERTICES[gl_VertexIndex]\` is $(0,0)$ to $(1,1)$. Multiplying by \`push.texturePos.z\` (sprite width in pixels) and \`push.texturePos.w\` (sprite height in pixels) gives the sprite's true pixel dimensions before multiplying by \`push.model\` and the active camera's \`viewproj[push.cameraIndex]\`.
+- **Line 49–50 (Pixel-Space \`fragTexCoord\`):** Look closely! \`TEX_COORDS\` ($0..1$) is multiplied by \`push.texturePos.zw\` (pixel width/height) and added to \`push.texturePos.xy\` (top-left pixel offset in a spritesheet). Therefore, the \`float2 uv\` parameter arriving in your Slang \`PixelShader(float2 uv)\` is **NOT** normalized $[0, 1]$! It is in **raw texture pixel coordinates**, e.g. $u \\in [0, 16],\\, v \\in [0, 16]$ for a $16 \\times 16$ caveguy sprite!
+
+### Chapter 3: Line-by-Line Dissection of Your First Slang Shader & C Host
+
+Let's examine every single line of a minimal working VK2D Slang shader side-by-side with the reflection checks in \`ShaderCompiler.cpp\`:
+
+\`\`\`hlsl
+// Lines 1-11: Push constants: MUST be named "push" of type "Push" and size == 112 B!
+struct Push {
+    int cameraIndex;     // [0..3]   Camera slot chosen by VK2D (0..9)
+    uint textureIndex;   // [4..7]   Bindless slot ID inside textures[] (+8B auto pad)
+    float4 texturePos;   // [16..31] (xInTex, yInTex, widthInTex, heightInTex) in pixels
+    float4 colour;       // [32..47] Current vk2dRendererSetColourMod() RGBA
+    float4x4 model;      // [48..111] 4x4 transform matrix (world pixels -> camera)
+};
+[[vk::push_constant]] Push push;
+
+// Lines 13-15: Required global sampler & bindless texture array (exact names & bindings!)
+[[vk::binding(1, 1)]] SamplerState sampler;
+[[vk::binding(2, 2)]] Texture2D<float4> textures[];
+
+// Lines 17-22: Optional user uniform block at Set 3, Binding 3 (auto-measured by reflection)
+struct UserData {
+    float time;          // Passed via void *data in vk2dRendererDrawShader()
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+// Lines 24-34: Entry point MUST be named "PixelShader" with [shader("pixel")]
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    // 1. Sample raw pixel-space texture coordinate using VK2D's unnormalized sampler
+    float4 texColor = textures[push.textureIndex].Sample(sampler, uv);
+
+    // 2. Convert pixel-space uv into normalized [0.0 .. 1.0] UVs for effects math
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+
+    // 3. Tint gently using localUV.x and time
+    float pulse = 0.5 + 0.5 * sin(userData.time * 4.0 + localUV.x * 6.28318);
+    return float4(texColor.rgb * push.colour.rgb * (0.7 + 0.3 * pulse), texColor.a * push.colour.a);
+}
+\`\`\`
+
+#### Line-by-Line Checklist of What \`_vk2dShaderCompile()\` Enforces (\`ShaderCompiler.cpp\`)
+
+| Declaration in Your \`.slang\` File | Requirement in \`ShaderCompiler.cpp\` | What Happens If Wrong |
+| --- | --- | --- |
+| \`[[vk::push_constant]] Push push;\` | Variable name **must** be \`push\`, struct name \`Push\`, exact byte size **112**. | Logs error & returns \`false\` |
+| \`[[vk::binding(1, 1)]] SamplerState sampler;\` | Variable name **must** be \`sampler\`, type \`SamplerState\`, Set \`1\`, Binding \`1\`. | Logs error & returns \`false\` |
+| \`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\` | Variable name **must** be \`textures\`, type \`Texture2D<float4>[]\`, Set \`2\`, Binding \`2\`. | Logs error & returns \`false\` |
+| \`[[vk::binding(3, 3)]] ConstantBuffer<T> ...;\` | Optional. If present at Set \`3\`, Binding \`3\`, must be a \`ConstantBuffer\`. Size auto-detected! | Rejects non-\`ConstantBuffer\` |
+| \`[shader("pixel")] float4 PixelShader(float2 uv)\` | Entry point **must** be named \`PixelShader\`. | Logs entrypoint error |
+
+*(Why \`localUV\` Matters: Remember the formula $\\text{localUV} = (\\text{uv} - \\text{push.texturePos.xy}) / \\text{push.texturePos.zw}$. Whether your sprite is a full $512 \\times 512$ PNG or a single $16 \\times 16$ frame sliced from \`(32, 48, 16, 16)\` inside a massive spritesheet, \`localUV\` always spans cleanly from $(0, 0)$ at the top-left of that sprite to $(1, 1)$ at its bottom-right!)*
+
+#### Complete Line-by-Line C Host Program
+
+\`\`\`c
+#include <SDL3/SDL.h>
+#include "VK2D/VK2D.h"
+
+// Must match UserData in Slang byte-for-byte (multiple of 4 bytes)
+typedef struct MyShaderData {
+  float time;
+} MyShaderData;
+
+int main(void) {
+  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+  SDL_Window *win = SDL_CreateWindow("VK2D Shader Book", 800, 600, SDL_WINDOW_VULKAN);
+  VK2DRendererConfig cfg = { VK2D_MSAA_1X, VK2D_SCREEN_MODE_VSYNC, VK2D_FILTER_TYPE_NEAREST };
+  vk2dRendererInit(win, cfg, NULL);
+
+  VK2DTexture sprite = vk2dTextureLoad("assets/caveguy.png");
+  VK2DShader shader = loadCustomSlangFile("assets/my_effect.slang");
+
+  bool running = true;
+  SDL_Event e;
+  while (running) {
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_EVENT_QUIT) running = false;
+    }
+    MyShaderData data = { .time = (float)vk2dTime() };
+
+    // Draw sprite at (320, 220), scaled 8x around center pivot (8, 8)
+    vk2dRendererDrawShader(
+        shader, &data, sprite,
+        320, 220, 8.0f, 8.0f, 0.0f, 8.0f, 8.0f,
+        0, 0, vk2dTextureWidth(sprite), vk2dTextureHeight(sprite));
+
+    vk2dRendererPresent();
+  }
+
+  vk2dRendererWait(); // ALWAYS wait before freeing GPU assets!
+  vk2dShaderFree(shader);
+  vk2dTextureFree(sprite);
+  vk2dRendererQuit();
+  SDL_DestroyWindow(win);
+  return 0;
+}
+\`\`\`
+
+### Chapter 4: Line-by-Line Dissection of \`assets/shader.slang\` (The Rainbow Wave)
+
+Let's dissect the actual pixel shader included in \`extern/Vulkan2d/assets/shader.slang\` (used in \`examples/main\` and \`examples/testing\`):
+
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float a = 1;
+    float b = 0.3;
+    float val1 = ((a - b) / 2) * sin(((uv.y + uv.x) / 2) + (userData.time)) + (((a - b) / 2) + b);
+    float val2 = ((a - b) / 2) * sin(((uv.y + uv.x) / 2) + (userData.time + (3.141592635 * 0.25))) + (((a - b) / 2) + b);
+    float val3 = ((a - b) / 2) * sin(((uv.y + uv.x) / 2) + (userData.time + (3.141592635 * 0.5))) + (((a - b) / 2) + b);
+    float4 uv_colour = textures[push.textureIndex].Sample(sampler, uv);
+    return float4((0.5 * uv_colour.r) * push.colour.r * (val1 * 2),
+                  (0.5 * uv_colour.g) * push.colour.g * (val2 * 2),
+                  (0.5 * uv_colour.b) * push.colour.b * (val3 * 2),
+                  (uv_colour.a) * push.colour.a);
+}
+\`\`\`
+
+- **Lines 32–33:** Sets the wave peak $a = 1.0$ and trough $b = 0.3$ so colors never dip completely to black.
+- **Line 34 (\`val1\`: Red Wave):** Notice how \`((a - b) / 2) * sin(x) + ((a - b) / 2 + b)\` remaps $\\sin(x) \\in [-1, +1]$ smoothly into $[b, a] = [0.3, 1.0]$. Passing \`(uv.y + uv.x) / 2\` creates diagonal wave stripes moving across pixel coordinates, while \`userData.time\` scrolls those stripes continuously!
+- **Lines 35–36 (\`val2\`, \`val3\`: Green & Blue Phase Shift):** Adding $\\pi/4$ ($45^\\circ$) to Green and $\\pi/2$ ($90^\\circ$) to Blue offsets the three color waves so the peaks chase one another like a scrolling rainbow.
+- **Line 37:** Samples the original texel \`uv_colour\` once into fast registers.
+- **Lines 38–41:** Multiplies RGB by the phase waves and preserves original alpha (\`uv_colour.a * push.colour.a\`) so transparent background pixels around the character stay invisible!
+
+### Chapter 5: Graded Assignments 1–3 (With Starter Code & Full Solutions)
+
+#### Assignment 1: Damage Hit-Flash & Stone Petrification Shader
+- **Objective:** Write a shader with two floats in \`UserData\`: \`float flashAmount\` ($0.0 .. 1.0$) and \`float stoneAmount\` ($0.0 .. 1.0$). When \`stoneAmount > 0\`, blend the sprite smoothly toward grayscale luminance ($Y = 0.299 R + 0.587 G + 0.114 B$). Then, when \`flashAmount > 0\`, blend toward pure opaque white while keeping transparent background pixels untouched!
+- **Starter Skeleton (Fill in \`PixelShader\`):**
+\`\`\`hlsl
+// Add Push, sampler, textures here...
+struct UserData {
+    float flashAmount; // 0.0 = normal, 1.0 = solid white hit flash
+    float stoneAmount; // 0.0 = full color, 1.0 = grayscale statue
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 c = textures[push.textureIndex].Sample(sampler, uv);
+    // TODO 1: Compute perceptual luminance y = dot(c.rgb, float3(0.299, 0.587, 0.114))
+    // TODO 2: Blend c.rgb -> float3(y, y, y) using lerp(..., userData.stoneAmount)
+    // TODO 3: Blend RGB -> float3(1.0, 1.0, 1.0) using lerp(..., userData.flashAmount)
+    // TODO 4: Return final RGBA multiplied by push.colour
+}
+\`\`\`
+- **Reference Solution (Shader + C Struct):**
+\`\`\`c
+// Matching C struct (8 bytes, 4-byte aligned -> valid for vk2dShaderFrom!)
+typedef struct HitFlashData {
+  float flashAmount;
+  float stoneAmount;
+} HitFlashData;
+\`\`\`
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 c = textures[push.textureIndex].Sample(sampler, uv);
+    float luma = dot(c.rgb, float3(0.299, 0.587, 0.114));
+    float3 stoned = lerp(c.rgb, float3(luma, luma, luma), saturate(userData.stoneAmount));
+    float3 flashed = lerp(stoned, float3(1.0, 1.0, 1.0), saturate(userData.flashAmount));
+    return float4(flashed * push.colour.rgb, c.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 2: Normalized UV Pulsing Magic Forcefield
+- **Objective:** Convert pixel \`uv\` into centered normalized coordinates $p \\in [-1, +1]^2$, measure distance $r = \\text{length}(p)$ from the sprite center, and draw an additive cyan shield ring at radius $r \\approx 0.85$ whose thickness pulses over \`userData.time\`—without any \`if\` branch divergence!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData {
+    float time;
+    float shieldStrength; // 0.0 .. 1.0
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float2 p = localUV * 2.0 - 1.0; // Center is (0, 0), edges are +/- 1.0
+    float r = length(p);
+
+    float pulseRadius = 0.80 + 0.06 * sin(userData.time * 5.0);
+    // Peak 1.0 right on the ring, smoothly falling to 0.0 away from the ring
+    float ring = 1.0 - smoothstep(0.0, 0.12, abs(r - pulseRadius));
+    float3 shieldColor = float3(0.2, 0.9, 1.0) * ring * userData.shieldStrength;
+
+    // Show sprite + glowing ring where either sprite is opaque OR ring is glowing
+    float3 finalRGB = tex.rgb * push.colour.rgb + shieldColor;
+    float finalA = max(tex.a, ring * userData.shieldStrength) * push.colour.a;
+    return float4(finalRGB, finalA);
+}
+\`\`\`
+
+#### Assignment 3: Retro 4-Shade Game Boy Quantizer & Ordered $2 \\times 2$ Dither
+- **Objective:** Use VK2D's pixel-space \`uv\` coordinates directly to look up a $2 \\times 2$ Bayer threshold matrix (adding crisp retro dithering) and snap the sprite luminance into 4 classic emerald-green shades!
+- **Reference Solution:**
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 c = textures[push.textureIndex].Sample(sampler, uv);
+    float luma = dot(c.rgb, float3(0.299, 0.587, 0.114));
+
+    // Classic 2x2 Bayer matrix thresholds in pixel space (zero normalization needed!)
+    int2 px = int2(floor(uv)) & 1; // 0 or 1 in X and Y
+    float bayer = (px.x == 0 && px.y == 0) ? 0.00 :
+                  (px.x == 1 && px.y == 0) ? 0.50 :
+                  (px.x == 0 && px.y == 1) ? 0.75 : 0.25;
+
+    // Quantize into 4 discrete tones (0, 1, 2, 3) with dithering bias
+    float q = floor(saturate(luma + (bayer - 0.5) * 0.25) * 3.999) / 3.0;
+    float3 gbDark  = float3(0.06, 0.22, 0.06);
+    float3 gbLight = float3(0.61, 0.74, 0.06);
+    float3 outRGB = lerp(gbDark, gbLight, q);
+    return float4(outRGB * push.colour.rgb, c.a * push.colour.a);
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Line-by-Line Dataflow from C Host to usershader.vert and Slang PixelShader",
+        chart: `
+flowchart TD
+    classDef host fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef vert fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef frag fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    Host["C Host: vk2dRendererDrawShader(shader, &data, tex, x, y, ...)<br/>Pushes 112B PushBuffer + Copies UserData to Set 3 Binding 3"]:::host
+    Vert["shaders/usershader.vert<br/>Reads VERTICES(0..5) * texturePos.zw<br/>Emits gl_Position + pixel-space fragTexCoord"]:::vert
+    Frag["Your Slang PixelShader(float2 uv)<br/>Reads push.textureIndex, Set 1 sampler, Set 2 textures, Set 3 userData<br/>Outputs final float4 RGBA"]:::frag
+
+    Host --> Vert --> Frag
+`,
+      },
+      {
+        title: "Pixel-Space UV vs Normalized Local UV Coordinate Mapping",
+        chart: `
+flowchart LR
+    classDef raw fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef norm fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef use fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    RawUV["Incoming Pixel uv<br/>e.g. (xInTex..xInTex+W, yInTex..yInTex+H)"]:::raw
+    NormUV["localUV = (uv - push.texturePos.xy) / push.texturePos.zw<br/>Always 0.0 to 1.0 across current sprite"]:::norm
+    TexSample["Texture Sampling & Pixel Neighbours<br/>textures[id].Sample(sampler, uv)<br/>or uv + float2(1, 0) for 1px step"]:::use
+    MathFX["Normalized Vignettes, Rings & Waves<br/>length(localUV * 2.0 - 1.0)"]:::use
+
+    RawUV --> TexSample
+    RawUV --> NormUV --> MathFX
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-shader-book-advanced-workshop",
+    title: "68. GPU & Shader Book III: Advanced Effects, Alignment Rules & Assignments 4–7",
+    category: "graphics",
+    summary:
+      "Master C-to-GPU memory alignment (std140/std430), write 4 production shaders line-by-line (atlas-safe water ripples, 1-pixel outlines, procedural dissolve, CRT post-processing), sample multiple bindless textures at once, and solve Assignments 4–7.",
+    sourceFiles: [
+      "extern/Vulkan2d/docs/Shaders.md",
+      "extern/Vulkan2d/VK2D/src/ShaderCompiler.cpp",
+      "extern/Vulkan2d/VK2D/src/Shader.c",
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+      "extern/Vulkan2d/examples/main/main.c",
+      "extern/Vulkan2d/examples/retrolook/main.c",
+    ],
+    content: `
+### Chapter 1: The C-to-GPU Memory Alignment Bible (\`std140\` / \`std430\` Rules)
+
+Every bug where a shader "reads garbage numbers" from \`userData\` comes from **struct alignment mismatch** between your C compiler and Vulkan's GPU constant buffer rules (\`docs/Shaders.md\`). Look at why:
+- A scalar (\`float\`, \`int\`, \`uint\`) takes **4 bytes** and aligns to **4 bytes**.
+- A \`float2\` (\`vec2\`) takes **8 bytes** and aligns to **8 bytes**.
+- A \`float4\` (\`vec4\`) takes **16 bytes** and **must start at a byte offset divisible by 16**!
+
+Look at what happens when you put a \`float time\` right before a \`vec4 tint\` without padding:
+
+\`\`\`c
+// BROKEN C STRUCT (Size: 20 bytes)
+typedef struct BrokenData {
+  float time;   // Offset 0..3
+  vec4 tint;    // C puts this at Offset 4..19! GPU reads Offset 16..31 (GARBAGE!)
+} BrokenData;
+
+// FIXED C STRUCT (Size: 32 bytes: matches Slang's std430/std140 layout!)
+typedef struct FixedData {
+  float time;     // Offset 0..3
+  float _pad[3];  // Offset 4..15 (12 bytes of explicit padding)
+  vec4 tint;      // Offset 16..31 (Starts cleanly at 16-byte boundary!)
+} FixedData;
+\`\`\`
+
+*(Pro Golden Rule: Put all your \`vec4\` and \`mat4\` fields at the **top** of \`UserData\`, followed by \`vec2\` fields, followed by scalars—and always pack floats into multiples of 4 so \`sizeof(C_Struct) == userDataSize\` reported by Slang reflection!)*
+
+### Chapter 2: Four Production Game Shaders Explained Line-by-Line
+
+#### Production Shader 1: Atlas-Safe Water Ripple (No Sprite-Sheet Bleed!)
+
+If you draw a sprite carved out of a spritesheet using \`vk2dRendererDrawShader\`, shifting \`uv\` carelessly with \`sin()\` can accidentally step outside \`push.texturePos\` and sample the boots or sword of the *neighboring sprite*! Always clamp displaced pixel UVs strictly inside \`[minUV, maxUV]\`:
+
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 minUV = push.texturePos.xy + float2(0.5, 0.5);
+    float2 maxUV = push.texturePos.xy + push.texturePos.zw - float2(0.5, 0.5);
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+
+    // Displace X slightly using vertical Y wave, tapering to 0 near edges
+    float wave = sin(localUV.y * 25.0 + userData.time * 6.0) * 1.5;
+    float2 safeUV = clamp(uv + float2(wave, 0.0), minUV, maxUV);
+
+    float4 tex = textures[push.textureIndex].Sample(sampler, safeUV);
+    return tex * push.colour;
+}
+\`\`\`
+
+*(Why \`+ 0.5\` / \`- 0.5\`? Under \`VK_FILTER_LINEAR\`, texel centers sit at integer $+ 0.5$, so clamping 0.5 px inward guarantees bilinear filtering never blends with a neighbor frame in your atlas!)*
+
+#### Production Shader 2: Crisp 1-Pixel Sprite Outline & Glowing Aura
+
+Because VK2D's \`sampler\` sets \`unnormalizedCoordinates = VK_TRUE\`, adding \`float2(1.0, 0.0)\` to \`uv\` steps **exactly 1 texture pixel right**, regardless of whether the texture is $16 \\times 16$ or $2048 \\times 2048$! We can outline any transparent sprite in 10 lines with zero \`if\` divergence:
+
+\`\`\`hlsl
+struct UserData {
+    float4 outlineColor; // Offset 0..15
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 center = textures[push.textureIndex].Sample(sampler, uv);
+
+    // Sample 4 cardinal neighbors exactly 1 texel away
+    float aRight = textures[push.textureIndex].Sample(sampler, uv + float2( 1.0,  0.0)).a;
+    float aLeft  = textures[push.textureIndex].Sample(sampler, uv + float2(-1.0,  0.0)).a;
+    float aDown  = textures[push.textureIndex].Sample(sampler, uv + float2( 0.0,  1.0)).a;
+    float aUp    = textures[push.textureIndex].Sample(sampler, uv + float2( 0.0, -1.0)).a;
+
+    // Is any neighbor opaque while center is transparent?
+    float neighborOpaque = saturate(aRight + aLeft + aDown + aUp);
+    float outlineMask = neighborOpaque * (1.0 - step(0.1, center.a));
+
+    return lerp(center * push.colour, userData.outlineColor, outlineMask);
+}
+\`\`\`
+
+#### Production Shader 3: Procedural Noise Dissolve with Emissive Burn Edge
+
+No noise texture needed: a tiny 2D value-noise helper lets any boss or crate burn away into ash with an orange ember rim controlled by \`userData.dissolveProgress\` ($0.0 .. 1.0$):
+
+\`\`\`hlsl
+float hash21(float2 p) {
+    p = frac(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return frac(p.x * p.y);
+}
+
+float valueNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + float2(1.0, 0.0));
+    float c = hash21(i + float2(0.0, 1.0));
+    float d = hash21(i + float2(1.0, 1.0));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float n = valueNoise(localUV * 10.0);
+
+    // Cut away pixels where noise < dissolveProgress (branchless alpha mask!)
+    float alive = step(userData.progress, n);
+    // Glowing orange ember band just above the threshold (+0.08 width)
+    float ember = alive * (1.0 - step(userData.progress + 0.08, n));
+
+    float3 rgb = lerp(tex.rgb * push.colour.rgb, float3(1.0, 0.42, 0.05), ember);
+    return float4(rgb, tex.a * push.colour.a * alive);
+}
+\`\`\`
+
+#### Production Shader 4: Full-Screen Offscreen CRT Post-Processing
+
+Combine Chapter 58 (\`vk2dRendererSetTarget\`) with custom shaders to apply full-screen post-processing to your entire game:
+1. Draw your entire game into an offscreen target texture \`VK2DTexture sceneTex = vk2dTextureCreate(w, h);\`.
+2. Switch back to \`VK2D_TARGET_SCREEN\` and draw \`sceneTex\` using \`vk2dRendererDrawShader(crtShader, &time, sceneTex, 0, 0, ...)\`.
+3. Inside \`crt.slang\`, sample Red, Green, and Blue at slightly shifted horizontal pixel coordinates for **Chromatic Aberration**, multiply alternating rows by a dark scanline sine wave, and darken the corners with a smooth vignette!
+
+### Chapter 3: Sampling Multiple Bindless Textures in One Custom Shader
+
+Because VK2D keeps **all loaded textures** inside the single global bindless array \`textures[]\` (Set 2, Binding 2), any custom shader can sample a second texture (such as a normal map, light mask, or lookup palette) simply by storing \`vk2dTextureGetID(secondTex)\` inside your \`UserData\` C struct!
+
+\`\`\`c
+typedef struct MultiTexData {
+  uint32_t secondTexID; // Set via vk2dTextureGetID(normalMapTex)
+  float strength;
+  float pad0;
+  float pad1;           // Padded cleanly to 16 bytes
+} MultiTexData;
+\`\`\`
+\`\`\`hlsl
+struct UserData {
+    uint secondTexID;
+    float strength;
+    float pad0;
+    float pad1;
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+// Sample sprite albedo from push.textureIndex AND secondary map from userData.secondTexID!
+float4 albedo = textures[push.textureIndex].Sample(sampler, uv);
+float4 mapSample = textures[userData.secondTexID].Sample(sampler, uv);
+\`\`\`
+
+### Chapter 4: Graded Assignments 4–7 (Advanced, With Starter Code & Full Solutions)
+
+#### Assignment 4: Expanding Radial Shockwave Distortion (Post-Processing)
+- **Objective:** Given an offscreen scene texture drawn via \`vk2dRendererDrawShader\`, take \`float2 centerLocal\` ($0..1$), \`float radius\`, \`float thickness\`, and \`float strength\` inside \`UserData\`, and refract pixels along the ring outward to create an explosion shockwave!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData {
+    float2 centerLocal; // Normalized 0..1 explosion center
+    float radius;
+    float strength;     // 16 bytes total (two float2 slots aligned cleanly!)
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 minUV = push.texturePos.xy + 0.5;
+    float2 maxUV = push.texturePos.xy + push.texturePos.zw - 0.5;
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+
+    float2 delta = localUV - userData.centerLocal;
+    float dist = length(delta) + 0.0001; // Avoid divide-by-zero at center
+    float2 dir = delta / dist;
+
+    float band = 1.0 - smoothstep(0.0, 0.08, abs(dist - userData.radius));
+    float2 offsetPx = -dir * band * userData.strength;
+    return textures[push.textureIndex].Sample(sampler, clamp(uv + offsetPx, minUV, maxUV)) * push.colour;
+}
+\`\`\`
+
+#### Assignment 5: 9-Tap $3 \\times 3$ Pixel Blur Kernel
+- **Objective:** Sample the 9 pixels around \`uv\` at distance \`userData.blurRadiusPx\` using normalized $3 \\times 3$ box/Gaussian weights ($1, 2, 1 \\;/\\; 2, 4, 2 \\;/\\; 1, 2, 1$ divided by $16$) and clamp safely inside \`push.texturePos\`.
+- **Reference Solution:**
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 minUV = push.texturePos.xy + 0.5;
+    float2 maxUV = push.texturePos.xy + push.texturePos.zw - 0.5;
+    float r = userData.blurRadiusPx;
+
+    float4 sum = float4(0, 0, 0, 0);
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2(-r, -r), minUV, maxUV)) * 1.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( 0, -r), minUV, maxUV)) * 2.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( r, -r), minUV, maxUV)) * 1.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2(-r,  0), minUV, maxUV)) * 2.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( 0,  0), minUV, maxUV)) * 4.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( r,  0), minUV, maxUV)) * 2.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2(-r,  r), minUV, maxUV)) * 1.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( 0,  r), minUV, maxUV)) * 2.0;
+    sum += textures[push.textureIndex].Sample(sampler, clamp(uv + float2( r,  r), minUV, maxUV)) * 1.0;
+    return (sum / 16.0) * push.colour;
+}
+\`\`\`
+
+#### Assignment 6: Multi-Texture 2D Normal-Mapped Torch Light
+- **Objective:** Pass \`uint normalTexID\` (from \`vk2dTextureGetID(normalTex)\`) and a 3D torch light position \`float3 lightLocal\` (where $x, y \\in [0, 1]$ and $z$ is height above sprite, e.g. \`0.18\`) in \`UserData\`. Decode the RGB normal map ($\\mathbf{N} = \\operatorname{normalize}(\\text{rgb} \\cdot 2.0 - 1.0)$) and shade your sprite with Lambertian diffuse lighting $\\max(\\mathbf{N} \\cdot \\mathbf{L}, 0)$ + ambient light!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData {
+    float3 lightPosLocal; // [0..11]  (x, y, zHeight)
+    uint normalTexID;     // [12..15] Exact 16-byte packed struct! Zero waste!
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 albedo = textures[push.textureIndex].Sample(sampler, uv);
+    float3 normalRGB = textures[userData.normalTexID].Sample(sampler, uv).xyz;
+    float3 N = normalize(normalRGB * 2.0 - 1.0);
+
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float3 L = normalize(userData.lightPosLocal - float3(localUV, 0.0));
+    float diff = max(dot(N, L), 0.0);
+
+    float3 lit = albedo.rgb * (0.22 + 0.95 * diff * float3(1.0, 0.78, 0.45));
+    return float4(lit * push.colour.rgb, albedo.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 7: Bypassing Slang to Load Raw Pre-Compiled SPIR-V (\`vk2dShaderFrom\`)
+- **Objective:** If you build VK2D with \`-DVK2D_DISABLE_SHADERS=ON\` (disabling runtime Slang compilation) or want zero startup compile time, write a GLSL 450 fragment shader matching VK2D's descriptors (\`set 1\` sampler, \`set 2\` texture array, \`set 3\` uniform), compile it offline with \`glslc my_effect.frag -o my_effect.spv\`, and load it directly alongside \`VK2DVertUsershader\` (\`Blobs.h\`) using \`vk2dShaderFrom()\`!
+- **Reference Solution (GLSL Fragment + C Loader):**
+\`\`\`glsl
+#version 450
+#extension GL_EXT_nonuniform_qualifier : enable
+
+layout(set = 1, binding = 1) uniform sampler texSampler;
+layout(set = 2, binding = 2) uniform texture2D textures[];
+layout(set = 3, binding = 3) uniform UserData { float time; } userData;
+
+layout(push_constant) uniform PushBuffer {
+    int cameraIndex; uint textureIndex; vec4 texturePos; vec4 colour; mat4 model;
+} push;
+
+layout(location = 0) in vec2 fragTexCoord;
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    vec4 tex = texture(sampler2D(textures[nonuniformEXT(push.textureIndex)], texSampler), fragTexCoord);
+    outColor = tex * push.colour * (0.6 + 0.4 * sin(userData.time * 3.0));
+}
+\`\`\`
+\`\`\`c
+#include "VK2D/Blobs.h"
+// Load spvBytes from disk, then create VK2DShader directly with zero Slang dependency:
+VK2DShader precompiled = vk2dShaderFrom(
+    VK2DVertUsershader, sizeof(VK2DVertUsershader),
+    spvBytes, spvByteCount,
+    sizeof(float)); // Must be a multiple of 4!
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "16-Byte ConstantBuffer Alignment: Broken C Struct vs Padded C Struct",
+        chart: `
+flowchart TD
+    classDef broken fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+    classDef pad fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef ok fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    subgraph Broken_Layout ["Broken C Struct (Mismatch!)"]
+        B1["Bytes 0..3: float time"]:::broken
+        B2["Bytes 4..19: vec4 tint (UNALIGNED!)<br/>GPU Slang reads Bytes 16..31 -> CORRUPTION"]:::broken
+    end
+
+    subgraph Fixed_Layout ["Fixed 16-Byte Aligned C Struct"]
+        F1["Bytes 0..3: float time"]:::ok
+        F2["Bytes 4..15: float _pad0..2 (12 B Pad)"]:::pad
+        F3["Bytes 16..31: vec4 tint (Aligned to 16 B!)<br/>Matches Slang ConstantBuffer byte-for-byte"]:::ok
+    end
+`,
+      },
+      {
+        title: "Offscreen Render Target + Multi-Texture Bindless Post-Processing Pipeline",
+        chart: `
+flowchart LR
+    classDef scene fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef target fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef post fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    World["1. Draw World Sprites & Lights<br/>SetTarget(sceneTex) -> Empty() -> Draw"]:::scene
+    TexID["2. Bindless Slot Ready<br/>push.textureIndex = GetID(sceneTex)<br/>userData.secondTexID = GetID(normalOrMaskTex)"]:::target
+    Post["3. Draw Fullscreen Quad with Custom Shader<br/>SetTarget(SCREEN) -> DrawShader(postShader)"]:::post
+    Final["4. Final Screen Image<br/>CRT, Shockwave, Blur or Normal-Mapped Lit World"]:::out
+
+    World --> TexID --> Post --> Final
+`,
+      },
+    ],
+  },
 ];

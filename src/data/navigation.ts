@@ -336,6 +336,18 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-nuklear-uthash-internals",
         shortTitle: "Nuklear Vulkan Backend, Font Hash & Uploads",
       },
+      {
+        id: "vk2d-gpu-architecture-book",
+        shortTitle: "Book I: How Modern GPUs Work",
+      },
+      {
+        id: "vk2d-shader-book-fundamentals",
+        shortTitle: "Book II: Step-by-Step Shader Guide",
+      },
+      {
+        id: "vk2d-shader-book-advanced-workshop",
+        shortTitle: "Book III: Advanced Shaders & Labs",
+      },
     ],
   },
 ];
