@@ -7250,6 +7250,134 @@ flowchart TD
     SevErr["Severity = VK2D_LOG_SEVERITY_ERROR"]:::check
     Logger["vk2dLoggerLogv (Stack Buf up to 127 chars)<br/>Routes to gLogger->log()"]:::fnCall
     Stdout["Console stdout / stderr<br/>(if stdoutLogging == true)"]:::sink
+    ErrFile["errorFile (vk2derror.txt)<br/>Always records WARN, ERROR & FATAL"]:::sink
+    Abort["abort() if FATAL"]:::sink
+
+    Raise --> FatalCheck
+    FatalCheck -->|Yes| SevFatal --> Logger
+    FatalCheck -->|No| SevErr --> Logger
+    Logger --> Stdout
+    Logger --> ErrFile
+    ErrFile --> Abort
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-examples-cookbook",
+    title: "61. Practical Vulkan2D Cookbook & Sample Walkthroughs",
+    category: "graphics",
+    summary:
+      "Step-by-step code walkthroughs of real VK2D patterns from extern/Vulkan2d/examples/: integer-scaled retro pixel canvases, multi-light subtractive 2D shadows, 4-player split-screen cameras, dynamic texture streaming, and bitmap font overlays.",
+    sourceFiles: [
+      "extern/Vulkan2d/examples/main/main.c",
+      "extern/Vulkan2d/examples/retrolook/main.c",
+      "extern/Vulkan2d/examples/shadowsglsl/main.c",
+      "extern/Vulkan2d/examples/splitscreen/main.c",
+      "extern/Vulkan2d/examples/gui/main.c",
+      "extern/Vulkan2d/examples/testing/main.c",
+      "extern/Vulkan2d/examples/debug.c",
+    ],
+    content: `
+### Recipe 1: Integer-Scaled Retro Pixel Canvas (\`examples/retrolook/main.c\`)
+
+Many pixel-art games want to render at a fixed low resolution (like $256 \\times 224$ or $480 \\times 270$) and scale up cleanly to whatever window size the player chooses with nearest-neighbor filtering (\`VK2D_FILTER_TYPE_NEAREST\`).
+
+\`examples/retrolook/main.c\` shows the exact 4-step pattern:
+1. Create an offscreen render-target texture at your virtual resolution: \`VK2DTexture texTarget = vk2dTextureCreate(256, 224);\`.
+2. At the start of your draw loop, bind \`texTarget\` and clear it:
+\`\`\`c
+vk2dRendererSetTarget(texTarget);
+vk2dRendererSetColourMod(clear);
+vk2dRendererClear();
+vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
+\`\`\`
+3. Draw your entire game world (sprites, tilemaps, particles, or even 3D models if \`vk2dRendererSetTextureCamera(true)\` is enabled) into \`texTarget\`.
+4. Switch back to \`VK2D_TARGET_SCREEN\`, lock to \`VK2D_DEFAULT_CAMERA\`, compute the integer scale factor, and draw \`texTarget\` centered in the window:
+\`\`\`c
+vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
+float scale = minf(floorf(windowW / 256.0f), floorf(windowH / 224.0f));
+float xOnWindow = (windowW - (256.0f * scale)) / 2.0f;
+float yOnWindow = (windowH - (224.0f * scale)) / 2.0f;
+vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+vk2dDrawTextureExt(texTarget, xOnWindow, yOnWindow, scale, scale, 0, 0, 0);
+\`\`\`
+
+### Recipe 2: Multi-Light 2D Shadows Using Subtractive Blending (\`examples/shadowsglsl/main.c\`)
+
+How do you combine \`VK2DShadowEnvironment\` with multiple colored point lights so each light casts its own independent shadows across the room? \`examples/shadowsglsl/main.c\` demonstrates this using a reusable offscreen light texture (\`lightTex\`) and \`VK2D_BLEND_MODE_SUBTRACT\`:
+
+1. **Setup Once:** Create your wall polygons, trace their edges into a \`VK2DShadowEnvironment\` with \`vk2dShadowEnvironmentAddEdge()\`, and upload the shadow VBO once via \`vk2dShadowEnvironmentFlushVBO(shadows)\`. Create one offscreen texture \`lightTex = vk2dTextureCreate(400, 300)\`.
+2. **Per-Light Loop Every Frame:** For each point light \`i\`:
+   - Switch target to \`lightTex\` and wipe it to transparent with \`vk2dRendererEmpty()\`.
+   - Draw the radial light orb sprite centered at \`lights[i].pos\` tinted with \`lights[i].colour\`.
+   - Switch blend mode to **subtractive** (\`VK2D_BLEND_MODE_SUBTRACT\`) and call \`vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos)\`. Because \`VK2D_BLEND_MODE_SUBTRACT\` subtracts the shadow's alpha from the destination alpha (\`VK_BLEND_OP_REVERSE_SUBTRACT\`), this **erases** the light orb's alpha everywhere behind the walls!
+   - Restore \`VK2D_BLEND_MODE_BLEND\`, switch back to \`VK2D_TARGET_SCREEN\`, and draw \`lightTex\` onto the screen!
+3. Finally, draw your wall polygons and player sprites on top of the accumulated lights.
+
+\`\`\`c
+for (int i = 0; i < lightCount; i++) {
+  vk2dRendererSetTarget(lightTex);
+  vk2dRendererEmpty(); // Clear to {0, 0, 0, 0}
+
+  vk2dRendererSetColourMod(lights[i].colour);
+  vk2dDrawTexture(lightOrbTex,
+                  lights[i].pos[0] - vk2dTextureWidth(lightOrbTex) / 2,
+                  lights[i].pos[1] - vk2dTextureHeight(lightOrbTex) / 2);
+  vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
+
+  // Carve shadows out of this light's alpha channel!
+  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_SUBTRACT);
+  vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos);
+  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_BLEND);
+
+  vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
+  vk2dDrawTexture(lightTex, 0, 0);
+}
+\`\`\`
+
+### Recipe 3: Four-Quadrant Split-Screen + UI Overlay (\`examples/splitscreen/main.c\`)
+
+Because VK2D automatically loops over all enabled 2D cameras on every draw call, setting up a 4-player split-screen takes almost no extra drawing code:
+
+1. Create 4 cameras with \`vk2dCameraCreate()\`, setting their \`xOnScreen, yOnScreen, wOnScreen, hOnScreen\` to the 4 quadrants of the window (top-left, top-right, bottom-left, bottom-right), each with its own independent world \`x, y, zoom, rot\`.
+2. Before drawing the game world, temporarily disable the full-window default camera so the world is only drawn into the 4 split-screen quadrants:
+\`\`\`c
+vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_DISABLED);
+// Draw your world once — VK2D automatically renders it into all 4 quadrant cameras!
+vk2dDrawPolygon(testPoly, 0, 0);
+vk2dDrawTextureExt(texCaveguy, x, y, 10, 10, time, 8, 8);
+vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_NORMAL);
+\`\`\`
+3. To draw screen-space UI borders and HUD text across the whole window without repeating them in each quadrant, lock the renderer to \`VK2D_DEFAULT_CAMERA\`:
+\`\`\`c
+vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+// Draw screen-space UI / borders / debug overlay here
+vk2dRendererUnlockCameras();
+\`\`\`
+
+### Recipe 4: Sprite-Sheet Bitmap Font & Telemetry Overlay (\`examples/debug.c\`)
+
+All the example programs include \`examples/debug.c\`, which shows how to render a bitmap font sprite sheet (\`assets/font.png\`, a 128-pixel-wide grid of $8 \\times 16$ ASCII characters) and display live frame time and VRAM telemetry:
+- Each ASCII character \`c = text[i]\` is sliced from the texture atlas at pixel coordinates:
+  $$x_{\\text{tex}} = (c \\times 8) \\bmod 128, \\qquad y_{\\text{tex}} = \\lfloor c / 16 \\rfloor \\times 16$$
+  and drawn with \`vk2dRendererDrawTexture(gDebugFont, x, y, 2, 2, 0, 0, 0, xTex, yTex, 8, 16)\`.
+- Because every character uses the same \`gDebugFont\` texture, drawing a 100-character string simply appends 100 \`VK2DDrawCommand\` structs into the current sprite batch and renders the entire paragraph in **one instanced GPU draw call**!
+- Always remember the golden shutdown rule shown at the bottom of every example: **call \`vk2dRendererWait()\` before freeing any textures, polygons, models, or shaders** so the GPU finishes its last submitted command buffer before VMA destroys the underlying buffers!
+
+### Recipe 5: CMake Integration & Build Flags (\`extern/Vulkan2d/CMakeLists.txt\`)
+
+Adding \`extern/Vulkan2d\` to a C or C++ project only requires \`add_subdirectory\` and linking against \`Vulkan2D\`. Four CMake options in \`extern/Vulkan2d/CMakeLists.txt\` let you tailor the build:
+
+| CMake Option | Default | What It Controls |
+| --- | --- | --- |
+| \`VK2D_BUILD_SDL\` | \`ON\` | Builds the bundled \`extern/SDL\` (SDL3) submodule automatically. Set to \`OFF\` if your project already provides an \`SDL3\` target. |
+| \`VK2D_DISABLE_SHADERS\` | \`OFF\` | When set to \`ON\`, defines \`DISABLE_SHADER_COMPILATION\` and skips building the embedded \`extern/slang\` compiler for much faster CMake build times if you only need built-in pipelines or pre-compiled SPIR-V. |
+| \`VK2D_DISABLE_VECS\` | \`OFF\` | Defines \`VK2D_DISABLE_VECTOR_TYPES\` so \`Structs.h\` does not typedef \`vec2\`, \`vec3\`, \`vec4\`, and \`mat4\` (helpful if you already use \`cglm\` or another math library with those type names). |
+| \`VK2D_BUILD_EXAMPLES\` | \`OFF\` | Builds all 6 sample executables under \`examples/\` (\`main\`, \`gui\`, \`retrolook\`, \`shadowsglsl\`, \`splitscreen\`, \`testing\`). |
+`,
+    mermaidCharts: [
+      {
         title: "Subtractive 2D Shadow & Multi-Light Composition Loop (examples/shadowsglsl)",
         chart: `
 flowchart LR
