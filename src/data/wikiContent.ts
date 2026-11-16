@@ -6599,11 +6599,11 @@ flowchart LR
         title: "VK2DDescCon Auto-Expanding Descriptor Pool Chain",
         chart: `
 flowchart TD
-    classDef call fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef fnCall fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef pool fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Req["vk2dDescConGetSet(descCon)"]:::call
+    Req["vk2dDescConGetSet(descCon)"]:::fnCall
     CheckNull{"descCon->pools == NULL?"}:::pool
     AllocPool["vkCreateDescriptorPool (1,000 sets)<br/>poolsInUse++"]:::pool
     TryAlloc["vkAllocateDescriptorSets(currentPool)"]:::pool
@@ -7169,15 +7169,15 @@ void vk2dSleep(double seconds) {
         title: "Error Raising, Severity Routing & Log Sinks (Validation.c -> Logger.c)",
         chart: `
 flowchart TD
-    classDef call fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef fnCall fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef check fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef sink fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Raise["vk2dRaise(status, fmt, ...)<br/>gStatus |= status<br/>Appends to gLogBuffer (4096 B)"]:::call
+    Raise["vk2dRaise(status, fmt, ...)<br/>gStatus |= status<br/>Appends to gLogBuffer (4096 B)"]:::fnCall
     FatalCheck{"quitOnError && vk2dStatusFatal()?"}:::check
     SevFatal["Severity = VK2D_LOG_SEVERITY_FATAL"]:::check
     SevErr["Severity = VK2D_LOG_SEVERITY_ERROR"]:::check
-    Logger["vk2dLoggerLogv (Stack Buf up to 127 chars)<br/>Routes to gLogger->log()"]:::call
+    Logger["vk2dLoggerLogv (Stack Buf up to 127 chars)<br/>Routes to gLogger->log()"]:::fnCall
     Stdout["Console stdout / stderr<br/>(if stdoutLogging == true)"]:::sink
     ErrFile["errorFile (vk2derror.txt)<br/>Always records WARN, ERROR & FATAL"]:::sink
     Abort["abort() if FATAL"]:::sink
