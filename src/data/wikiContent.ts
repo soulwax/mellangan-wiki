@@ -6425,12 +6425,12 @@ Static staging uploads are great for assets loaded once at startup, but what abo
 To solve this, VK2D creates one \`VK2DDescriptorBuffer\` per frame in flight (\`gRenderer->descriptorBuffers[0]\` and \`[1]\`). Think of a \`VK2DDescriptorBuffer\` as a **book of 256 KB memory pages** (\`_VK2DDescriptorBufferInternal\`). Each page is actually a twin pair of buffers of size \`pageSize = options.vramPageSize\` (default \`256,000\` bytes):
 - \`stageBuffer\`: Lives in CPU-writable RAM (\`VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT\`).
 - \`deviceBuffer\`: Lives in fast GPU VRAM (\`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\`) with flags allowing it to act simultaneously as a **Uniform Buffer (UBO)**, **Vertex Buffer (VBO)**, and **Storage Buffer (SSBO)**:
-  \`\`\`c
-  VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-  \`\`\`
+\`\`\`c
+VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+\`\`\`
 
 #### Follow One Frame Through \`VK2DDescriptorBuffer\`
 
@@ -6686,9 +6686,9 @@ When \`vk2dRendererFlushSpriteBatch()\` runs:
 1. It copies \`drawCommandCount\` \`VK2DDrawCommand\` items into the current frame's \`VK2DDescriptorBuffer\` (getting back the GPU buffer and offset for Binding 0).
 2. It reserves \`drawCommandCount * sizeof(VK2DDrawInstance)\` bytes in the \`VK2DDescriptorBuffer\` for the compute output (Binding 1 for compute, and Set 3 Binding 3 for the vertex shader).
 3. On \`computeCommandBuffer\`, it pushes \`drawCount\` and dispatches enough 64-thread workgroups to cover every sprite in the batch:
-   \`\`\`c
-   vkCmdDispatch(computeBuf, (drawCount / 64) + 1, 1, 1);
-   \`\`\`
+\`\`\`c
+vkCmdDispatch(computeBuf, (drawCount / 64) + 1, 1, 1);
+\`\`\`
 
 In \`shaders/spritebatch.comp\`, thread \`gID = gl_GlobalInvocationID.x\` reads \`drawCommandsIn.draws[gID]\`, builds the $4 \\times 4$ model matrix that scales the sprite and rotates it around \`origin\`, and writes \`drawInstancesOut.draws[gID]\`:
 $$M = T(\\text{pos.x} + \\text{origin.x}\\cdot \\text{scale.x},\\; \\text{pos.y} + \\text{origin.y}\\cdot \\text{scale.y}) \\cdot R_z(-\\theta) \\cdot T(-\\text{origin.x}\\cdot \\text{scale.x},\\; -\\text{origin.y}\\cdot \\text{scale.y}) \\cdot S(\\text{scale.x},\\; \\text{scale.y})$$
@@ -6999,33 +6999,33 @@ Want walls or pillars to cast real-time 2D shadows away from torches or player l
 1. **Adding Wall Edges on the CPU (\`vk2dShadowEnvironmentAddEdge\`):**
    You create a shadow environment with \`vk2dShadowEnvironmentCreate()\`, optionally group walls into movable objects with \`vk2dShadowEnvironmentAddObject()\`, and trace the outer edges of each wall with \`vk2dShadowEnvironmentAddEdge(se, x1, y1, x2, y2)\`.
    For every wall edge $(x_1, y_1) \\to (x_2, y_2)$, VK2D appends **6 vertices** (two triangles) into its vertex list:
-   \`\`\`c
-   vec3 vert[6] = {
-       {x2, y2, 0}, // Index 0: Stays on the wall edge
-       {x2, y2, 0}, // Index 1: Pushed away from light by shadows.vert!
-       {x1, y1, 0}, // Index 2: Stays on the wall edge
-       {x1, y1, 0}, // Index 3: Stays on the wall edge
-       {x1, y1, 0}, // Index 4: Pushed away from light by shadows.vert!
-       {x2, y2, 0}, // Index 5: Pushed away from light by shadows.vert!
-   };
-   \`\`\`
-   Once all edges are added, calling \`vk2dShadowEnvironmentFlushVBO(se)\` uploads the whole list into a single GPU vertex buffer (\`se->vbo\`). Even if a wall object moves or rotates every frame, you **never** have to rebuild the VBO: just call \`vk2dShadowEnvironmentObjectUpdate(se, obj, x, y, scaleX, scaleY, rot, ox, oy)\` to update that object's $4 \\times 4$ model matrix!
+\`\`\`c
+vec3 vert[6] = {
+    {x2, y2, 0}, // Index 0: Stays on the wall edge
+    {x2, y2, 0}, // Index 1: Pushed away from light by shadows.vert!
+    {x1, y1, 0}, // Index 2: Stays on the wall edge
+    {x1, y1, 0}, // Index 3: Stays on the wall edge
+    {x1, y1, 0}, // Index 4: Pushed away from light by shadows.vert!
+    {x2, y2, 0}, // Index 5: Pushed away from light by shadows.vert!
+};
+\`\`\`
+Once all edges are added, calling \`vk2dShadowEnvironmentFlushVBO(se)\` uploads the whole list into a single GPU vertex buffer (\`se->vbo\`). Even if a wall object moves or rotates every frame, you **never** have to rebuild the VBO: just call \`vk2dShadowEnvironmentObjectUpdate(se, obj, x, y, scaleX, scaleY, rot, ox, oy)\` to update that object's $4 \\times 4$ model matrix!
 2. **Extruding Shadow Quads on the GPU (\`shaders/shadows.vert\`):**
    When you call \`vk2dRendererDrawShadows(se, colour, lightSource)\`, VK2D binds \`shadowsPipe\` and pushes the object's \`model\` matrix and the light's \`(x, y)\` position. Inside \`shaders/shadows.vert\`, the vertex shader checks \`gl_VertexIndex % 6\`. Vertices \`0, 2, 3\` stay anchored on the wall segment, while vertices \`1, 4, 5\` are flung $1{,}000\\times$ outward along the ray from \`lightSource\` through the wall corner:
-   \`\`\`glsl
-   int mod = gl_VertexIndex % 6;
-   vec4 position = pushBuffer.model * vec4(inPosition, 1.0);
-   if (mod == 1 || mod == 4 || mod == 5) {
-       vec4 vertex = vec4(
-           (position.x - pushBuffer.lightSource.x) * 1000,
-           (position.y - pushBuffer.lightSource.y) * 1000,
-           1.0, 0.0);
-       gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * vertex;
-   } else {
-       gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * position;
-   }
-   \`\`\`
-   That stretches the 6 vertices from a flat line segment into a long shadow quad covering everything behind the wall!
+\`\`\`glsl
+int mod = gl_VertexIndex % 6;
+vec4 position = pushBuffer.model * vec4(inPosition, 1.0);
+if (mod == 1 || mod == 4 || mod == 5) {
+    vec4 vertex = vec4(
+        (position.x - pushBuffer.lightSource.x) * 1000,
+        (position.y - pushBuffer.lightSource.y) * 1000,
+        1.0, 0.0);
+    gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * vertex;
+} else {
+    gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * position;
+}
+\`\`\`
+That stretches the 6 vertices from a flat line segment into a long shadow quad covering everything behind the wall!
 
 ### 3D Wavefront \`.obj\` Models (\`Model.c\`)
 
@@ -7137,9 +7137,9 @@ All console and file logging in VK2D routes through \`VK2D/src/Logger.c\`:
 - **Six Severity Levels:** \`debug\`, \`info\`, \`warn\`, \`error\`, \`fatal\`, and \`unknown\`, with convenient \`printf\`-style wrappers (\`vk2dLogInfo(...)\`, \`vk2dLogWarn(...)\`, \`vk2dLogError(...)\`).
 - **Zero-Allocation Fast Path:** In \`vk2dLoggerLogv()\`, messages up to **127 characters** are formatted directly into a stack buffer (\`char msgBuf[128]\`) with zero heap allocations; only longer messages allocate a temporary heap buffer.
 - **Dual Output (Console + Error File):** Protected by \`SDL_Mutex\`, the default logger (\`VK2DDefaultLogger\`) prints \`info\` and \`debug\` to \`stdout\` and \`warn\`/\`error\`/\`fatal\` to \`stderr\` (when \`stdoutLogging\` is enabled). Regardless of whether console logging is on or off, **every warning, error, and fatal message is also written with a timestamp to \`errorFile\`** (\`vk2derror.txt\`), preceded by the system hardware header (\`vk2dHostInformation()\`):
-  \`\`\`text
-  Windows, SDL 3.x.x | Host: 16 logical cores, 31.92gb RAM | Device: NVIDIA GeForce RTX ..., Vulkan 1.3.x, Vulkan2D 0.8.0
-  \`\`\`
+\`\`\`text
+Windows, SDL 3.x.x | Host: 16 logical cores, 31.92gb RAM | Device: NVIDIA GeForce RTX ..., Vulkan 1.3.x, Vulkan2D 0.8.0
+\`\`\`
 - **Custom Logger Hook (\`vk2dSetLogger\`):** Want VK2D logs to appear inside your own game engine's log file or on-screen console? Fill out a \`VK2DLogger\` struct (\`log\`, \`destroy\`, \`severityFn\`, \`context\`) and pass it to \`vk2dSetLogger(&myLogger)\`—even before calling \`vk2dRendererInit()\`!
 
 ### Vulkan Struct Initializers (\`Initializers.c\`) & Helpers (\`Util.c\`)
@@ -7148,17 +7148,17 @@ All console and file logging in VK2D routes through \`VK2D/src/Logger.c\`:
    Every Vulkan \`vkCreate*\` call requires a large \`Vk*CreateInfo\` struct with a mandatory \`sType\` tag. \`VK2D/src/Initializers.c\` isolates all 38 of these struct builders (\`vk2dInitInstanceCreateInfo\`, \`vk2dInitSwapchainCreateInfoKHR\`, \`vk2dInitGraphicsPipelineCreateInfo\`, \`vk2dInitSamplerCreateInfo\`, etc.), zero-initializing each struct (\`= {0}\`) and setting its exact \`VK_STRUCTURE_TYPE_*\` enum so \`RendererMeta.c\` stays clean and readable.
 2. **Hybrid Frame Limiter Sleep (\`vk2dSleep\` in \`Util.c\`):**
    OS sleep functions like \`SDL_Delay(ms)\` only have millisecond granularity and often oversleep by 1 to 2 ms due to OS thread scheduling, causing frame-pacing micro-stutter. \`vk2dSleep(double seconds)\` combines a coarse \`SDL_Delay(floor(seconds * 1000))\` with a sub-millisecond high-precision spin-wait loop using \`SDL_GetPerformanceCounter()\` for the remaining fraction of a millisecond:
-   \`\`\`c
-   void vk2dSleep(double seconds) {
-     if (seconds <= 0) return;
-     double start = SDL_GetPerformanceCounter();
-     double milliseconds = floor(seconds * 1000);
-     SDL_Delay(milliseconds);
-     while ((SDL_GetPerformanceCounter() - start) / (double)SDL_GetPerformanceFrequency() < seconds) {
-       volatile int i = 0;
-     }
-   }
-   \`\`\`
+\`\`\`c
+void vk2dSleep(double seconds) {
+  if (seconds <= 0) return;
+  double start = SDL_GetPerformanceCounter();
+  double milliseconds = floor(seconds * 1000);
+  SDL_Delay(milliseconds);
+  while ((SDL_GetPerformanceCounter() - start) / (double)SDL_GetPerformanceFrequency() < seconds) {
+    volatile int i = 0;
+  }
+}
+\`\`\`
 3. **Thread-Safe Atomic LCG Random Number Generator (\`vk2dRandom\`):**
    Need a quick random float between \`min\` and \`max\` for particle spread or light colors? \`vk2dRandom(float min, float max)\` in \`Renderer.c\` updates a global \`SDL_AtomicInt gRNG\` (seeded with \`time(0)\` at startup) using the classic linear congruential generator ($r \\leftarrow (1103515245 \\cdot r + 12345) \\bmod 2^{31}$) and maps it across 5,000 steps between \`min\` and \`max\`.
 4. **Color Conversion Helpers (\`vk2dColourHex\`, \`vk2dColourInt\`, \`vk2dColourRGBA\`):**
@@ -7215,22 +7215,22 @@ Many pixel-art games want to render at a fixed low resolution (like $256 \\times
 \`examples/retrolook/main.c\` shows the exact 4-step pattern:
 1. Create an offscreen render-target texture at your virtual resolution: \`VK2DTexture texTarget = vk2dTextureCreate(256, 224);\`.
 2. At the start of your draw loop, bind \`texTarget\` and clear it:
-   \`\`\`c
-   vk2dRendererSetTarget(texTarget);
-   vk2dRendererSetColourMod(clear);
-   vk2dRendererClear();
-   vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
-   \`\`\`
+\`\`\`c
+vk2dRendererSetTarget(texTarget);
+vk2dRendererSetColourMod(clear);
+vk2dRendererClear();
+vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
+\`\`\`
 3. Draw your entire game world (sprites, tilemaps, particles, or even 3D models if \`vk2dRendererSetTextureCamera(true)\` is enabled) into \`texTarget\`.
 4. Switch back to \`VK2D_TARGET_SCREEN\`, lock to \`VK2D_DEFAULT_CAMERA\`, compute the integer scale factor, and draw \`texTarget\` centered in the window:
-   \`\`\`c
-   vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
-   float scale = minf(floorf(windowW / 256.0f), floorf(windowH / 224.0f));
-   float xOnWindow = (windowW - (256.0f * scale)) / 2.0f;
-   float yOnWindow = (windowH - (224.0f * scale)) / 2.0f;
-   vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
-   vk2dDrawTextureExt(texTarget, xOnWindow, yOnWindow, scale, scale, 0, 0, 0);
-   \`\`\`
+\`\`\`c
+vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
+float scale = minf(floorf(windowW / 256.0f), floorf(windowH / 224.0f));
+float xOnWindow = (windowW - (256.0f * scale)) / 2.0f;
+float yOnWindow = (windowH - (224.0f * scale)) / 2.0f;
+vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+vk2dDrawTextureExt(texTarget, xOnWindow, yOnWindow, scale, scale, 0, 0, 0);
+\`\`\`
 
 ### Recipe 2: Multi-Light 2D Shadows Using Subtractive Blending (\`examples/shadowsglsl/main.c\`)
 
@@ -7271,19 +7271,19 @@ Because VK2D automatically loops over all enabled 2D cameras on every draw call,
 
 1. Create 4 cameras with \`vk2dCameraCreate()\`, setting their \`xOnScreen, yOnScreen, wOnScreen, hOnScreen\` to the 4 quadrants of the window (top-left, top-right, bottom-left, bottom-right), each with its own independent world \`x, y, zoom, rot\`.
 2. Before drawing the game world, temporarily disable the full-window default camera so the world is only drawn into the 4 split-screen quadrants:
-   \`\`\`c
-   vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_DISABLED);
-   // Draw your world once — VK2D automatically renders it into all 4 quadrant cameras!
-   vk2dDrawPolygon(testPoly, 0, 0);
-   vk2dDrawTextureExt(texCaveguy, x, y, 10, 10, time, 8, 8);
-   vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_NORMAL);
-   \`\`\`
+\`\`\`c
+vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_DISABLED);
+// Draw your world once — VK2D automatically renders it into all 4 quadrant cameras!
+vk2dDrawPolygon(testPoly, 0, 0);
+vk2dDrawTextureExt(texCaveguy, x, y, 10, 10, time, 8, 8);
+vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_NORMAL);
+\`\`\`
 3. To draw screen-space UI borders and HUD text across the whole window without repeating them in each quadrant, lock the renderer to \`VK2D_DEFAULT_CAMERA\`:
-   \`\`\`c
-   vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
-   // Draw screen-space UI / borders / debug overlay here
-   vk2dRendererUnlockCameras();
-   \`\`\`
+\`\`\`c
+vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+// Draw screen-space UI / borders / debug overlay here
+vk2dRendererUnlockCameras();
+\`\`\`
 
 ### Recipe 4: Sprite-Sheet Bitmap Font & Telemetry Overlay (\`examples/debug.c\`)
 
