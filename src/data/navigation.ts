@@ -328,6 +328,14 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-api-reference",
         shortTitle: "Complete Public API Reference & Struct Layout",
       },
+      {
+        id: "vk2d-shaders-glsl-deep-dive",
+        shortTitle: "GLSL 450 Shaders, Vertex Layouts & Blobs.h",
+      },
+      {
+        id: "vk2d-nuklear-uthash-internals",
+        shortTitle: "Nuklear Vulkan Backend, Font Hash & Uploads",
+      },
     ],
   },
 ];

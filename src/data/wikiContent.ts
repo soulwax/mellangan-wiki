@@ -6243,12 +6243,32 @@ One of the cleverest tricks in VK2D is how those three command buffers are recor
 
 ### Skipping Redundant Binds & Handling Window Resizes
 
-Binding the same Vulkan pipeline, descriptor sets, or vertex buffer over and over is slow. For non-instanced draws (shapes, custom shaders, 3D models), \`gRenderer\` remembers the last bound handles in \`prevPipe\`, \`prevSetHash\` (computed by \`_vk2dHashSets()\`), and \`prevVBO\`, skipping the Vulkan bind calls when nothing changed. Switching render targets or flushing a sprite batch calls \`_vk2dRendererResetBoundPointers()\` to clear this cache.
+Binding the same Vulkan pipeline, descriptor sets, or vertex buffer over and over is slow. For non-instanced draws (shapes, custom shaders, 3D models), \`gRenderer\` remembers the last bound handles in \`prevPipe\`, \`prevSetHash\`, and \`prevVBO\`, skipping the Vulkan bind calls when nothing changed:
+
+\`\`\`c
+uint64_t _vk2dHashSets(VkDescriptorSet *sets, uint32_t setCount) {
+  uint64_t hash = 0;
+  for (uint32_t i = 0; i < setCount; i++) {
+    uint64_t *pointer = (void*)&sets[i];
+    hash += (*pointer) * (i + 1);
+  }
+  return hash;
+}
+\`\`\`
+
+Notice how weighting each handle by \`(i + 1)\` makes order matter: swapping Set 1 and Set 2 produces a different hash, whereas re-drawing two polygons in a row with the same camera descriptor set produces the exact same hash and skips both \`vkCmdBindPipeline\` and \`vkCmdBindDescriptorSets\`. Switching render targets or flushing a sprite batch calls \`_vk2dRendererResetBoundPointers()\` to clear \`prevPipe\`, \`prevSetHash\`, and \`prevVBO\`.
 
 When a user resizes or minimizes the window (causing \`VK_ERROR_OUT_OF_DATE_KHR\` or \`VK_SUBOPTIMAL_KHR\`), or calls \`vk2dRendererSetConfig()\` to change MSAA or VSync on the fly:
 1. If the window is minimized (\`SDL_WINDOW_MINIMIZED\`), \`_vk2dRendererResetSwapchain()\` pauses in a lightweight \`SDL_PumpEvents()\` loop until the window is restored.
 2. It waits for the GPU to finish (\`vkDeviceWaitIdle\`) and rebuilds the swapchain, MSAA buffer, depth buffer, framebuffers, camera UBOs, samplers, and sync objects.
 3. **Smart MSAA Rebuild:** Because Vulkan bakes MSAA sample counts into render passes, pipelines, and offscreen framebuffers, VK2D checks \`bool msaaChanged = gRenderer->newConfig.msaa != gRenderer->config.msaa;\`. Only when MSAA actually changed does it destroy and recreate the 3 \`VkRenderPass\` objects, rebuild all pipelines (keeping custom shaders alive), and call \`_vk2dRendererRefreshTargets()\` to resize the MSAA resolve images of every offscreen texture target!
+
+#### Swapchain Surface Capabilities, Image Count & \`B8G8R8A8_SRGB\` Selection
+
+Inside \`_vk2dRendererCreateWindowSurface()\` and \`_vk2dRendererCreateSwapchain()\` (\`RendererMeta.c\`), VK2D handles three tricky cross-platform window quirks automatically:
+- **Universal Surface Format:** VK2D locks \`surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB\` with \`VK_COLOR_SPACE_SRGB_NONLINEAR_KHR\` (guaranteed across Vulkan desktop and mobile drivers) so sRGB textures blend accurately without washing out colors.
+- **High-DPI & Wayland Window Sizes (\`UINT32_MAX\` Extent):** On Wayland and some Retina displays, \`surfaceCapabilities.currentExtent.width\` may be \`UINT32_MAX\` to let the application choose the resolution. When VK2D sees \`UINT32_MAX\`, \`_vk2dRendererGetSurfaceSize()\` falls back to \`SDL_GetWindowSizeInPixels()\` so blurry scaling never happens.
+- **Swapchain Image Count Clamping:** VK2D requests at least 3 swapchain images for smooth triple buffering ($\\max(\\text{minImageCount}, 3)$), then clamps down to \`surfaceCapabilities.maxImageCount\` when a driver restricts the maximum queue length.
 
 ### Detailed Swapchain Image Acquisition & Fence Tracking (\`vk2dRendererStartFrame\`)
 
@@ -6405,8 +6425,21 @@ Because VK2D stores all loaded textures in a single huge bindless array so you c
 6. \`descriptorBindingSampledImageUpdateAfterBind\` (allows updating texture slots after the descriptor set is bound)
 7. \`descriptorBindingUniformBufferUpdateAfterBind\` (allows updating the camera matrix UBO at the end of the frame after draw calls were recorded)
 
-If any of those seven features is missing, VK2D logs the exact missing feature name and stops initialization cleanly. Next, it checks \`VkPhysicalDeviceDescriptorIndexingProperties\` to make sure \`options.maxTextures\` (default \`10,000\`) does not exceed what the GPU driver actually allows in a single descriptor set:
-$$\\text{maxTextures} = \\min\\!\\big(\\text{options.maxTextures},\\; \\text{maxDescriptorSetUpdateAfterBindSampledImages},\\; \\text{maxPerStageDescriptorUpdateAfterBindSampledImages}\\big)$$
+All the hardware limits above are queried during \`vk2dLogicalDeviceCreate()\` (\`LogicalDevice.c\`): optional extensions \`VK_EXT_MEMORY_BUDGET_EXTENSION_NAME\` and \`VK_KHR_portability_subset\` (for macOS/MoltenVK) are enabled automatically if present, along with device features \`wideLines\` (unlocking \`limits.maxLineWidth\`), \`fillModeNonSolid\` (unlocking 3D \`wireframePipe\`), and \`samplerAnisotropy\`.
+
+#### Automatic Depth Buffer Format Probing (\`_vk2dRendererCreateDepthBuffer\`)
+
+Before creating pipelines or render passes, \`_vk2dRendererCreateDepthBuffer()\` searches for the lightest supported depth format on the physical GPU:
+1. It checks four candidate formats in order: \`VK_FORMAT_D16_UNORM\`, \`VK_FORMAT_D32_SFLOAT\`, \`VK_FORMAT_D32_SFLOAT_S8_UINT\`, and \`VK_FORMAT_D24_UNORM_S8_UINT\`.
+2. Using \`vkGetPhysicalDeviceFormatProperties()\`, it picks the **first** format whose \`optimalTilingFeatures\` includes \`VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT\`.
+3. Why pick \`D16_UNORM\` first? Most 2D games only need depth testing when drawing optional 3D props across a small near/far range ($0.1$ to $10.0$), so 16-bit depth cuts depth-attachment VRAM bandwidth in half compared to 32-bit floats while staying compatible with hardware MSAA.
+
+#### Single-Use Command Buffers & Queue Submissions (\`LogicalDevice.c\`)
+
+Whenever an asset upload (texture pixels, 3D model VBO, or pixel readback) needs an immediate GPU transfer outside the main frame loop, VK2D uses two helper functions on \`VK2DLogicalDevice\`:
+- \`vk2dLogicalDeviceGetSingleUseBuffer(dev)\`: Allocates a primary \`VkCommandBuffer\` from \`dev->pool\` and begins it with \`VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT\`.
+- \`vk2dLogicalDeviceSubmitSingleBuffer(dev, buf)\`: Ends the command buffer, submits it to \`dev->queue\`, waits until the copy finishes via \`vkQueueWaitIdle(dev->queue)\`, and frees the command buffer back to \`dev->pool\`.
+- Meanwhile, if the GPU queue family exposes two hardware queues (\`queueCount >= 2\`), \`vk2dLogicalDeviceCreate()\` also caches a second queue handle (\`ldev->loadQueue\`) and flags \`limits.supportsMultiThreadLoading = true\` alongside the active queue handle.
 
 ### Easy GPU Memory with VMA & Staging Uploads (\`Buffer.c\`)
 
@@ -6573,6 +6606,23 @@ In \`_vk2dRendererCreateDescriptorSetLayouts()\` (\`RendererMeta.c\`), VK2D asks
    If you have procedural pixel art, a dynamic minimap, or video frames that change on the CPU every frame (as demonstrated in \`examples/testing/main.c\`), you do not need to destroy and recreate the texture. Calling \`vk2dTextureUpdate(tex, pixels)\` or \`vk2dTextureUpdateRegion(tex, pixels, x, y, w, h)\` copies your RGBA buffer into a staging buffer, transitions the texture to \`TRANSFER_DST_OPTIMAL\`, copies just the \`(x, y, w, h)\` rectangle via \`vkCmdCopyBufferToImage\`, and transitions it back to \`SHADER_READ_ONLY_OPTIMAL\`. *(Note: Render-target textures created with \`vk2dTextureCreate\` cannot be updated with \`vk2dTextureUpdateRegion\`; draw to them with \`vk2dRendererSetTarget\` instead.)*
 4. **Reading GPU Pixels Back to CPU RAM (\`vk2dTextureCopyPixels\`):**
    Need to save a screenshot or inspect a rendered texture on the CPU? \`vk2dTextureCopyPixels(tex, outPixels)\` copies the GPU image into a temporary host-visible staging buffer via \`vkCmdCopyImageToBuffer\`. Because offscreen render targets use the swapchain's \`VK_FORMAT_B8G8R8A8_SRGB\` format (Blue-Green-Red-Alpha) while normal loaded textures use \`VK_FORMAT_R8G8B8A8_SRGB\` (Red-Green-Blue-Alpha), \`vk2dTextureCopyPixels()\` checks \`vk2dTextureIsTarget(tex)\` and automatically swaps the Red and Blue channels for render targets so \`outPixels\` always comes back as clean RGBA bytes!
+
+#### 2D \`textureSampler\` vs 3D \`modelSampler\` (\`RendererMeta.c\`)
+
+The Vulkan specification forbids enabling anisotropic filtering when \`unnormalizedCoordinates = VK_TRUE\`. Because 2D sprites in VK2D sample textures using raw pixel coordinates rather than $0.0 .. 1.0$ fractions, \`_vk2dRendererCreateSampler()\` builds two separate \`VkSampler\` objects bound cleanly through \`samplerSet\` and \`modelSamplerSet\`:
+
+| Sampler Property | 2D \`textureSampler\` (\`samplerSet\`) | 3D \`modelSampler\` (\`modelSamplerSet\`) |
+| --- | --- | --- |
+| **Coordinate Mode** | \`unnormalizedCoordinates = VK_TRUE\` (raw pixel $x, y$) | \`unnormalizedCoordinates = VK_FALSE\` (normalized $[0, 1]$ UV) |
+| **Address Wrap Mode** | \`VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE\` | \`VK_SAMPLER_ADDRESS_MODE_REPEAT\` (tiles seamlessly) |
+| **Magnification / Minification** | \`LINEAR\` or \`NEAREST\` from \`config.filterMode\` | \`LINEAR\` or \`NEAREST\` from \`config.filterMode\` |
+| **Anisotropic Filtering** | Disabled (\`1.0\`) because pixel UVs forbid anisotropy | Enabled when \`filterMode == LINEAR\`, clamped to \`min(msaa, maxSamplerAnisotropy)\` |
+
+#### Inside \`struct VK2DTexture_t\`: Sprite Texture vs Render Target
+
+Both regular images and drawable offscreen canvases share the same \`VK2DTexture\` pointer type (\`Opaque.h\`), distinguished internally by whether \`tex->fbo != VK_NULL_HANDLE\`:
+- **Standard Sprite (\`vk2dTextureLoad\` / \`From\`):** Owns only \`img\` (\`VK_FORMAT_R8G8B8A8_SRGB\`), \`imgHandled = true\` (so \`vk2dTextureFree\` frees \`img\`), and its atomic bindless slot \`descriptorIndex\`. Fields \`sampledImg\`, \`depthBuffer\`, \`fbo\`, \`ubo\`, and \`uboSet\` stay \`NULL\`.
+- **Offscreen Render Target (\`vk2dTextureCreate(w, h)\`):** Uses swapchain-compatible \`VK_FORMAT_B8G8R8A8_SRGB\` for \`img\` with \`COLOR_ATTACHMENT | SAMPLED | TRANSFER_SRC | TRANSFER_DST\`, allocates its own \`depthBuffer\` (and MSAA \`sampledImg\` if MSAA > 1x), builds a personal \`VkFramebuffer\` (\`fbo\`), uploads a dedicated orthographic \`ubo\` sized to \`w x h\`, and registers itself in \`gRenderer->targets[]\` so MSAA changes resize its attachments automatically!
 `,
     mermaidCharts: [
       {
@@ -6692,6 +6742,13 @@ vkCmdDispatch(computeBuf, (drawCount / 64) + 1, 1, 1);
 
 In \`shaders/spritebatch.comp\`, thread \`gID = gl_GlobalInvocationID.x\` reads \`drawCommandsIn.draws[gID]\`, builds the $4 \\times 4$ model matrix that scales the sprite and rotates it around \`origin\`, and writes \`drawInstancesOut.draws[gID]\`:
 $$M = T(\\text{pos.x} + \\text{origin.x}\\cdot \\text{scale.x},\\; \\text{pos.y} + \\text{origin.y}\\cdot \\text{scale.y}) \\cdot R_z(-\\theta) \\cdot T(-\\text{origin.x}\\cdot \\text{scale.x},\\; -\\text{origin.y}\\cdot \\text{scale.y}) \\cdot S(\\text{scale.x},\\; \\text{scale.y})$$
+
+#### Why \`VK2DDrawInstance\` Contains 12 Bytes of Explicit \`vec3 padding\`
+
+Look closely at \`VK2DDrawInstance\` in \`Structs.h\` vs \`DrawInstance\` in \`spritebatch.comp\` and \`instanced.vert\`:
+- In C, after \`vec4 texturePos\` (16B), \`vec4 colour\` (16B), and \`uint32_t textureIndex\` (4B), the current byte offset is **36**.
+- In GLSL \`std140\` layout (\`spritebatch.comp\`), every \`vec4\` column of a \`mat4\` **must start at a 16-byte boundary**, so GLSL automatically advances from byte 36 to byte **48** before placing \`mat4 model\`. Meanwhile, \`instanced.vert\` enables \`GL_EXT_scalar_block_layout\`.
+- By adding \`vec3 padding;\` (12 bytes) right after \`uint32_t textureIndex\` inside C's \`VK2DDrawInstance\`, the C struct size hits **112 bytes** ($16 + 16 + 4 + 12 + 64$) and \`model\` lands at **exact byte offset 48** across C, \`std140\`, and \`scalar_block_layout\`!
 
 #### Step 4: Drawing Procedural Quads in \`instanced.vert\` & \`instanced.frag\`
 
@@ -6831,6 +6888,10 @@ float4 PixelShader(float2 uv) {
 \`\`\`
 
 *(Alignment Tip: In Slang/Vulkan constant buffers, \`float4\` / \`vec4\` fields align to 16-byte boundaries. If your C struct has a \`float time;\` followed by a \`vec4 colour;\`, remember to put \`float _pad[3];\` between them on the C side so the C struct matches the shader's 16-byte alignment!)*
+
+#### How Custom Shaders Survive MSAA & Swapchain Resets
+
+Every time \`vk2dShaderFrom()\` creates a custom \`VK2DShader\`, VK2D copies both the vertex and fragment SPIR-V bytecode (\`spvVert\`, \`spvFrag\`) and \`uniformSize\` into the shader struct and appends the shader handle to \`gRenderer->customShaders[]\` via \`_vk2dRendererAddShader()\`. If the player toggles MSAA from \`1x\` to \`8x\` mid-game, \`_vk2dRendererResetSwapchain()\` destroys old graphics pipelines, rebuilds \`renderPass\`, and loops over \`gRenderer->customShaders[]\` calling \`_vk2dShaderBuildPipe()\`—instantly rebuilding all 4 blend mode pipelines for your shader from its cached SPIR-V without re-invoking the Slang compiler!
 `,
     mermaidCharts: [
       {
@@ -6880,6 +6941,16 @@ To prevent this, \`_vk2dRendererCreateRenderPass()\` creates **three** compatibl
 | **1. \`renderPass\`** | \`LOAD_OP_CLEAR\` | \`LOAD_OP_CLEAR\` | Used once at the very start of the frame (\`vk2dRendererStartFrame\`). Wipes the screen backbuffer and depth buffer clean. |
 | **2. \`externalTargetRenderPass\`** | \`LOAD_OP_LOAD\` | \`LOAD_OP_CLEAR\` | Used when \`vk2dRendererSetTarget(tex)\` switches to an offscreen texture. **Keeps** whatever pixels were already in that texture from earlier passes or frames! |
 | **3. \`midFrameSwapRenderPass\`** | \`LOAD_OP_LOAD\` | \`LOAD_OP_LOAD\` | Used when \`vk2dRendererSetTarget(VK2D_TARGET_SCREEN)\` returns to the screen mid-frame. **Keeps** both the screen colors and depth buffer intact! |
+
+#### Attachment Transition Layouts (1x MSAA vs Multi-Sampled Resolve)
+
+Each of those three render passes changes its attachment count and image layouts automatically based on whether MSAA is enabled (\`config.msaa > 1\`), where Attachment \`0\` is color, Attachment \`1\` is depth, and Attachment \`2\` (MSAA only) is the single-sampled resolve image:
+
+| RenderPass | MSAA Off (2 Attachments) | MSAA On (3 Attachments with Resolve) |
+| --- | --- | --- |
+| **\`renderPass\`** | Att 0: \`UNDEFINED -> PRESENT_SRC_KHR\`<br/>Att 1: \`UNDEFINED -> DEPTH_STENCIL\` | Att 0 (MSAA): \`UNDEFINED -> COLOR_ATTACHMENT\`<br/>Att 2 (Swapchain Resolve): \`UNDEFINED -> PRESENT_SRC_KHR\` |
+| **\`midFrameSwapRenderPass\`** | Att 0: \`PRESENT_SRC_KHR -> PRESENT_SRC_KHR\` (\`LOAD\`)<br/>Att 1: \`DEPTH_STENCIL -> DEPTH_STENCIL\` (\`LOAD\`) | Att 0 (MSAA): \`COLOR_ATTACHMENT -> COLOR_ATTACHMENT\` (\`LOAD\`)<br/>Att 2 (Resolve): \`PRESENT_SRC_KHR -> PRESENT_SRC_KHR\` (\`LOAD\`) |
+| **\`externalTargetRenderPass\`** | Att 0 (Tex): \`COLOR_ATTACHMENT -> COLOR_ATTACHMENT\` (\`LOAD\`)<br/>Att 1 (Depth): \`UNDEFINED -> DEPTH_STENCIL\` (\`CLEAR\`) | Att 0 (MSAA): \`COLOR_ATTACHMENT -> COLOR_ATTACHMENT\` (\`LOAD\`)<br/>Att 2 (Tex Resolve): \`COLOR_ATTACHMENT -> COLOR_ATTACHMENT\` (\`LOAD\`) |
 
 ### Switching Render Targets Mid-Frame (\`vk2dRendererSetTarget\`)
 
@@ -7179,134 +7250,6 @@ flowchart TD
     SevErr["Severity = VK2D_LOG_SEVERITY_ERROR"]:::check
     Logger["vk2dLoggerLogv (Stack Buf up to 127 chars)<br/>Routes to gLogger->log()"]:::fnCall
     Stdout["Console stdout / stderr<br/>(if stdoutLogging == true)"]:::sink
-    ErrFile["errorFile (vk2derror.txt)<br/>Always records WARN, ERROR & FATAL"]:::sink
-    Abort["abort() if FATAL"]:::sink
-
-    Raise --> FatalCheck
-    FatalCheck -->|Yes| SevFatal --> Logger
-    FatalCheck -->|No| SevErr --> Logger
-    Logger --> Stdout
-    Logger --> ErrFile
-    ErrFile --> Abort
-`,
-      },
-    ],
-  },
-  {
-    id: "vk2d-examples-cookbook",
-    title: "61. Practical Vulkan2D Cookbook & Sample Walkthroughs",
-    category: "graphics",
-    summary:
-      "Step-by-step code walkthroughs of real VK2D patterns from extern/Vulkan2d/examples/: integer-scaled retro pixel canvases, multi-light subtractive 2D shadows, 4-player split-screen cameras, dynamic texture streaming, and bitmap font overlays.",
-    sourceFiles: [
-      "extern/Vulkan2d/examples/main/main.c",
-      "extern/Vulkan2d/examples/retrolook/main.c",
-      "extern/Vulkan2d/examples/shadowsglsl/main.c",
-      "extern/Vulkan2d/examples/splitscreen/main.c",
-      "extern/Vulkan2d/examples/gui/main.c",
-      "extern/Vulkan2d/examples/testing/main.c",
-      "extern/Vulkan2d/examples/debug.c",
-    ],
-    content: `
-### Recipe 1: Integer-Scaled Retro Pixel Canvas (\`examples/retrolook/main.c\`)
-
-Many pixel-art games want to render at a fixed low resolution (like $256 \\times 224$ or $480 \\times 270$) and scale up cleanly to whatever window size the player chooses with nearest-neighbor filtering (\`VK2D_FILTER_TYPE_NEAREST\`).
-
-\`examples/retrolook/main.c\` shows the exact 4-step pattern:
-1. Create an offscreen render-target texture at your virtual resolution: \`VK2DTexture texTarget = vk2dTextureCreate(256, 224);\`.
-2. At the start of your draw loop, bind \`texTarget\` and clear it:
-\`\`\`c
-vk2dRendererSetTarget(texTarget);
-vk2dRendererSetColourMod(clear);
-vk2dRendererClear();
-vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
-\`\`\`
-3. Draw your entire game world (sprites, tilemaps, particles, or even 3D models if \`vk2dRendererSetTextureCamera(true)\` is enabled) into \`texTarget\`.
-4. Switch back to \`VK2D_TARGET_SCREEN\`, lock to \`VK2D_DEFAULT_CAMERA\`, compute the integer scale factor, and draw \`texTarget\` centered in the window:
-\`\`\`c
-vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
-float scale = minf(floorf(windowW / 256.0f), floorf(windowH / 224.0f));
-float xOnWindow = (windowW - (256.0f * scale)) / 2.0f;
-float yOnWindow = (windowH - (224.0f * scale)) / 2.0f;
-vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
-vk2dDrawTextureExt(texTarget, xOnWindow, yOnWindow, scale, scale, 0, 0, 0);
-\`\`\`
-
-### Recipe 2: Multi-Light 2D Shadows Using Subtractive Blending (\`examples/shadowsglsl/main.c\`)
-
-How do you combine \`VK2DShadowEnvironment\` with multiple colored point lights so each light casts its own independent shadows across the room? \`examples/shadowsglsl/main.c\` demonstrates this using a reusable offscreen light texture (\`lightTex\`) and \`VK2D_BLEND_MODE_SUBTRACT\`:
-
-1. **Setup Once:** Create your wall polygons, trace their edges into a \`VK2DShadowEnvironment\` with \`vk2dShadowEnvironmentAddEdge()\`, and upload the shadow VBO once via \`vk2dShadowEnvironmentFlushVBO(shadows)\`. Create one offscreen texture \`lightTex = vk2dTextureCreate(400, 300)\`.
-2. **Per-Light Loop Every Frame:** For each point light \`i\`:
-   - Switch target to \`lightTex\` and wipe it to transparent with \`vk2dRendererEmpty()\`.
-   - Draw the radial light orb sprite centered at \`lights[i].pos\` tinted with \`lights[i].colour\`.
-   - Switch blend mode to **subtractive** (\`VK2D_BLEND_MODE_SUBTRACT\`) and call \`vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos)\`. Because \`VK2D_BLEND_MODE_SUBTRACT\` subtracts the shadow's alpha from the destination alpha (\`VK_BLEND_OP_REVERSE_SUBTRACT\`), this **erases** the light orb's alpha everywhere behind the walls!
-   - Restore \`VK2D_BLEND_MODE_BLEND\`, switch back to \`VK2D_TARGET_SCREEN\`, and draw \`lightTex\` onto the screen!
-3. Finally, draw your wall polygons and player sprites on top of the accumulated lights.
-
-\`\`\`c
-for (int i = 0; i < lightCount; i++) {
-  vk2dRendererSetTarget(lightTex);
-  vk2dRendererEmpty(); // Clear to {0, 0, 0, 0}
-
-  vk2dRendererSetColourMod(lights[i].colour);
-  vk2dDrawTexture(lightOrbTex,
-                  lights[i].pos[0] - vk2dTextureWidth(lightOrbTex) / 2,
-                  lights[i].pos[1] - vk2dTextureHeight(lightOrbTex) / 2);
-  vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
-
-  // Carve shadows out of this light's alpha channel!
-  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_SUBTRACT);
-  vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos);
-  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_BLEND);
-
-  vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
-  vk2dDrawTexture(lightTex, 0, 0);
-}
-\`\`\`
-
-### Recipe 3: Four-Quadrant Split-Screen + UI Overlay (\`examples/splitscreen/main.c\`)
-
-Because VK2D automatically loops over all enabled 2D cameras on every draw call, setting up a 4-player split-screen takes almost no extra drawing code:
-
-1. Create 4 cameras with \`vk2dCameraCreate()\`, setting their \`xOnScreen, yOnScreen, wOnScreen, hOnScreen\` to the 4 quadrants of the window (top-left, top-right, bottom-left, bottom-right), each with its own independent world \`x, y, zoom, rot\`.
-2. Before drawing the game world, temporarily disable the full-window default camera so the world is only drawn into the 4 split-screen quadrants:
-\`\`\`c
-vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_DISABLED);
-// Draw your world once — VK2D automatically renders it into all 4 quadrant cameras!
-vk2dDrawPolygon(testPoly, 0, 0);
-vk2dDrawTextureExt(texCaveguy, x, y, 10, 10, time, 8, 8);
-vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_NORMAL);
-\`\`\`
-3. To draw screen-space UI borders and HUD text across the whole window without repeating them in each quadrant, lock the renderer to \`VK2D_DEFAULT_CAMERA\`:
-\`\`\`c
-vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
-// Draw screen-space UI / borders / debug overlay here
-vk2dRendererUnlockCameras();
-\`\`\`
-
-### Recipe 4: Sprite-Sheet Bitmap Font & Telemetry Overlay (\`examples/debug.c\`)
-
-All the example programs include \`examples/debug.c\`, which shows how to render a bitmap font sprite sheet (\`assets/font.png\`, a 128-pixel-wide grid of $8 \\times 16$ ASCII characters) and display live frame time and VRAM telemetry:
-- Each ASCII character \`c = text[i]\` is sliced from the texture atlas at pixel coordinates:
-  $$x_{\\text{tex}} = (c \\times 8) \\bmod 128, \\qquad y_{\\text{tex}} = \\lfloor c / 16 \\rfloor \\times 16$$
-  and drawn with \`vk2dRendererDrawTexture(gDebugFont, x, y, 2, 2, 0, 0, 0, xTex, yTex, 8, 16)\`.
-- Because every character uses the same \`gDebugFont\` texture, drawing a 100-character string simply appends 100 \`VK2DDrawCommand\` structs into the current sprite batch and renders the entire paragraph in **one instanced GPU draw call**!
-- Always remember the golden shutdown rule shown at the bottom of every example: **call \`vk2dRendererWait()\` before freeing any textures, polygons, models, or shaders** so the GPU finishes its last submitted command buffer before VMA destroys the underlying buffers!
-
-### Recipe 5: CMake Integration & Build Flags (\`extern/Vulkan2d/CMakeLists.txt\`)
-
-Adding \`extern/Vulkan2d\` to a C or C++ project only requires \`add_subdirectory\` and linking against \`Vulkan2D\`. Four CMake options in \`extern/Vulkan2d/CMakeLists.txt\` let you tailor the build:
-
-| CMake Option | Default | What It Controls |
-| --- | --- | --- |
-| \`VK2D_BUILD_SDL\` | \`ON\` | Builds the bundled \`extern/SDL\` (SDL3) submodule automatically. Set to \`OFF\` if your project already provides an \`SDL3\` target. |
-| \`VK2D_DISABLE_SHADERS\` | \`OFF\` | When set to \`ON\`, defines \`DISABLE_SHADER_COMPILATION\` and skips building the embedded \`extern/slang\` compiler for much faster CMake build times if you only need built-in pipelines or pre-compiled SPIR-V. |
-| \`VK2D_DISABLE_VECS\` | \`OFF\` | Defines \`VK2D_DISABLE_VECTOR_TYPES\` so \`Structs.h\` does not typedef \`vec2\`, \`vec3\`, \`vec4\`, and \`mat4\` (helpful if you already use \`cglm\` or another math library with those type names). |
-| \`VK2D_BUILD_EXAMPLES\` | \`OFF\` | Builds all 6 sample executables under \`examples/\` (\`main\`, \`gui\`, \`retrolook\`, \`shadowsglsl\`, \`splitscreen\`, \`testing\`). |
-`,
-    mermaidCharts: [
-      {
         title: "Subtractive 2D Shadow & Multi-Light Composition Loop (examples/shadowsglsl)",
         chart: `
 flowchart LR
@@ -7566,6 +7509,167 @@ flowchart TD
 
     Umbrella --> High_Level_API
     High_Level_API --> Low_Level_Opt
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-shaders-glsl-deep-dive",
+    title: "64. Built-In GLSL 450 Shaders, Vertex Formats & SPIR-V Blob Generation",
+    category: "graphics",
+    summary:
+      "Inside extern/Vulkan2d/shaders/: how the 5 vertex input descriptors in Util.c match every GLSL 450 shader, the math behind colour.vert's UNIT_VIEW clear matrix, and how genblobs.py compiles shaders into C byte arrays in Blobs.h.",
+    sourceFiles: [
+      "extern/Vulkan2d/shaders/colour.vert",
+      "extern/Vulkan2d/shaders/colour.frag",
+      "extern/Vulkan2d/shaders/usershader.vert",
+      "extern/Vulkan2d/shaders/model.vert",
+      "extern/Vulkan2d/shaders/model.frag",
+      "extern/Vulkan2d/shaders/shadows.vert",
+      "extern/Vulkan2d/shaders/shadows.frag",
+      "extern/Vulkan2d/shaders/genblobs.py",
+      "extern/Vulkan2d/VK2D/include/VK2D/Blobs.h",
+    ],
+    content: `
+### The Five Vertex Input Layouts (\`Util.c\` & \`Pipeline.c\`)
+
+When Vulkan creates a graphics pipeline in \`vk2dPipelineCreate()\`, it needs a \`VkPipelineVertexInputStateCreateInfo\` explaining how vertex bytes inside a buffer map onto \`layout(location = N)\` inputs in the vertex shader. VK2D defines five helper builders inside \`VK2D/src/Util.c\`:
+
+| Pipeline Type | Builder in \`Util.c\` | Vertex Stride | Attribute Locations |
+| --- | --- | ---: | --- |
+| **Shapes (\`primFillPipe\`, \`primLinePipe\`)** | \`_vk2dGetColourVertexInputState()\` | \`28 B\` (\`VK2DVertexColour\`) | \`0\`: \`vec3 pos\` (\`R32G32B32_SFLOAT\`)<br/>\`1\`: \`vec4 colour\` (\`R32G32B32A32_SFLOAT\`) |
+| **3D Meshes (\`modelPipe\`, \`wireframePipe\`)** | \`_vk2dGetModelVertexInputState()\` | \`20 B\` (\`VK2DVertex3D\`) | \`0\`: \`vec3 pos\` (\`R32G32B32_SFLOAT\`)<br/>\`1\`: \`vec2 uv\` (\`R32G32_SFLOAT\`) |
+| **2D Shadows (\`shadowsPipe\`)** | \`_vk2dGetShadowsVertexInputState()\` | \`12 B\` (\`vec3\`) | \`0\`: \`vec3 pos\` (\`R32G32B32_SFLOAT\`) |
+| **Batched Sprites (\`instancedPipe\`)** | \`_vk2dGetInstanceVertexInputState()\` | \`0 B\` *(No VBO!)* | Procedural corners derived from \`gl_VertexIndex\` and SSBO Set 3 |
+| **Custom Slang Shaders (\`USER_SHADER\`)** | \`_vk2dGetTextureVertexInputState()\` | \`0 B\` *(No VBO!)* | Procedural $1 \\times 1$ quad corners indexed directly by \`gl_VertexIndex\` |
+
+*(Zero-VBO Trick: Both \`instanced.vert\` and \`usershader.vert\` bake a static 6-vertex unit square array right into GLSL constant memory. Because \`vkCmdBindVertexBuffers\` is skipped completely, VK2D never allocates or binds vertex buffers for sprites or custom shaders!)*
+
+### Inside Every Built-In GLSL 450 Shader Pair (\`shaders/\`)
+
+Each built-in pipeline pairs a tiny, specialized vertex and fragment shader under \`extern/Vulkan2d/shaders/\`:
+
+1. **Shapes & Clears (\`colour.vert\` & \`colour.frag\`):**
+   Reads \`vec3 inPosition\` and \`vec4 inColor\`, multiplies by \`pushBuffer.model\`, and outputs \`fragColor * pushBuffer.colourMod\`.
+   Notice the constant matrix \`UNIT_VIEW\` inside \`shaders/colour.vert\`:
+\`\`\`glsl
+const mat4 UNIT_VIEW = {
+    { 2.0,  0.0, 0.0,      0.0 },
+    { 0.0,  2.0, 0.0,      0.0 },
+    { 0.0,  0.0, 0.10101,  0.0 },
+    { -1.0, -1.0, 0.191919, 1.0 }
+};
+\`\`\`
+   Why those exact decimals? When \`vk2dRendererClear()\` or \`vk2dRendererEmpty()\` draws \`unitSquare\` (whose corners span $[0, 1]^2$), it sets \`pushBuffer.cameraIndex = -1\`. \`UNIT_VIEW\` stretches $[0, 1]$ by $\\times 2$ and shifts by $-1$ to cover $[-1, +1]^2$ in screen clip space, while mapping $z = 0$ inside Vulkan's $[0.1, 10.0]$ orthographic depth range ($\\frac{1}{10.0 - 0.1} = 0.10101$).
+2. **Custom Shader Quad Host (\`usershader.vert\`):**
+   Matches \`VK2DShaderPushBuffer\` (\`112 B\`). Multiplies \`VERTICES[gl_VertexIndex]\` by \`push.texturePos.zw\` (pixel width/height of the sprite region) so your Slang vertex output sits in world pixel coordinates, then interpolates pixel texture coordinates \`fragTexCoord = push.texturePos.xy + TEX_COORDS[gl_VertexIndex] * push.texturePos.zw\` into \`PixelShader(float2 uv)\`.
+3. **3D Models (\`model.vert\` & \`model.frag\`):**
+   Transforms \`VK2DVertex3D\` vertices by \`ubo.viewproj[cameraIndex] * pushBuffer.model\`, then samples \`tex[pushBuffer.textureIndex]\` with the repeating normalized 3D sampler (\`Set 1\`) and tints by \`pushBuffer.colourMod\`.
+4. **2D Shadow Extrusion (\`shadows.vert\` & \`shadows.frag\`):**
+   Reads wall corner positions (\`vec3 inPosition\`), transforms them into world space, tests \`gl_VertexIndex % 6\`, projects vertices \`1, 4, 5\` away from \`pushBuffer.lightSource\` by $\\times 1{,}000$, and fills the extruded triangles with solid \`pushBuffer.colour\` inside \`shadows.frag\`.
+
+### Baking Shaders Into C Arrays (\`shaders/genblobs.py\` $\\to$ \`Blobs.h\`)
+
+Instead of loading external \`.spv\` files from disk at startup (which could fail if a game launches from a different working directory), VK2D compiles all GLSL shaders ahead of time into C byte arrays in \`VK2D/include/VK2D/Blobs.h\` using \`extern/Vulkan2d/shaders/genblobs.py\`:
+
+1. \`find_glslc()\` locates \`glslc\` (on Linux) or scans \`C:\\VulkanSDK\\*\\Bin\\glslc.exe\` (on Windows).
+2. For every input file, \`genblobs.py\` runs \`glslc -g <shader>\` to compile SPIR-V bytecode (with debug symbols preserved for RenderDoc!) into \`a.spv\`.
+3. \`filename_to_variable()\` converts paths like \`colour.vert\` or \`spritebatch.comp\` into C identifiers using the pattern \`VK2D<Ext><Name>\` (producing \`VK2DVertColour\`, \`VK2DFragInstanced\`, \`VK2DCompSpritebatch\`, etc.).
+4. Finally, it formats the SPIR-V bytes in 15-byte hex rows into \`VK2D/include/VK2D/Blobs.h\`, wrapped in \`extern "C"\` guards so both C11 and C++ callers can reference them directly.
+`,
+    mermaidCharts: [
+      {
+        title: "GLSL 450 Source -> glslc SPIR-V Compilation -> Blobs.h Pipeline Build",
+        chart: `
+flowchart LR
+    classDef src fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef tool fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef blob fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef pipe fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    GLSL["shaders/*.vert, *.frag, spritebatch.comp<br/>GLSL 450 Sources"]:::src
+    GEN["shaders/genblobs.py<br/>Calls glslc -g and encodes hex arrays"]:::tool
+    BLOBS["VK2D/include/VK2D/Blobs.h<br/>VK2DVertColour, VK2DFragInstanced,<br/>VK2DVertUsershader, VK2DCompSpritebatch"]:::blob
+    PIPES["RendererMeta.c & Shader.c<br/>vkCreateShaderModule directly from C arrays<br/>Zero external shader files needed at runtime"]:::pipe
+
+    GLSL --> GEN --> BLOBS --> PIPES
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-nuklear-uthash-internals",
+    title: "65. Nuklear Vulkan Backend (nuklear.c), Font Atlas Hashing & Off-Thread Loading",
+    category: "graphics",
+    summary:
+      "Inside VK2D's embedded immediate-mode GUI renderer (nuklear.c), how font handles are indexed with uthash.h, how swapchain resizes rebuild UI framebuffers, and how Image.c structures pixel uploads.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/src/nuklear.c",
+      "extern/Vulkan2d/VK2D/include/VK2D/nuklear_defs.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/uthash.h",
+      "extern/Vulkan2d/VK2D/src/Gui.c",
+      "extern/Vulkan2d/VK2D/src/Image.c",
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+    ],
+    content: `
+### Inside \`VK2D/src/nuklear.c\`: A Standalone Vulkan UI Overlay
+
+While VK2D handles all 2D/3D game rendering through \`Renderer.c\`, its embedded GUI (\`options.enableNuklear = true\`) runs a self-contained Vulkan backend (\`struct nk_sdl_device\` inside \`VK2D/src/nuklear.c\`) that shares the same \`VkDevice\` and swapchain image views without interfering with your game's descriptor buffers or sprite batches.
+
+How does \`nuklear.c\` overlay crisp menus and debug panels cleanly on top of your rendered game?
+
+1. **Preserve Game Pixels with \`LOAD_OP_LOAD\`:**
+   \`nk_sdl_create_render_pass()\` creates a single-attachment \`VkRenderPass\` whose \`initialLayout\` and \`finalLayout\` are both \`VK_IMAGE_LAYOUT_PRESENT_SRC_KHR\` and whose \`loadOp\` is \`VK_ATTACHMENT_LOAD_OP_LOAD\`. Because it waits on VK2D's \`renderFinishedSemaphores[scImageIndex]\`, Nuklear opens the swapchain image **right after** VK2D finishes drawing your scene and draws widgets cleanly over top!
+2. **Per-Swapchain-Image Mapped Ring Buffers:**
+   In \`nk_sdl_device_create()\`, Nuklear allocates one set of host-visible, persistently mapped buffers **per swapchain image**:
+   - \`vertex_buffers[i]\`: \`512 KB\` (\`MAX_VERTEX_BUFFER\`) storing \`struct nk_sdl_vertex\` (\`float pos[2]\`, \`float uv[2]\`, \`nk_byte col[4]\`).
+   - \`index_buffers[i]\`: \`128 KB\` (\`MAX_ELEMENT_BUFFER\`) storing 16-bit triangle indices.
+   - \`uniform_buffers[i]\`: \`64 B\` storing an orthographic screen-space projection matrix (\`m[0] = 2 / w\`, \`m[5] = -2 / h\`).
+   - \`frameStartFences[i]\`: Signals when that swapchain slot's previous Nuklear command buffer has finished executing on the GPU before overwriting its mapped vertex/index buffers.
+3. **256 Texture Descriptor Cache & Per-Widget Scissor Clipping:**
+   \`nk_sdl_render()\` calls \`nk_convert()\` to tessellate windows, sliders, and text directly into the mapped buffers, then walks \`nk_draw_foreach(cmd)\`. Whenever a widget references a new \`VkImageView\` (up to \`NK_SDL_MAX_TEXTURES = 256\`), Nuklear caches a \`VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER\` descriptor set for it, updates \`vkCmdSetScissor\` to \`cmd->clip_rect\` so scrolled panels never bleed outside their window borders, and issues \`vkCmdDrawIndexed\`.
+
+### Embedded SPIR-V UI Shaders & Resize Recovery
+
+Just like \`Blobs.h\` embeds VK2D's game shaders, \`VK2D/src/nuklear.c\` embeds pre-compiled SPIR-V bytecode arrays \`nuklearshaders_nuklear_vert_spv\` (1,856 bytes) and \`nuklearshaders_nuklear_frag_spv\` (860 bytes). When the game window resizes or changes MSAA:
+- \`_vk2dRendererResetNuklear()\` in \`RendererMeta.c\` calls \`nk_sdl_resize(swapchainImageViews, swapchainImageCount, surfaceWidth, surfaceHeight)\`.
+- \`nk_sdl_resize()\` destroys and recreates Nuklear's framebuffers, pipeline, descriptor pool, and render pass using the new swapchain image views—without clearing your open windows, slider values, or font atlas!
+
+### Font Atlas Management & \`uthash.h\` Registry (\`RendererMeta.c\`)
+
+When \`_vk2dRendererInitNuklear()\` boots the UI subsystem:
+- It calls \`nk_sdl_font_stash_begin(&atlas)\`, bakes Nuklear's default 16 px font into a 32-bit RGBA bitmap via \`nk_font_atlas_bake(..., NK_FONT_ATLAS_RGBA32)\`, and uploads it into a \`VK_FORMAT_R8G8B8A8_UNORM\` GPU image (\`dev->font_image\`) via \`nk_sdl_device_upload_atlas()\`.
+- Inside \`struct VK2DGui_t\` (\`Opaque.h\`), VK2D embeds Troy D. Hanson's single-header hash table library (\`VK2D/include/VK2D/uthash.h\`) inside \`struct VK2DFontHandle\`:
+\`\`\`c
+struct VK2DFontHandle {
+  UT_hash_handle hh;
+  char *name;
+  struct nk_font *font;
+};
+\`\`\`
+  At shutdown (\`_vk2dRendererQuitNuklear()\`), VK2D safely iterates all entries using \`HASH_ITER(hh, gRenderer->gui->fonts, font, tmp)\` and \`HASH_DEL()\` to free every font handle before calling \`nk_sdl_shutdown()\`.
+
+### Event Routing & Dual-Queue Support for Image Uploads (\`Gui.c\` & \`Image.c\`)
+
+To route keyboard shortcuts (Copy/Paste via SDL3 clipboard, arrow keys, backspace, scroll wheel, and text input) and double-clicks into Nuklear cleanly:
+1. Wrap your SDL3 event polling loop with \`vk2dGuiStartInput()\`, \`vk2dGuiProcessEvent(&e)\`, and \`vk2dGuiEndInput()\`. Internally, all three functions check \`vk2d->options.enableNuklear\` first so they are safe no-ops if Nuklear is disabled.
+2. In \`VK2D/src/Image.c\`, note how \`vk2dImageFromPixels(dev, pixels, w, h, mainThread)\` accepts a \`bool mainThread\` flag and forwards it through \`_vk2dImageTransitionImageLayout()\` and \`_vk2dImageCopyBufferToImage()\`, while \`LogicalDevice.c\` probes \`queueCount >= 2\` to cache \`ldev->loadQueue\` for multi-queue hardware. And every image upload handles platform endianness via \`SDL_BYTEORDER\` masks (\`rmask, gmask, bmask, amask\`) cleanly across Windows, Linux, and macOS.
+`,
+    mermaidCharts: [
+      {
+        title: "VK2D Frame Submission -> Nuklear Overlay Pass -> Swapchain Present Sync",
+        chart: `
+flowchart LR
+    classDef vk2d fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef nk fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef pres fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Scene["VK2D Main Submit<br/>Copies + Compute + Graphics<br/>Signals renderFinishedSemaphores"]:::vk2d
+    WaitFence["nk_sdl_render<br/>Wait frameStartFences and nk_convert<br/>Into mapped 512KB VBO + 128KB IBO"]:::nk
+    DrawUI["RenderPass LOAD_OP_LOAD<br/>Bind font_image or cached texture set<br/>Per-widget vkCmdSetScissor + DrawIndexed"]:::nk
+    Present["vkQueuePresentKHR<br/>Waits on render_completed_semaphores"]:::pres
+
+    Scene -->|"Wait renderFinishedSemaphore"| WaitFence --> DrawUI -->|"Signal nkSemaphore"| Present
 `,
       },
     ],
