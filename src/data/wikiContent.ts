@@ -6116,7 +6116,7 @@ flowchart TD
     title: "53. Vulkan2D Basic Architecture & Frame Lifecycle",
     category: "graphics",
     summary:
-      "Core architecture of extern/Vulkan2d: the VK2DRenderer_t state machine, 18-step initialization sequence, 2 frames in flight, 3 command buffers per swapchain image (Copy, Compute, Draw), and swapchain recreation.",
+      "How extern/Vulkan2d turns complex Vulkan setup into a simple 2D drawing API: the global renderer state, 18-step boot sequence, 2 frames in flight, 3 command buffers per swapchain image (Copy, Compute, Draw), and automatic window resizing.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/VK2D.h",
       "extern/Vulkan2d/VK2D/include/VK2D/Renderer.h",
@@ -6127,31 +6127,49 @@ flowchart TD
       "extern/Vulkan2d/VK2D/src/RendererMeta.c",
     ],
     content: `
-### Overview of the Standalone \`extern/Vulkan2d\` Renderer
+### What \`extern/Vulkan2d\` Is and Why It Exists
 
-\`extern/Vulkan2d\` (**VK2D**) is a standalone C11 and C++20 2D/3D hardware-accelerated rendering library built atop **Vulkan 1.2** and **SDL3**. Its public headers expose opaque handle typedefs (\`VK2D_OPAQUE_POINTER\`) and plain C structures (\`VK2D_USER_STRUCT\`) so callers can initialize a swapchain, load textures, compile Slang shaders, and submit instanced sprite batches without directly managing Vulkan descriptors, render passes, or pipeline barriers.
+Raw Vulkan is famously verbose: drawing a single 2D sprite requires hundreds of lines of setup for instances, physical devices, queues, swapchains, render passes, descriptor pools, staging buffers, and pipeline barriers. \`extern/Vulkan2d\` (**VK2D**) wraps **Vulkan 1.2** and **SDL3** behind a clean, beginner-friendly C API (originally designed as a high-speed drop-in replacement for \`SDL_Renderer\`).
 
-Internally, a single global state structure (\`VK2DRenderer gRenderer\` in \`VK2D/src/Renderer.c\`, defined as \`struct VK2DRenderer_t\` in \`VK2D/include/VK2D/Opaque.h\`) owns the Vulkan instance (\`VkInstance\`), physical and logical devices, Vulkan Memory Allocator (\`VmaAllocator\`), swapchain images, descriptor controllers, graphics/compute pipelines, and frame synchronization primitives.
+You include \`VK2D/VK2D.h\`, initialize the renderer on an SDL3 Vulkan window, load textures or shaders, call simple drawing functions like \`vk2dDrawTexture(tex, x, y)\`, and finish each frame with \`vk2dRendererPresent()\`.
 
-### Startup Options & Hardware Capability Negotiation
+#### Opaque Pointers vs User Structs
 
-\`vk2dRendererInit(SDL_Window *window, VK2DRendererConfig config, const VK2DStartupOptions *options)\` boots the renderer. When \`options\` is \`NULL\` or specific fields are left zero, \`DEFAULT_STARTUP_OPTIONS\` applies:
+To keep user code simple and prevent accidental corruption of Vulkan handles, \`VK2D/include/VK2D/Structs.h\` splits all types into two categories:
+1. **Opaque Pointers (\`VK2D_OPAQUE_POINTER\`):** Types like \`VK2DTexture\`, \`VK2DShader\`, \`VK2DPolygon\`, \`VK2DModel\`, and \`VK2DRenderer\` are pointers to hidden internal structs (defined only inside \`VK2D/include/VK2D/Opaque.h\`). You create and free them through VK2D functions without ever touching raw \`VkImage\` or \`VkBuffer\` handles.
+2. **Plain User Structs (\`VK2D_USER_STRUCT\`):** Small configuration structs like \`VK2DRendererConfig\`, \`VK2DStartupOptions\`, \`VK2DCameraSpec\`, and \`VK2DDrawCommand\` live on the stack so you can read and edit their fields directly.
 
-| Option Field | Default Value | Architectural Role |
+Internally, a single global state structure (\`VK2DRenderer gRenderer\` in \`VK2D/src/Renderer.c\`, defined as \`struct VK2DRenderer_t\` in \`VK2D/include/VK2D/Opaque.h\`) owns the entire Vulkan context: the \`VkInstance\`, physical and logical devices, Vulkan Memory Allocator (\`VmaAllocator\`), swapchain images, descriptor controllers, graphics/compute pipelines, and frame synchronization primitives.
+
+### Screen Space, Angles & Origin Pivots
+
+Before looking at the GPU internals, it helps to know how VK2D measures positions and angles:
+* **Top-Left Origin:** Coordinates start at $(0, 0)$ in the **top-left corner** of the window or texture. The $x$-axis grows to the right, and the $y$-axis grows **downward** (so $y = 300$ is lower on screen than $y = 100$).
+* **Radians & Clockwise Rotation:** All rotations in VK2D use **radians** (with helper macros \`VK2D_DEGREES(d)\` and \`VK2D_RADIANS(r)\` in \`Constants.h\`). Angles start at East ($0\\text{ rad}$) and rotate **clockwise**.
+* **Origin Pivot (\`originX, originY\`):** By default, a sprite's rotation pivot is its top-left corner $(0, 0)$, which swings the whole image in an arc when rotated. Setting \`originX = width / 2\` and \`originY = height / 2\` rotates the sprite cleanly in place around its center.
+
+### Startup Options & Automatic Hardware Fallbacks
+
+\`vk2dRendererInit(SDL_Window *window, VK2DRendererConfig config, const VK2DStartupOptions *options)\` boots the renderer. If you pass \`NULL\` for \`options\` (or leave specific fields set to \`0\`), VK2D fills in safe defaults from \`DEFAULT_STARTUP_OPTIONS\` and \`Constants.c\`:
+
+| Option Field | Default Value | Plain-English Purpose |
 | --- | --- | --- |
-| \`enableDebug\` | \`false\` | Loads \`VK_LAYER_KHRONOS_validation\` and attaches \`VK_EXT_debug_report\` callback (\`_vk2dDebugCallback\`). |
-| \`stdoutLogging\` | \`true\` | Enables console output in \`VK2DDefaultLogger\` (\`Logger.c\`). |
-| \`quitOnError\` | \`true\` | Treats fatal \`VK2DStatus\` flags as immediate \`abort()\` triggers via \`VK2D_LOG_SEVERITY_FATAL\`. |
-| \`errorFile\` | \`"vk2derror.txt"\` | Appends warnings, errors, and host hardware headers (\`vk2dHostInformation()\`) to disk. |
-| \`vramPageSize\` | \`256,000\` bytes | Size of each host-to-device staging/VRAM page in \`VK2DDescriptorBuffer\`. Caps \`maxInstancedDraws\`, \`maxShaderBufferSize\`, and \`maxGeometryVertices\`. |
-| \`maxTextures\` | \`10,000\` | Upper bound for the bindless texture descriptor array at Set 2, Binding 2 (clamped to hardware \`maxDescriptorSetUpdateAfterBindSampledImages\`). |
-| \`enableNuklear\` | \`false\` | Initializes the embedded Nuklear GUI context and font atlas when \`true\`. |
+| \`enableDebug\` | \`false\` | Enables \`VK_LAYER_KHRONOS_validation\` and attaches the debug callback (\`_vk2dDebugCallback\`) to catch Vulkan API misuse. |
+| \`stdoutLogging\` | \`true\` | Prints info, warnings, and errors to the terminal (\`Logger.c\`). |
+| \`quitOnError\` | \`true\` | Immediately aborts the program if a fatal Vulkan error occurs (\`VK2D_LOG_SEVERITY_FATAL\`). |
+| \`errorFile\` | \`"vk2derror.txt"\` | File path where warnings, errors, and system hardware specs (\`vk2dHostInformation()\`) are appended. |
+| \`vramPageSize\` | \`256,000\` bytes | Size of each RAM-to-VRAM staging page in \`VK2DDescriptorBuffer\`. Controls how many sprites (\`2,284\`) or geometry vertices (\`9,141\`) fit in one batch. |
+| \`maxTextures\` | \`10,000\` | Maximum number of textures that can stay loaded at once in the global bindless texture array (clamped to hardware limits). |
+| \`enableNuklear\` | \`false\` | Initializes the built-in Nuklear immediate-mode GUI library when set to \`true\`. |
 
-During initialization, VK2D enumerates instance extensions required by SDL3 (\`SDL_Vulkan_GetInstanceExtensions\`), checks for \`VK_KHR_get_physical_device_properties2\` (to unlock \`VK_EXT_memory_budget\` VRAM telemetry in VMA), and on macOS enables \`VK_KHR_portability_enumeration\` and \`VK_KHR_portability_subset\` for MoltenVK compatibility. Requested MSAA sample counts (\`config.msaa\`) and presentation modes (\`config.screenMode\`) are automatically clamped to hardware limits stored in \`gRenderer->limits\`.
+GPUs vary wildly in what they support. Integrated laptops often lack triple buffering (\`VK_PRESENT_MODE_MAILBOX_KHR\`) or \`32x\` MSAA. Rather than failing to boot when you request an unsupported setting in \`VK2DRendererConfig\`, VK2D queries the GPU's limits (\`gRenderer->limits\`) and **automatically falls back to the next best supported option**:
+* If you request \`VK2D_MSAA_32X\` on a GPU that only supports \`8x\` MSAA, VK2D clamps \`config.msaa\` to \`VK2D_MSAA_8X\`.
+* If you request \`VK2D_SCREEN_MODE_TRIPLE_BUFFER\` or \`VK2D_SCREEN_MODE_IMMEDIATE\` and the display driver does not offer it, \`_vk2dRendererGetPresentMode()\` falls back to \`VK2D_SCREEN_MODE_VSYNC\` (\`VK_PRESENT_MODE_FIFO_KHR\`), which the Vulkan specification guarantees on every device.
+* Calling \`vk2dRendererGetConfig()\` returns the **actual** configuration running on the hardware (or the pending config if you just called \`vk2dRendererSetConfig()\`).
 
-### The 18-Step Initialization Sequence & Immediate Frame Start
+### The 18-Step Boot Sequence & Why Frame 1 Starts Immediately
 
-After creating \`VkInstance\`, selecting \`VK2DPhysicalDevice\`, creating \`VK2DLogicalDevice\`, and initializing \`VmaAllocator\`, \`vk2dRendererInit()\` executes 18 ordered subsystem constructors guarded by \`VK2D_INIT_STEP(step)\`. If any step raises a fatal status (\`vk2dStatusFatal()\`), initialization halts immediately and calls \`vk2dRendererQuit()\` so no partially initialized handle is dereferenced:
+After creating the \`VkInstance\`, picking a GPU (\`VK2DPhysicalDevice\`), creating the logical device (\`VK2DLogicalDevice\`), and starting the Vulkan Memory Allocator (\`VmaAllocator\`), \`vk2dRendererInit()\` runs 18 ordered setup steps wrapped in \`VK2D_INIT_STEP(step)\`. If any step hits a fatal error (\`vk2dStatusFatal()\`), it stops right there and calls \`vk2dRendererQuit()\` so later steps never touch half-initialized pointers:
 
 \`\`\`c
 #define VK2D_INIT_STEP(step) do { step; if (vk2dStatusFatal()) { vk2dRendererQuit(); return VK2D_ERROR; } } while (0)
@@ -6176,7 +6194,7 @@ VK2D_INIT_STEP(_vk2dInitShaderCompiler());
 #undef VK2D_INIT_STEP
 \`\`\`
 
-Notice line 334 of \`VK2D/src/Renderer.c\`: before \`vk2dRendererInit()\` returns to the caller, it calls \`vk2dRendererStartFrame(VK2D_BLACK)\`. Consequently, the renderer is **always inside an active frame recording state** whenever user code runs between initialization and \`vk2dRendererPresent()\`. Calling \`vk2dRendererPresent()\` simply invokes \`vk2dRendererEndFrame()\` followed immediately by \`vk2dRendererStartFrame(VK2D_BLACK)\` for the next frame:
+Look at line 334 of \`VK2D/src/Renderer.c\`: right before \`vk2dRendererInit()\` finishes, it calls \`vk2dRendererStartFrame(VK2D_BLACK)\`! That means **as soon as \`vk2dRendererInit()\` returns, the renderer is already inside an open frame and ready to record draw calls**. In your main loop, you do not need to call \`StartFrame\` or \`EndFrame\` manually; you simply draw your scene and call \`vk2dRendererPresent()\`, which finishes the current frame and immediately opens the next one:
 
 \`\`\`c
 void vk2dRendererPresent() {
@@ -6187,49 +6205,50 @@ void vk2dRendererPresent() {
 }
 \`\`\`
 
-### Frame Synchronization & The Three Command Buffers
+*(Guard flag \`gRenderer->procedStartFrame\` ensures that calling \`vk2dRendererStartFrame()\` twice in a row or calling \`vk2dRendererEndFrame()\` without a started frame is a safe no-op.)*
 
-VK2D decouples CPU frame recording from swapchain image count using two distinct indexing domains:
+### Two Frames in Flight vs Three Command Buffers
 
-1. **Frames in Flight (\`currentFrame\` $\\in [0, \\text{VK2D\\_MAX\\_FRAMES\\_IN\\_FLIGHT})$, where \`VK2D_MAX_FRAMES_IN_FLIGHT = 2\`):**
-   Controls CPU-to-GPU pacing and per-frame dynamic memory. Indexed by \`currentFrame\`:
-   * \`inFlightFences[2]\`: Signaled when the GPU finishes executing a submitted frame's command buffers.
-   * \`imageAvailableSemaphores[2]\`: Signaled by \`vkAcquireNextImageKHR\`.
-   * \`descriptorBuffers[2]\`: Paged host-to-device ring allocators (\`VK2DDescriptorBuffer\`).
-   * \`uboDescriptorSets[2]\`: Camera view-projection matrix uniform descriptors.
-   * \`descConCompute[2]\`, \`descConShaders[2]\`, \`descConSBO[2]\`: Per-frame descriptor controllers reset at the start of every frame (\`vk2dDescConReset\`).
+To keep both the CPU and GPU busy without waiting on each other, VK2D uses two separate counters every frame:
 
-2. **Swapchain Image Slots (\`scImageIndex\` $\\in [0, \\text{swapchainImageCount})$, typically 3 images):**
-   Controls presentation targets and recorded command streams. Indexed by \`scImageIndex\`:
-   * \`framebuffers[swapchainImageCount]\` and \`swapchainImageViews[swapchainImageCount]\`.
-   * \`renderFinishedSemaphores[swapchainImageCount]\` and \`imagesInFlight[swapchainImageCount]\`.
-   * **Three primary \`VkCommandBuffer\` handles per swapchain image:**
-     1. \`dbCommandBuffer[scImageIndex]\` (**Copy Command Buffer**): Records \`vkCmdCopyBuffer\` transfers from host-visible staging pages into device-local VRAM pages, followed by a \`VK_PIPELINE_STAGE_TRANSFER_BIT\` $\\to$ \`VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT\` buffer memory barrier.
-     2. \`computeCommandBuffer[scImageIndex]\` (**Compute Command Buffer**): Binds \`spriteBatchPipe\` (\`spritebatch.comp\`), records \`vkCmdDispatch((drawCount / 64) + 1, 1, 1)\` for each flushed sprite batch, and ends with a \`VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT\` $\\to$ \`VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT\` barrier.
-     3. \`commandBuffer[scImageIndex]\` (**Draw Command Buffer**): Records render pass transitions (\`vkCmdBeginRenderPass\` / \`vkCmdEndRenderPass\`), image layout barriers, viewport/scissor updates, and graphics draw calls (\`vkCmdDraw\`, \`vkCmdDrawIndexed\`).
+1. **Frame-in-Flight Slot (\`currentFrame\` $\\in \\{0, 1\\}$, since \`VK2D_MAX_FRAMES_IN_FLIGHT = 2\`):**
+   While the GPU is busy drawing Frame 0, the CPU can already record commands and write uniform data into Frame 1's memory buffers. Resources duplicated per \`currentFrame\` include:
+   * \`inFlightFences[2]\`: CPU wait fences that prevent the CPU from overwriting a frame slot still in use by the GPU.
+   * \`imageAvailableSemaphores[2]\`: GPU semaphores signaled when the swapchain hands over a screen image.
+   * \`descriptorBuffers[2]\`: The per-frame 256 KB paged staging/VRAM memory managers (\`VK2DDescriptorBuffer\`).
+   * \`uboDescriptorSets[2]\`: The per-frame camera matrix uniform descriptors.
+   * \`descConCompute[2]\`, \`descConShaders[2]\`, \`descConSBO[2]\`: Per-frame descriptor set allocators reset at the start of each frame (\`vk2dDescConReset\`).
 
-### Why Recording Order Differs from GPU Execution Order
+2. **Swapchain Image Index (\`scImageIndex\` $\\in [0, \\text{swapchainImageCount})$, usually 3 images):**
+   Returned by \`vkAcquireNextImageKHR\`. It tells VK2D which actual screen backbuffer to draw into. Indexed by \`scImageIndex\`:
+   * \`framebuffers[scImageIndex]\` and \`swapchainImageViews[scImageIndex]\`.
+   * \`renderFinishedSemaphores[scImageIndex]\` and \`imagesInFlight[scImageIndex]\`.
+   * **Three separate \`VkCommandBuffer\` streams per swapchain image:**
+     1. \`dbCommandBuffer[scImageIndex]\` (**1. Copy Buffer**): Copies all per-frame dynamic data (sprite batches, camera matrices, shader uniforms, dynamic geometry) from CPU staging RAM into fast GPU VRAM, then inserts a pipeline barrier so Compute waits for the copy to finish.
+     2. \`computeCommandBuffer[scImageIndex]\` (**2. Compute Buffer**): Runs the \`spritebatch.comp\` compute shader to turn compact sprite draw commands into $4 \\times 4$ model matrices in parallel, then inserts a pipeline barrier so Vertex Shaders wait for Compute to finish.
+     3. \`commandBuffer[scImageIndex]\` (**3. Draw Buffer**): Runs the actual graphics render passes (\`vkCmdBeginRenderPass\`), switches offscreen targets, and records all \`vkCmdDraw\` calls.
 
-A subtle architectural invariant in VK2D is how the three command buffers are populated during CPU draw calls versus how they execute on the GPU queue:
+### Why CPU Recording Order Differs from GPU Execution Order
 
-* **During the Frame (CPU Recording):**
-  As the application calls \`vk2dRendererDrawTexture()\`, commands accumulate in the CPU array \`gRenderer->drawCommands\`. When a batch flushes (\`vk2dRendererFlushSpriteBatch()\`), the CPU copies the \`VK2DDrawCommand\` array into the mapped host staging memory of \`descriptorBuffers[currentFrame]\`, reserves space in VRAM for \`VK2DDrawInstance\` outputs, records \`vkCmdDispatch\` onto \`computeCommandBuffer\`, and records \`vkCmdDraw(buf, 6 * drawCommandCount, 1, 0, 0)\` onto \`commandBuffer\`. Notice that **no \`vkCmdCopyBuffer\` has been recorded onto \`dbCommandBuffer\` yet**!
-* **At \`vk2dRendererEndFrame()\` (Closing & Barrier Injection):**
-  Only after all sprite batches, camera UBOs (\`_vk2dRendererFlushUBOBuffers\`), user shader uniforms, and dynamic geometry vertices have been written into the mapped staging pages does \`vk2dDescriptorBufferEndFrame()\` unmap the staging buffers and record **one consolidated \`vkCmdCopyBuffer\` per active 256 KB page** onto \`dbCommandBuffer\`, followed by the copy-to-compute and compute-to-vertex barriers.
-* **Queue Submission (\`vkQueueSubmit\`):**
-  \`vk2dRendererEndFrame()\` submits the three command buffers in a single \`VkSubmitInfo\` array ordered strictly as:
-  $$\\text{bufs} = \\big[\\,\\text{dbCommandBuffer}[i],\\; \\text{computeCommandBuffer}[i],\\; \\text{commandBuffer}[i]\\,\\big]$$
-  Because Vulkan begins executing command buffers in array order and enforces the recorded pipeline barriers between them, the GPU DMA-transfers all frame data into VRAM first, computes all sprite model matrices in parallel second, and executes all graphics render passes third!
+One of the cleverest tricks in VK2D is how those three command buffers are recorded vs how the GPU runs them:
 
-### Redundant State Filtering & Swapchain Recreation
+* **While You Draw (CPU Recording):**
+  When you call \`vk2dRendererDrawTexture()\`, VK2D simply appends a struct to a C array (\`gRenderer->drawCommands\`). When that batch flushes (\`vk2dRendererFlushSpriteBatch()\`), VK2D copies those commands into the mapped CPU staging memory of \`descriptorBuffers[currentFrame]\`, records \`vkCmdDispatch\` onto \`computeCommandBuffer\`, and records \`vkCmdDraw\` onto \`commandBuffer\`. Notice that **nothing has been recorded into \`dbCommandBuffer\` yet**!
+* **When the Frame Ends (\`vk2dRendererEndFrame\`):**
+  At the end of the frame, after every sprite batch, camera update, and custom shader uniform has been written into the staging pages, \`vk2dDescriptorBufferEndFrame()\` unmaps the staging memory and records **one big \`vkCmdCopyBuffer\` per 256 KB page** into \`dbCommandBuffer\`, followed by the pipeline barriers.
+* **When Submitted to the GPU (\`vkQueueSubmit\`):**
+  VK2D submits the three command buffers in the array order \`[dbCommandBuffer, computeCommandBuffer, commandBuffer]\`:
+  $$\\text{GPU Execution Order:} \\quad \\underbrace{\\text{dbCommandBuffer}}_{\\text{1. Copy RAM } \\to \\text{ VRAM}} \\longrightarrow \\underbrace{\\text{computeCommandBuffer}}_{\\text{2. Build Sprite Matrices}} \\longrightarrow \\underbrace{\\text{commandBuffer}}_{\\text{3. Draw Graphics Passes}}$$
+  Even though \`dbCommandBuffer\` was recorded last on the CPU, it sits **first** in the submit list! The GPU copies all frame data to VRAM in one burst, runs all compute shader dispatches second, and executes all graphics draws third.
 
-To minimize driver overhead on \`commandBuffer\`, \`struct VK2DRenderer_t\` caches bound state across non-instanced draw calls (\`_vk2dRendererDrawRaw\`, \`_vk2dRendererDrawRawShader\`, \`_vk2dRendererDrawRaw3D\`):
-* \`prevPipe\`: Skips \`vkCmdBindPipeline\` if the target \`VkPipeline\` (including blend mode variant) is already bound.
-* \`prevSetHash\`: Computes a positional hash of the \`VkDescriptorSet\` array via \`_vk2dHashSets()\` (\`hash += (*pointer) * (i + 1)\`) and skips \`vkCmdBindDescriptorSets\` on a match.
-* \`prevVBO\`: Skips \`vkCmdBindVertexBuffers\` when drawing repeated polygons from the same \`VkBuffer\`.
-* Any render pass switch (\`vk2dRendererSetTarget\`), instanced batch flush, or raw command buffer retrieval (\`vk2dVulkanGetDrawBuffer\`) calls \`_vk2dRendererResetBoundPointers()\` to invalidate the cache.
+### Skipping Redundant Binds & Handling Window Resizes
 
-When \`vkAcquireNextImageKHR\` or \`vkQueuePresentKHR\` returns \`VK_ERROR_OUT_OF_DATE_KHR\` or \`VK_SUBOPTIMAL_KHR\`, or when the user calls \`vk2dRendererSetConfig()\`, \`_vk2dRendererResetSwapchain()\` blocks if the SDL window is minimized (\`SDL_WINDOW_MINIMIZED\`), waits for \`vkDeviceWaitIdle\`, and rebuilds the swapchain, MSAA color image, depth buffer, framebuffers, camera UBOs, samplers, and synchronization objects. Critically, if the MSAA sample count changed (\`msaaChanged\`), it also rebuilds the 3 \`VkRenderPass\` objects, recreates all graphics pipelines (preserving custom shaders), and calls \`_vk2dRendererRefreshTargets()\` to reallocate the multisampled resolve attachments of every active offscreen render-target texture (\`gRenderer->targets[]\`).
+Binding the same Vulkan pipeline, descriptor sets, or vertex buffer over and over is slow. For non-instanced draws (shapes, custom shaders, 3D models), \`gRenderer\` remembers the last bound handles in \`prevPipe\`, \`prevSetHash\` (computed by \`_vk2dHashSets()\`), and \`prevVBO\`, skipping the Vulkan bind calls when nothing changed. Switching render targets or flushing a sprite batch calls \`_vk2dRendererResetBoundPointers()\` to clear this cache.
+
+When a user resizes or minimizes the window (causing \`VK_ERROR_OUT_OF_DATE_KHR\` or \`VK_SUBOPTIMAL_KHR\`), or calls \`vk2dRendererSetConfig()\` to change MSAA or VSync on the fly:
+1. If the window is minimized (\`SDL_WINDOW_MINIMIZED\`), \`_vk2dRendererResetSwapchain()\` pauses in a lightweight \`SDL_PumpEvents()\` loop until the window is restored.
+2. It waits for the GPU to finish (\`vkDeviceWaitIdle\`) and rebuilds the swapchain, MSAA buffer, depth buffer, framebuffers, camera UBOs, samplers, and sync objects.
+3. **Smart MSAA Rebuild:** Because Vulkan bakes MSAA sample counts into render passes, pipelines, and offscreen framebuffers, VK2D checks \`bool msaaChanged = gRenderer->newConfig.msaa != gRenderer->config.msaa;\`. Only when MSAA actually changed does it destroy and recreate the 3 \`VkRenderPass\` objects, rebuild all pipelines (keeping custom shaders alive), and call \`_vk2dRendererRefreshTargets()\` to resize the MSAA resolve images of every offscreen texture target!
 `,
     mermaidCharts: [
       {
@@ -6317,7 +6336,7 @@ sequenceDiagram
     title: "54. Physical/Logical Devices, VMA & Paged DescriptorBuffers",
     category: "graphics",
     summary:
-      "GPU selection, descriptor indexing feature enforcement, VMA heap budget tracking, and the 256 KB paged staging-to-VRAM VK2DDescriptorBuffer allocator.",
+      "How VK2D picks the best GPU, checks Vulkan 1.2 bindless features, tracks VRAM with Vulkan Memory Allocator (VMA), and streams dynamic frame data through 256 KB DescriptorBuffer pages.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/PhysicalDevice.h",
       "extern/Vulkan2d/VK2D/include/VK2D/LogicalDevice.h",
@@ -6329,11 +6348,15 @@ sequenceDiagram
       "extern/Vulkan2d/VK2D/src/DescriptorBuffer.c",
     ],
     content: `
-### Physical Device Selection & Queue Family Probing (\`PhysicalDevice.c\`)
+### Picking the Best GPU & Queue Family (\`PhysicalDevice.c\`)
 
-\`vk2dPhysicalDeviceFind(VkInstance instance, int32_t preferredDevice)\` enumerates all Vulkan-capable GPUs on the host. When \`preferredDevice == VK2D_DEVICE_BEST_FIT\` (\`-1\`), \`_vk2dPhysicalDeviceGetBestDevice()\` iterates available devices and selects the first device that satisfies queue family requirements, immediately locking onto the first discrete GPU (\`VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\`) if one is present, or falling back to an integrated GPU otherwise.
+A computer often has more than one graphics chip (for example, an integrated CPU graphics chip plus a dedicated gaming GPU). \`vk2dPhysicalDeviceFind(VkInstance instance, int32_t preferredDevice)\` inspects every Vulkan-capable device on the system.
 
-For a physical device to be considered supported (\`_vk2dPhysicalDeviceSupportsQueueFamilies\`), it must expose at least one queue family whose \`queueFlags\` include **both** \`VK_QUEUE_GRAPHICS_BIT\` and \`VK_QUEUE_COMPUTE_BIT\`:
+When \`preferredDevice\` is set to \`VK2D_DEVICE_BEST_FIT\` (\`-1\`), \`_vk2dPhysicalDeviceGetBestDevice()\` loops through the available GPUs:
+* If it finds a **discrete GPU** (\`VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\`) that supports VK2D's required queues, it selects it immediately and stops searching.
+* Otherwise, it falls back to the first supported integrated GPU.
+
+What makes a GPU queue family valid for VK2D? Inside \`_vk2dPhysicalDeviceSupportsQueueFamilies()\`, VK2D looks for a single queue family whose \`queueFlags\` support **both graphics drawing and compute shaders** (\`VK_QUEUE_GRAPHICS_BIT\` and \`VK_QUEUE_COMPUTE_BIT\`):
 
 \`\`\`c
 if (queueList[i].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
@@ -6346,41 +6369,42 @@ if (queueList[i].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
 }
 \`\`\`
 
-Because \`graphicsFamily\` and \`computeFamily\` resolve to the same unified queue family index, buffer memory barriers between \`dbCommandBuffer\`, \`computeCommandBuffer\`, and \`commandBuffer\` never require queue family ownership transfers. If that queue family exposes \`queueCount >= 2\`, VK2D sets \`limits.supportsMultiThreadLoading = true\` and retrieves a second \`VkQueue\` handle (\`ldev->loadQueue\`) alongside the primary \`ldev->queue\`.
+Why is using the same queue family for both graphics and compute so helpful? In Vulkan, if compute and graphics lived on different queue families, every sprite batch would need a complex queue ownership transfer barrier. Because they share one queue family, simple pipeline barriers are all that is needed! And if that queue family offers at least 2 hardware queues (\`queueCount >= 2\`), VK2D grabs a second queue handle (\`ldev->loadQueue\`) and sets \`limits.supportsMultiThreadLoading = true\`.
 
-### Logical Device & Mandatory Vulkan 1.2 Descriptor Indexing (\`LogicalDevice.c\`)
+### Logical Device & The 7 Required Bindless Features (\`LogicalDevice.c\`)
 
-\`vk2dLogicalDeviceCreate()\` queries \`vkGetPhysicalDeviceFeatures2\` for \`VkPhysicalDeviceDescriptorIndexingFeatures\` and verifies that **all seven** bindless descriptor capabilities are supported by the hardware:
+Once the physical GPU is chosen, \`vk2dLogicalDeviceCreate()\` creates the \`VK2DLogicalDevice\` wrapper (\`VkDevice\`, \`queue\`, \`loadQueue\`, and a resettable \`VkCommandPool\`).
 
-1. \`shaderSampledImageArrayNonUniformIndexing\`
-2. \`runtimeDescriptorArray\`
-3. \`descriptorBindingVariableDescriptorCount\`
-4. \`descriptorBindingPartiallyBound\`
-5. \`descriptorBindingUpdateUnusedWhilePending\`
-6. \`descriptorBindingSampledImageUpdateAfterBind\`
-7. \`descriptorBindingUniformBufferUpdateAfterBind\`
+Because VK2D stores all loaded textures in a single huge bindless array so you can draw any texture at any time without swapping descriptor sets, it queries \`vkGetPhysicalDeviceFeatures2\` (\`VkPhysicalDeviceDescriptorIndexingFeatures\`) and checks that the GPU supports **seven Vulkan 1.2 descriptor indexing features**:
 
-If any of these seven features is missing, \`vk2dLogicalDeviceCreate()\` raises \`VK2D_STATUS_VULKAN_ERROR\` and aborts initialization. Next, it queries \`VkPhysicalDeviceDescriptorIndexingProperties\` and clamps \`gRenderer->options.maxTextures\` to:
+1. \`shaderSampledImageArrayNonUniformIndexing\` (allows shaders to index the texture array with a per-sprite variable)
+2. \`runtimeDescriptorArray\` (allows open-ended \`texture2D tex[]\` arrays in GLSL/Slang)
+3. \`descriptorBindingVariableDescriptorCount\` (allows sizing the texture array to \`maxTextures\` at allocation time)
+4. \`descriptorBindingPartiallyBound\` (allows drawing even when most of the 10,000 texture slots are still empty)
+5. \`descriptorBindingUpdateUnusedWhilePending\` (allows loading a new texture into an empty slot while a command buffer is running)
+6. \`descriptorBindingSampledImageUpdateAfterBind\` (allows updating texture slots after the descriptor set is bound)
+7. \`descriptorBindingUniformBufferUpdateAfterBind\` (allows updating the camera matrix UBO at the end of the frame after draw calls were recorded)
+
+If any of those seven features is missing, VK2D logs the exact missing feature name and stops initialization cleanly. Next, it checks \`VkPhysicalDeviceDescriptorIndexingProperties\` to make sure \`options.maxTextures\` (default \`10,000\`) does not exceed what the GPU driver actually allows in a single descriptor set:
 $$\\text{maxTextures} = \\min\\!\\big(\\text{options.maxTextures},\\; \\text{maxDescriptorSetUpdateAfterBindSampledImages},\\; \\text{maxPerStageDescriptorUpdateAfterBindSampledImages}\\big)$$
 
-Finally, it creates the \`VkDevice\` with \`VK_KHR_swapchain\` (plus \`VK_EXT_memory_budget\` and \`VK_KHR_portability_subset\` when supported) and allocates a primary \`VkCommandPool\` configured with \`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT\`.
+### Easy GPU Memory with VMA & Staging Uploads (\`Buffer.c\`)
 
-### VMA Integration & Staging Buffer Uploads (\`Buffer.c\`)
+Allocating raw \`VkDeviceMemory\` blocks in Vulkan by hand is slow and hits driver allocation count limits quickly. VK2D embeds **Vulkan Memory Allocator (VMA)** (\`gRenderer->vma\`) to pool and sub-allocate GPU memory automatically.
 
-All Vulkan buffer and image memory allocations in VK2D go through **Vulkan Memory Allocator** (\`VmaAllocator gRenderer->vma\`, initialized with Vulkan API version 1.1 and \`VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT\` when supported). \`vk2dRendererGetVRAMUsage(float *inUse, float *total)\` queries \`vmaGetHeapBudgets()\` and sums \`budget\` and \`usage\` across all memory heaps flagged with \`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\`, converting bytes to MiB ($\\div 1{,}048{,}576$).
+* **Checking VRAM Usage (\`vk2dRendererGetVRAMUsage\`):** If the GPU supports \`VK_EXT_memory_budget\` (\`limits.supportsVRAMUsage == true\`), VMA queries live OS video memory budgets via \`vmaGetHeapBudgets()\`. VK2D sums \`usage\` and \`budget\` across all \`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\` heaps and divides by $1{,}048{,}576$ to report used and total VRAM in **MiB**.
+* **Static GPU Buffers (\`Buffer.c\`):** When you create a polygon or load a 3D model, the vertex data only needs to be uploaded once. Fast GPU memory (\`DEVICE_LOCAL\`) usually cannot be written directly by the CPU. So \`vk2dBufferLoad()\` does a two-step staging upload:
+  1. It creates a temporary CPU-visible **staging buffer** (\`HOST_VISIBLE | HOST_COHERENT\`), maps it, and \`memcpy\`s your data into it.
+  2. It creates a fast **device-local buffer** on the GPU, records a single-use command buffer to copy from staging to VRAM (\`vk2dBufferCopy\`), waits for the copy to finish, and frees the temporary staging buffer.
+  *(For 3D models, \`vk2dBufferLoad2()\` packs both the vertex array and the 16-bit index array back-to-back into one shared \`VK2DBuffer\` in a single upload!)*
 
-For static GPU buffers (such as polygon VBOs, 3D model vertex/index buffers, and offscreen target UBOs), \`Buffer.c\` provides three primitives:
-* \`vk2dBufferCreate(dev, size, usage, mem)\`: Calls \`vmaCreateBuffer\` with \`requiredFlags = mem\`.
-* \`vk2dBufferLoad(dev, size, usage, data, mainThread)\`: Allocates a temporary host-visible, host-coherent staging buffer (\`VK_BUFFER_USAGE_TRANSFER_SRC_BIT\`), maps it via \`vmaMapMemory\`, \`memcpy\`s \`data\`, allocates a \`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\` destination buffer (\`usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT\`), and copies between them using a single-use command buffer (\`vk2dBufferCopy\`).
-* \`vk2dBufferLoad2(dev, size, usage, data, size2, data2, mainThread)\`: Concatenates two contiguous payloads (used by \`Model.c\` to pack 3D vertices and 16-bit indices into a single \`VK2DBuffer\` allocation) before staging to VRAM.
+### Per-Frame Dynamic Memory: How \`VK2DDescriptorBuffer\` Works (\`DescriptorBuffer.c\`)
 
-### Paged Per-Frame Dynamic Memory: \`VK2DDescriptorBuffer\` (\`DescriptorBuffer.c\`)
+Static staging uploads are great for assets loaded once at startup, but what about data that changes **every single frame**, like sprite batches, camera matrices, custom shader uniforms, and \`vk2dRendererDrawGeometry\` vertices? Creating and freeing Vulkan buffers every frame would stutter terribly.
 
-Any data that changes every frame (camera view-projection UBOs, sprite batch \`VK2DDrawCommand\` inputs, compute-generated \`VK2DDrawInstance\` storage buffers, custom shader uniform buffers, and \`vk2dRendererDrawGeometry\` vertices) is managed by \`VK2DDescriptorBuffer\`. One \`VK2DDescriptorBuffer\` instance exists per frame in flight (\`gRenderer->descriptorBuffers[0..1]\`).
-
-Each \`VK2DDescriptorBuffer\` manages a dynamically growing array of \`_VK2DDescriptorBufferInternal\` page pairs, where each page has size \`pageSize = options.vramPageSize\` (default \`256,000\` bytes):
-* \`stageBuffer\`: Allocated in \`VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT\` with \`VK_BUFFER_USAGE_TRANSFER_SRC_BIT\`.
-* \`deviceBuffer\`: Allocated in \`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\` with composite usage flags:
+To solve this, VK2D creates one \`VK2DDescriptorBuffer\` per frame in flight (\`gRenderer->descriptorBuffers[0]\` and \`[1]\`). Think of a \`VK2DDescriptorBuffer\` as a **book of 256 KB memory pages** (\`_VK2DDescriptorBufferInternal\`). Each page is actually a twin pair of buffers of size \`pageSize = options.vramPageSize\` (default \`256,000\` bytes):
+* \`stageBuffer\`: Lives in CPU-writable RAM (\`VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT\`).
+* \`deviceBuffer\`: Lives in fast GPU VRAM (\`VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\`) with flags allowing it to act simultaneously as a **Uniform Buffer (UBO)**, **Vertex Buffer (VBO)**, and **Storage Buffer (SSBO)**:
   \`\`\`c
   VK_BUFFER_USAGE_TRANSFER_DST_BIT |
   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
@@ -6388,33 +6412,22 @@ Each \`VK2DDescriptorBuffer\` manages a dynamically growing array of \`_VK2DDesc
   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
   \`\`\`
 
-#### The Four-Phase Frame Lifecycle of \`VK2DDescriptorBuffer\`
+#### Follow One Frame Through \`VK2DDescriptorBuffer\`
 
 1. **Start of Frame (\`vk2dDescriptorBufferBeginFrame\`):**
-   Resets every allocated page's used byte counter (\`buffers[i].size = 0\`) and maps every \`stageBuffer\` into CPU address space (\`vmaMapMemory(..., &buffers[i].hostData)\`). Pages allocated in previous frames are reused in-place without reallocation.
-2. **Mid-Frame Sub-Allocation (\`vk2dDescriptorBufferCopyData\` & \`vk2dDescriptorBufferReserveSpace\`):**
-   When a caller requests \`size\` bytes (which must be strictly less than \`pageSize\`):
-   * It scans \`buffers[0..bufferCount-1]\` for the first page where $\\text{size} \\le \\text{pageSize} - \\text{buffers}[i].\\text{size}$.
-   * If no existing page has enough room, \`_vk2dDescriptorBufferAppendBuffer(db)\` allocates a new 256 KB \`stageBuffer\` + \`deviceBuffer\` pair (expanding the \`db->buffers\` array in increments of \`VK2D_DEFAULT_ARRAY_EXTENSION = 10\`) and maps its \`stageBuffer\`.
-   * \`vk2dDescriptorBufferCopyData\` copies the CPU payload into \`(uint8_t*)spot->hostData + spot->size\` and returns \`*outBuffer = spot->deviceBuffer->buf\` and \`*offset = spot->size\`.
-   * \`vk2dDescriptorBufferReserveSpace\` skips the \`memcpy\` (since the GPU compute shader will write the output directly into \`deviceBuffer\`) and simply returns the \`deviceBuffer\` handle and byte offset.
-   * **Hardware Alignment Rounding:** To satisfy both UBO and SSBO offset alignment rules on the physical device, \`spot->size\` advances by \`size\` rounded up to the next multiple of:
+   Every existing 256 KB page resets its used byte counter to zero (\`buffers[i].size = 0\`) and maps its \`stageBuffer\` into a CPU pointer (\`buffers[i].hostData\`). No memory is allocated or freed; last frame's pages are simply recycled!
+2. **During the Frame (\`CopyData\` and \`ReserveSpace\`):**
+   * Whenever VK2D needs to send dynamic data to the GPU (like a flushed sprite batch, camera UBO, or shader uniform), it calls \`vk2dDescriptorBufferCopyData(db, data, size, &outBuffer, &offset)\`.
+   * It checks its list of 256 KB pages for the first page with enough free space ($\\text{size} \\le \\text{pageSize} - \\text{buffers}[i].\\text{size}$). If every page is full, \`_vk2dDescriptorBufferAppendBuffer(db)\` allocates a brand-new 256 KB page pair on the fly (growing the page array in steps of \`VK2D_DEFAULT_ARRAY_EXTENSION = 5\`).
+   * It \`memcpy\`s the data into \`stageBuffer\` at the current offset, and hands back the corresponding **VRAM** \`deviceBuffer->buf\` handle and byte \`offset\` so descriptors or vertex bindings can point to where the data *will* live once copied!
+   * When the compute shader needs empty VRAM space to write its output \`VK2DDrawInstance\` matrices, VK2D calls \`vk2dDescriptorBufferReserveSpace()\`, which reserves a slice in the page and advances the offset without copying anything from the CPU.
+   * **Hardware Alignment Rounding:** GPUs require uniform and storage buffer offsets to land on specific byte boundaries (for example, 64 or 256 bytes). After every sub-allocation, VK2D rounds \`spot->size\` up to the next multiple of the GPU's alignment limit:
      $$A = \\max\\!\\big(\\text{minStorageBufferOffsetAlignment},\\; \\text{minUniformBufferOffsetAlignment}\\big)$$
-     \`\`\`c
-     const VkDeviceSize alignment = maxTwo(
-         gRenderer->pd->props.limits.minStorageBufferOffsetAlignment,
-         gRenderer->pd->props.limits.minUniformBufferOffsetAlignment);
-     if (size % alignment != 0) {
-       spot->size += ((size / alignment) + 1) * alignment;
-     } else {
-       spot->size += size;
-     }
-     \`\`\`
-3. **End of Frame DMA Copy (\`vk2dDescriptorBufferEndFrame\`):**
-   Unmaps every \`stageBuffer\` (\`vmaUnmapMemory\`) and, for each page with \`buffers[i].size > 0\`, records a single \`vkCmdCopyBuffer\` of \`buffers[i].size\` bytes from \`stageBuffer->buf\` to \`deviceBuffer->buf\` onto \`dbCommandBuffer\`.
+3. **End of Frame Bulk Copy (\`vk2dDescriptorBufferEndFrame\`):**
+   When you call \`vk2dRendererPresent()\`, VK2D unmaps every \`stageBuffer\` and records **one \`vkCmdCopyBuffer\` per non-empty 256 KB page** onto \`dbCommandBuffer\`. Instead of thousands of tiny copies, the GPU copies whole 256 KB pages in bulk!
 4. **Two-Stage Pipeline Barriers (\`RecordCopyPipelineBarrier\` & \`RecordComputePipelineBarrier\`):**
-   * On \`dbCommandBuffer\`: Inserts a \`VkBufferMemoryBarrier\` per active page from \`VK_ACCESS_TRANSFER_WRITE_BIT\` (\`VK_PIPELINE_STAGE_TRANSFER_BIT\`) to \`VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT\` (\`VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT\`).
-   * On \`computeCommandBuffer\`: Inserts a \`VkBufferMemoryBarrier\` per active page from \`VK_ACCESS_SHADER_WRITE_BIT\` (\`VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT\`) to \`VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT\` (\`VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT\`).
+   * At the end of \`dbCommandBuffer\`: Records a buffer barrier on all active pages so the **Compute Shader** waits until the **DMA Transfer** finishes writing \`deviceBuffer\`.
+   * At the end of \`computeCommandBuffer\`: Records a second buffer barrier on all active pages so the **Vertex Shader** waits until the **Compute Shader** finishes writing the sprite instance matrices into \`deviceBuffer\`.
 `,
     mermaidCharts: [
       {
@@ -6477,7 +6490,7 @@ flowchart TD
     title: "55. Bindless Texture Array, Samplers & DescriptorControl",
     category: "graphics",
     summary:
-      "The 4-set descriptor architecture, auto-growing VK2DDescCon pools, bindless sampled image array (Set 2, Binding 2), and RGBA/BGRA texture pixel readback.",
+      "How VK2D organizes its 4 descriptor sets, grows descriptor pools automatically, keeps up to 10,000 textures bound at once, streams dynamic pixel regions, and reads textures back to CPU RAM.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/DescriptorControl.h",
       "extern/Vulkan2d/VK2D/include/VK2D/Texture.h",
@@ -6487,53 +6500,49 @@ flowchart TD
       "extern/Vulkan2d/VK2D/src/Image.c",
     ],
     content: `
-### The Global Four-Set Descriptor Layout Architecture
+### How Shaders Find Their Data: The 4 Descriptor Sets
 
-VK2D standardizes its graphics pipeline layouts around four descriptor set slots (\`set = 0\` through \`set = 3\`) plus a dedicated compute descriptor set layout:
+In Vulkan, shaders access textures and buffers through numbered **Descriptor Sets** (\`set = 0\`, \`set = 1\`, etc.). To keep things predictable across the entire engine, VK2D uses the exact same four descriptor set slots for every graphics pipeline:
 
-| Set & Binding | Layout Handle | Descriptor Type | Stage Flags | Contents & Update Frequency |
-| --- | --- | --- | --- | --- |
-| **Set 0, Binding 0** | \`dslBufferVP\` | \`UNIFORM_BUFFER\` (\`UPDATE_AFTER_BIND\`) | \`VERTEX_BIT\` | \`VK2DUniformBufferObject\` (\`mat4 viewproj[10]\`). Updated once per frame in \`_vk2dRendererFlushUBOBuffers()\` or bound per texture target (\`target->uboSet\`). |
-| **Set 1, Binding 1** | \`dslSampler\` | \`SAMPLER\` | \`FRAGMENT_BIT\` | Immutable global sampler sets: \`samplerSet\` (2D unnormalized UV coordinates) or \`modelSamplerSet\` (3D normalized repeating UVs with anisotropy). |
-| **Set 2, Binding 2** | \`dslTextureArray\` | \`SAMPLED_IMAGE[maxTextures]\` | \`FRAGMENT_BIT\` | Global bindless texture array (\`texArrayDescriptorSet\`). Bound once for all sprites, custom shaders, and 3D models. |
-| **Set 3, Binding 3** (Instanced) | \`dslBufferSBO\` | \`STORAGE_BUFFER\` | \`VERTEX_BIT\` | Read-only \`DrawInstance objects[]\` SSBO produced by \`spritebatch.comp\` and read by \`instanced.vert\`. Allocated per batch flush from \`descConSBO[currentFrame]\`. |
-| **Set 3, Binding 3** (User Shader) | \`dslBufferUser\` | \`UNIFORM_BUFFER\` | \`VERTEX_BIT \\| FRAGMENT_BIT\` | Optional custom shader uniform buffer (\`data\` passed to \`vk2dRendererDrawShader\`). Allocated per draw call from \`descConShaders[currentFrame]\`. |
-| **Compute Set 0, Bindings 0 & 1** | \`dslSpriteBatch\` | \`STORAGE_BUFFER\` $\\times 2$ | \`COMPUTE_BIT\` | Binding 0: input \`DrawCommand draws[]\`. Binding 1: output \`DrawInstance draws[]\`. Allocated per batch flush from \`descConCompute[currentFrame]\`. |
+| Set & Binding | Layout Handle | What Lives Here | Who Uses It |
+| --- | --- | --- | --- |
+| **Set 0, Binding 0** | \`dslBufferVP\` | **Camera Matrices (\`VK2DUniformBufferObject\`)**: Holds the \`mat4 viewproj[10]\` array for all 10 cameras. | Every vertex shader (\`instanced.vert\`, \`colour.vert\`, \`model.vert\`, \`shadows.vert\`, \`usershader.vert\`). |
+| **Set 1, Binding 1** | \`dslSampler\` | **Texture Sampler**: Either \`samplerSet\` (2D pixel coordinates) or \`modelSamplerSet\` (3D repeating normalized UVs). | Sprite, custom shader, and 3D model fragment shaders. |
+| **Set 2, Binding 2** | \`dslTextureArray\` | **Global Bindless Texture Array (\`texArrayDescriptorSet\`)**: Holds up to \`10,000\` \`VkImageView\` handles at once. | Sprite, custom shader, and 3D model fragment shaders. |
+| **Set 3, Binding 3** (Sprites) | \`dslBufferSBO\` | **Computed Sprite Instances (\`DrawInstance objects[]\`)**: Storage buffer written by \`spritebatch.comp\`. | Read by \`instanced.vert\` during sprite batch drawing. |
+| **Set 3, Binding 3** (Custom Shaders) | \`dslBufferUser\` | **Custom Shader Uniforms (\`UserData\`)**: Optional \`ConstantBuffer\` data passed to \`vk2dRendererDrawShader()\`. | Custom Slang / SPIR-V shaders. |
+| **Compute Set 0, Bindings 0 & 1** | \`dslSpriteBatch\` | **Batch Input & Output SSBOs**: Binding 0 is \`DrawCommand draws[]\`, Binding 1 is \`DrawInstance draws[]\`. | Used exclusively by \`spritebatch.comp\` on the compute command buffer. |
 
-### Dynamic Pool Chaining: \`VK2DDescCon\` (\`DescriptorControl.c\`)
+### Never Running Out of Descriptor Sets: \`VK2DDescCon\` (\`DescriptorControl.c\`)
 
-In Vulkan, allocating a \`VkDescriptorSet\` from a \`VkDescriptorPool\` fails with \`VK_ERROR_OUT_OF_POOL_MEMORY\` once the pool's fixed capacity is exhausted. \`VK2DDescCon\` (\`struct VK2DDescCon_t\`) eliminates fixed descriptor limits by wrapping an extensible array of \`VkDescriptorPool\` handles:
+A standard Vulkan \`VkDescriptorPool\` has a hard limit on how many descriptor sets it can hand out; once full, \`vkAllocateDescriptorSets\` fails with \`VK_ERROR_OUT_OF_POOL_MEMORY\`.
 
-* Each pool in \`descCon->pools[]\` is created with a capacity of \`VK2D_DEFAULT_DESCRIPTOR_POOL_ALLOCATION = 10\` descriptor sets.
-* When \`_vk2dDescConGetAvailableSet(descCon)\` is called, it iterates \`i = 0 .. descCon->poolsInUse - 1\` and attempts \`vkAllocateDescriptorSets\`.
-* If pool \`i\` returns \`VK_ERROR_OUT_OF_POOL_MEMORY\`, it advances to pool \`i + 1\`. If all \`poolsInUse\` are full, \`_vk2dDescConAppendList(descCon)\` allocates a new \`VkDescriptorPool\` (growing the \`pools\` pointer array in chunks of \`VK2D_DEFAULT_ARRAY_EXTENSION = 10\`) and satisfies the allocation immediately.
-* At the start of every frame (\`vk2dRendererStartFrame\`), VK2D calls \`vk2dDescConReset()\` on \`descConShaders[currentFrame]\`, \`descConCompute[currentFrame]\`, and \`descConSBO[currentFrame]\`, which loops over \`0 .. poolsInUse - 1\` and calls \`vkResetDescriptorPool(..., 0)\`, recycling all descriptor sets in $O(\\text{poolsInUse})$ time without destroying the underlying pools.
+\`VK2DDescCon\` (\`struct VK2DDescCon_t\`) wraps a **self-growing list of descriptor pools** so you never hit a hard ceiling mid-frame:
+* Each pool in \`descCon->pools[]\` is created with room for \`VK2D_DEFAULT_DESCRIPTOR_POOL_ALLOCATION = 1000\` descriptor sets (defined in \`Constants.c\`).
+* When VK2D needs a fresh descriptor set (for example, when flushing a sprite batch or calling \`vk2dRendererDrawShader\` with custom uniform data), \`_vk2dDescConGetAvailableSet(descCon)\` tries to allocate from \`pools[0]\`, then \`pools[1]\`, and so on.
+* If every active pool in the list is full, \`_vk2dDescConAppendList(descCon)\` automatically creates a new \`VkDescriptorPool\` of 1,000 sets (expanding the \`pools\` array in steps of \`VK2D_DEFAULT_ARRAY_EXTENSION = 5\`) and hands back the new set.
+* At the start of the next frame (\`vk2dRendererStartFrame\`), \`vk2dDescConReset()\` loops through \`0 .. poolsInUse - 1\` and calls \`vkResetDescriptorPool(..., 0)\`, instantly recycling all allocated sets for the new frame without destroying the pools.
 
-### The Global Bindless Texture Array & MoltenVK Fallback
+### The Global Bindless Texture Array (Why All Textures Can Batch Together)
 
-Instead of binding a different \`VkDescriptorSet\` every time a sprite uses a new texture (which would break sprite batching across textures), VK2D places **every loaded or created \`VK2DTexture\` into a single global descriptor array** (\`gRenderer->texArrayDescriptorSet\`) at Set 2, Binding 2.
+In older OpenGL or basic Vulkan renderers, drawing Sprite A with \`hero.png\` and Sprite B with \`tree.png\` required unbinding \`hero.png\`, binding \`tree.png\`, and issuing two separate draw calls.
 
-In \`_vk2dRendererCreateDescriptorSetLayouts()\` (\`RendererMeta.c\`), \`dslTextureArray\` is configured with four descriptor indexing flags:
-\`\`\`c
-const VkDescriptorBindingFlagsEXT flags =
-    VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
-    VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-    VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-    VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-\`\`\`
+VK2D avoids this completely: **every texture you load or create is placed into one giant global array** (\`gRenderer->texArrayDescriptorSet\`) at Set 2, Binding 2. That single array stays bound for the entire sprite batch, and each sprite simply passes its integer slot number (\`textureIndex = vk2dTextureGetID(tex)\`) to the shader!
 
-Some platforms (notably **MoltenVK** on macOS) report a high global descriptor indexing limit in \`VkPhysicalDeviceDescriptorIndexingProperties\`, yet reject a single variable-count descriptor set layout of 10,000 images when queried via \`vkGetDescriptorSetLayoutSupport\`. VK2D handles this gracefully at lines 774–793 of \`RendererMeta.c\`: if \`layoutSupport.supported\` is \`VK_FALSE\`, it repeatedly halves \`descriptorCount\` until \`vkGetDescriptorSetLayoutSupport\` succeeds, then clamps to \`variableSupport.maxVariableDescriptorCount\` and updates \`gRenderer->options.maxTextures\`.
+#### How MoltenVK (macOS) Limits Are Handled Automatically
 
-#### Slot Registration & Free-Slot Recycling (\`Texture.c\`)
+In \`_vk2dRendererCreateDescriptorSetLayouts()\` (\`RendererMeta.c\`), VK2D asks the Vulkan driver if it supports a variable-length descriptor array of \`options.maxTextures\` (default \`10,000\`) via \`vkGetDescriptorSetLayoutSupport\`. Some drivers (especially **MoltenVK** on macOS) support descriptor indexing but allow fewer textures in a single set than their global limit suggests. If \`layoutSupport.supported\` comes back false, VK2D halves the requested count in a loop (\`descriptorCount /= 2\`) until the driver accepts it, then clamps to the exact \`maxVariableDescriptorCount\` supported by the host.
 
-1. **Loading a Texture (\`_vk2dTextureAddToTextureArray\`):**
-   When a texture is created via \`vk2dTextureLoad()\`, \`vk2dTextureFrom()\`, \`vk2dTextureLoadFromImage()\`, or \`vk2dTextureCreate()\`, VK2D scans \`gRenderer->textureArray[0 .. maxTextures - 1]\` for the first slot where \`active == false\`. It stores that index atomically in \`tex->descriptorIndex\`, marks \`textureArray[spot].active = true\`, and immediately calls \`vkUpdateDescriptorSets\` on \`texArrayDescriptorSet\` with \`dstArrayElement = spot\`. Because the pool uses \`VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT\` and \`VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT\`, textures can be loaded or freed mid-frame without invalidating bound command buffers!
-2. **2D vs 3D Samplers (\`_vk2dRendererCreateSampler\`):**
-   * \`gRenderer->textureSampler\` (bound in \`samplerSet\`) enables **unnormalized texel coordinates** (\`unnormalizedCoordinates = VK_TRUE\`, \`VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER\`). Consequently, 2D shaders sample textures using pixel coordinates $(x \\in [0, w],\\, y \\in [0, h])$ directly rather than normalized $[0, 1]$ UVs!
-   * \`gRenderer->modelSampler\` (bound in \`modelSamplerSet\`) sets \`unnormalizedCoordinates = VK_FALSE\`, \`VK_SAMPLER_ADDRESS_MODE_REPEAT\`, and enables anisotropic filtering up to \`min(config.msaa, maxSamplerAnisotropy)\` when linear filtering is active.
-3. **Sub-Region Upload & Pixel Readback (\`vk2dTextureUpdateRegion\` & \`vk2dTextureCopyPixels\`):**
-   * \`vk2dImageUpdate()\` transitions a non-target texture from \`SHADER_READ_ONLY_OPTIMAL\` to \`TRANSFER_DST_OPTIMAL\`, copies a rectangular pixel region \`(x, y, w, h)\` from a staging buffer, and transitions it back.
-   * \`vk2dTextureCopyPixels()\` transitions any texture to \`TRANSFER_SRC_OPTIMAL\`, copies the image into a host-visible staging buffer via \`vkCmdCopyImageToBuffer\`, transitions back to \`SHADER_READ_ONLY_OPTIMAL\`, and converts the mapped bytes into RGBA order. Because offscreen render targets are created with \`VK_FORMAT_B8G8R8A8_SRGB\` while file-loaded images use \`VK_FORMAT_R8G8B8A8_SRGB\`, line 323 of \`Texture.c\` inspects \`vk2dTextureIsTarget(tex)\` and swaps the Red and Blue channels (\`const int red = vk2dTextureIsTarget(tex) ? 2 : 0;\`) so \`outPixels\` is always returned as standard RGBA!
+#### Loading, Updating & Reading Back Textures (\`Texture.c\` & \`Image.c\`)
+
+1. **Loading from Disk or Memory (\`vk2dTextureLoad\` / \`vk2dTextureFrom\`):**
+   Uses embedded \`stb_image.h\` (\`STBI_rgb_alpha\`) to decode PNG/JPEG/BMP bytes into 32-bit RGBA pixels, uploads them through a staging buffer into a \`VK_FORMAT_R8G8B8A8_SRGB\` GPU image, transitions the image to \`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\`, and calls \`_vk2dTextureAddToTextureArray(tex)\`. That function finds the first slot in \`gRenderer->textureArray[]\` with \`active == false\`, stores the slot index atomically in \`tex->descriptorIndex\`, and writes the \`VkImageView\` into \`texArrayDescriptorSet[spot]\`. When you later call \`vk2dTextureFree(tex)\`, it simply sets \`textureArray[val].active = false\` so the next loaded texture can reuse that slot!
+2. **Why 2D Textures Use Pixel Coordinates Instead of \`0.0 .. 1.0\` UVs:**
+   Look at \`vk2dInitSamplerCreateInfo()\` in \`Initializers.c\`: VK2D's 2D sampler (\`gRenderer->textureSampler\`) sets \`unnormalizedCoordinates = VK_TRUE\` and \`VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE\`. That means 2D shaders sample textures using **exact pixel coordinates** $(x \\in [0, \\text{width}],\\, y \\in [0, \\text{height}])$ rather than normalized $[0, 1]$ floats! Meanwhile, the 3D model sampler (\`gRenderer->modelSampler\`) sets \`unnormalizedCoordinates = VK_FALSE\` and \`VK_SAMPLER_ADDRESS_MODE_REPEAT\` for standard 3D UV mapping.
+3. **Streaming Live Pixels into a Texture (\`vk2dTextureUpdate\` & \`vk2dTextureUpdateRegion\`):**
+   If you have procedural pixel art, a dynamic minimap, or video frames that change on the CPU every frame (as demonstrated in \`examples/testing/main.c\`), you do not need to destroy and recreate the texture. Calling \`vk2dTextureUpdate(tex, pixels)\` or \`vk2dTextureUpdateRegion(tex, pixels, x, y, w, h)\` copies your RGBA buffer into a staging buffer, transitions the texture to \`TRANSFER_DST_OPTIMAL\`, copies just the \`(x, y, w, h)\` rectangle via \`vkCmdCopyBufferToImage\`, and transitions it back to \`SHADER_READ_ONLY_OPTIMAL\`. *(Note: Render-target textures created with \`vk2dTextureCreate\` cannot be updated with \`vk2dTextureUpdateRegion\`; draw to them with \`vk2dRendererSetTarget\` instead.)*
+4. **Reading GPU Pixels Back to CPU RAM (\`vk2dTextureCopyPixels\`):**
+   Need to save a screenshot or inspect a rendered texture on the CPU? \`vk2dTextureCopyPixels(tex, outPixels)\` copies the GPU image into a temporary host-visible staging buffer via \`vkCmdCopyImageToBuffer\`. Because offscreen render targets use the swapchain's \`VK_FORMAT_B8G8R8A8_SRGB\` format (Blue-Green-Red-Alpha) while normal loaded textures use \`VK_FORMAT_R8G8B8A8_SRGB\` (Red-Green-Blue-Alpha), \`vk2dTextureCopyPixels()\` checks \`vk2dTextureIsTarget(tex)\` and automatically swaps the Red and Blue channels for render targets so \`outPixels\` always comes back as clean RGBA bytes!
 `,
     mermaidCharts: [
       {
@@ -6566,7 +6575,7 @@ flowchart TD
 
     Req["vk2dDescConGetSet(descCon)"]:::call
     CheckNull{"descCon->pools == NULL?"}:::pool
-    AllocPool["vkCreateDescriptorPool (10 sets)<br/>poolsInUse++"]:::pool
+    AllocPool["vkCreateDescriptorPool (1,000 sets)<br/>poolsInUse++"]:::pool
     TryAlloc["vkAllocateDescriptorSets(pools[i])"]:::pool
     Result{"res == VK_SUCCESS?"}:::pool
     NextPool{"++i == poolsInUse?"}:::pool
@@ -6589,7 +6598,7 @@ flowchart TD
     title: "56. GPU Compute Sprite Batching & Instanced Pipeline",
     category: "graphics",
     summary:
-      "How VK2D batches 2D texture draws on the CPU, transforms 56-byte VK2DDrawCommands into 112-byte VK2DDrawInstances via spritebatch.comp on the GPU, and renders procedural 6-vertex quads in instanced.vert.",
+      "Why drawing thousands of 2D sprites in VK2D is so fast: collecting lightweight VK2DDrawCommands on the CPU, building 4x4 matrices on the GPU in spritebatch.comp, and drawing procedural 6-vertex quads with zero vertex buffers.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/Structs.h",
       "extern/Vulkan2d/VK2D/src/Renderer.c",
@@ -6599,62 +6608,69 @@ flowchart TD
       "extern/Vulkan2d/shaders/instanced.frag",
     ],
     content: `
-### Zero-VBO Compute-Driven Sprite Instancing
+### Why VK2D Uses a Compute Shader for Sprite Batching
 
-Most 2D renderers either build a 4-vertex/6-index quad on the CPU for every sprite (consuming CPU math and PCIe bandwidth) or upload a $4 \\times 4$ model matrix per instance from the CPU. **VK2D** offloads all 2D affine matrix construction to a **Vulkan compute shader** (\`shaders/spritebatch.comp\`) and eliminates vertex and index buffers entirely during sprite rendering!
+In a typical 2D game, 90% of what you draw every frame is sprites (characters, tiles, projectiles, particles, UI icons). If the CPU had to multiply translation, rotation, and scaling matrices for 10,000 sprites and build 4-corner vertex buffers every frame, the CPU would quickly become a bottleneck.
 
-#### 1. CPU Draw Command Accumulation (\`VK2DDrawCommand\`, 56 Bytes)
+VK2D turns sprite drawing into a **three-step assembly line** where the GPU does the heavy math:
+1. **CPU (\`Renderer.c\`):** Simply appends your raw drawing parameters (position, scale, rotation angle, pivot, UV rectangle, color tint, and texture ID) into a flat C array (\`gRenderer->drawCommands\`).
+2. **Compute Shader (\`shaders/spritebatch.comp\`):** Runs 64 threads per workgroup on the GPU to turn each compact \`VK2DDrawCommand\` into a full \`VK2DDrawInstance\` containing a $4 \\times 4$ model matrix.
+3. **Vertex & Fragment Shaders (\`instanced.vert\` & \`instanced.frag\`):** Draws all $N$ sprites in a **single \`vkCmdDraw\` call** with **zero vertex buffers bound**, generating the 6 corners of each sprite quad on the fly from \`gl_VertexIndex\`!
 
-When user code calls \`vk2dRendererDrawTexture()\` or submits a pre-built array via \`vk2dRendererAddBatch(commands, count)\`, VK2D first checks \`_vk2dRendererFlushBatchIfNeeded(gRenderer->instancedPipe)\` and then appends a compact 56-byte \`VK2DDrawCommand\` to \`gRenderer->drawCommands[gRenderer->drawCommandCount++]\`:
+#### Step 1: Collecting \`VK2DDrawCommand\` Structs on the CPU
+
+Whenever you call \`vk2dRendererDrawTexture()\` (or its shorthand macros \`vk2dDrawTexture\`, \`vk2dDrawTextureExt\`, \`vk2dDrawTexturePart\`), VK2D fills out a \`VK2DDrawCommand\` struct and copies it into \`gRenderer->drawCommands[gRenderer->drawCommandCount++]\`:
 
 \`\`\`c
 struct VK2DDrawCommand {
-    vec4 texturePos;       // [0..15]  xInTex, yInTex, texWidth, texHeight (in pixels)
-    vec4 colour;           // [16..31] RGBA colour multiplier (from gRenderer->colourBlend)
-    vec2 pos;              // [32..39] World X, Y position
-    vec2 origin;           // [40..47] Pivot X, Y for rotation (in pixels)
-    vec2 scale;            // [48..55] Horizontal & vertical scale (negative flips)
-    float rotation;        // [56..59] Rotation angle in radians
-    uint32_t textureIndex; // [60..63] Global bindless texture ID (vk2dTextureGetID)
+    vec4 texturePos;       // xInTex, yInTex, texWidth, texHeight (in pixels)
+    vec4 colour;           // RGBA colour tint (copied from gRenderer->colourBlend)
+    vec2 pos;              // X, Y position in the game world
+    vec2 origin;           // X, Y pivot point for rotation (in pixels)
+    vec2 scale;            // X, Y scale multiplier (negative values flip the sprite!)
+    float rotation;        // Rotation in radians
+    uint32_t textureIndex; // Bindless texture slot (from vk2dTextureGetID(tex))
 };
 \`\`\`
 
-*(Note: In C, \`VK2DDrawCommand\` is 64 bytes; in \`spritebatch.comp\` it is declared with \`std140\` layout where \`vec2\` pairs pack into 16-byte vec4 registers totaling 64 bytes per element.)*
+If you want to build sprite lists on your own worker threads, you can also fill an array of \`VK2DDrawCommand\` structs yourself and hand the whole array to \`vk2dRendererAddBatch(commands, count)\` on the main thread!
 
-#### 2. Automatic Batch Flush Conditions (\`vk2dRendererFlushSpriteBatch\`)
+#### Step 2: When Does a Sprite Batch Flush? (\`vk2dRendererFlushSpriteBatch\`)
 
-The maximum number of sprites in a single batch (\`limits.maxInstancedDraws\`) is determined at startup by \`options.vramPageSize\` (default 256,000 bytes) in \`_vk2dRendererCreateDescriptorBuffers()\`:
-$$\\text{maxInstancedDraws} = \\min\\!\\left(\\left\\lfloor\\frac{\\text{vramPageSize}}{\\text{sizeof(VK2DDrawCommand)}}\\right\\rfloor,\\; \\left\\lfloor\\frac{\\text{vramPageSize}}{\\text{sizeof(VK2DDrawInstance)}}\\right\\rfloor\\right) - 1 = \\left\\lfloor\\frac{256{,}000}{112}\\right\\rfloor - 1 = 2{,}284$$
+How many sprites fit in a single batch before VK2D has to flush it to the current 256 KB \`VK2DDescriptorBuffer\` page? During startup (\`_vk2dRendererCreateDescriptorBuffers\`), VK2D divides \`vramPageSize\` (default \`256,000\` bytes) by \`sizeof(VK2DDrawInstance)\` (\`112\` bytes) and subtracts 1:
+$$\\text{maxInstancedDraws} = \\left\\lfloor\\frac{256{,}000}{112}\\right\\rfloor - 1 = 2{,}284 \\text{ sprites per batch}$$
+*(Tip: If your game draws tens of thousands of sprites per frame and you want even larger batches, simply set \`options.vramPageSize\` to a larger value when calling \`vk2dRendererInit\`, just like \`examples/testing/main.c\` does!)*
 
-VK2D automatically flushes the active sprite batch whenever any of the following state transitions occur:
-* \`drawCommandCount\` reaches \`limits.maxInstancedDraws\` (\`2,284\` sprites per page).
-* The active pipeline or blend mode changes (\`vk2dPipelineGetID(pipe, blendMode) != currentBatchPipelineID\`), such as switching to \`vk2dRendererSetBlendMode()\`, \`vk2dRendererDrawShader()\`, \`vk2dRendererDrawPolygon()\`, \`vk2dRendererDrawGeometry()\`, \`vk2dRendererDrawShadows()\`, or \`vk2dRendererDrawModel()\`.
-* The render target changes (\`vk2dRendererSetTarget\`) or the target is cleared (\`vk2dRendererClear\` / \`vk2dRendererEmpty\`).
-* Camera routing changes (\`vk2dRendererSetTextureCamera\`, \`vk2dRendererLockCameras\`, \`vk2dRendererUnlockCameras\`, \`vk2dCameraSetState\`).
-* The frame ends (\`vk2dRendererEndFrame\`).
+VK2D automatically calls \`vk2dRendererFlushSpriteBatch()\` whenever any of these events happen:
+* **Batch Full:** \`drawCommandCount\` reaches \`limits.maxInstancedDraws\` (\`2,284\` by default).
+* **Pipeline or Blend Mode Change:** You switch from drawing sprites to drawing shapes (\`vk2dRendererDrawPolygon\`, \`vk2dRendererDrawRectangle\`), custom shaders (\`vk2dRendererDrawShader\`), shadows (\`vk2dRendererDrawShadows\`), 3D models (\`vk2dRendererDrawModel\`), or you change the blend mode (\`vk2dRendererSetBlendMode\`).
+* **Render Target Switch or Clear:** You call \`vk2dRendererSetTarget()\`, \`vk2dRendererClear()\`, or \`vk2dRendererEmpty()\`.
+* **Camera State Change:** You lock/unlock cameras (\`vk2dRendererLockCameras\` / \`UnlockCameras\`), toggle \`vk2dRendererSetTextureCamera()\`, or enable/disable a camera (\`vk2dCameraSetState\`).
+* **End of Frame:** \`vk2dRendererPresent()\` flushes any remaining sprites before submitting the frame.
 
-#### 3. Parallel Matrix Assembly in \`shaders/spritebatch.comp\`
+*(Notice what is **not** on that list: switching textures or changing \`vk2dRendererSetColourMod()\`! Because every \`VK2DDrawCommand\` carries its own \`textureIndex\` and \`colour\` vector, you can draw 2,000 sprites from 500 different PNG files with 2,000 different color tints in **one single draw call**!)*
 
-When \`vk2dRendererFlushSpriteBatch()\` executes:
-1. It copies \`drawCommandCount * sizeof(VK2DDrawCommand)\` into \`descriptorBuffers[currentFrame]\` (returning \`drawCommands\` buffer + offset).
-2. It reserves \`drawCommandCount * sizeof(VK2DDrawInstance)\` bytes in \`descriptorBuffers[currentFrame]\` (returning \`drawInstances\` buffer + offset, where \`sizeof(VK2DDrawInstance) == 112\` bytes).
-3. It allocates a compute descriptor set from \`descConCompute[currentFrame]\` (binding 0 = \`drawCommands\`, binding 1 = \`drawInstances\`) and a vertex storage buffer descriptor set from \`descConSBO[currentFrame]\` (binding 3 = \`drawInstances\`).
-4. On \`computeCommandBuffer\`, it pushes \`drawCount\` and dispatches workgroups of 64 threads (\`local_size_x = 64\`):
+#### Step 3: Building $4 \\times 4$ Matrices in \`shaders/spritebatch.comp\`
+
+When \`vk2dRendererFlushSpriteBatch()\` runs:
+1. It copies \`drawCommandCount\` \`VK2DDrawCommand\` items into the current frame's \`VK2DDescriptorBuffer\` (getting back the GPU buffer and offset for Binding 0).
+2. It reserves \`drawCommandCount * sizeof(VK2DDrawInstance)\` bytes in the \`VK2DDescriptorBuffer\` for the compute output (Binding 1 for compute, and Set 3 Binding 3 for the vertex shader).
+3. On \`computeCommandBuffer\`, it pushes \`drawCount\` and dispatches enough 64-thread workgroups to cover every sprite in the batch:
    \`\`\`c
    vkCmdDispatch(computeBuf, (drawCount / 64) + 1, 1, 1);
    \`\`\`
 
-Inside \`shaders/spritebatch.comp\`, each invocation \`gID = gl_GlobalInvocationID.x\` (\`gID < ubo.drawCount\`) constructs the $4 \\times 4$ model matrix around the scaled rotation pivot and writes \`DrawInstance\`:
+In \`shaders/spritebatch.comp\`, thread \`gID = gl_GlobalInvocationID.x\` reads \`drawCommandsIn.draws[gID]\`, builds the $4 \\times 4$ model matrix that scales the sprite and rotates it around \`origin\`, and writes \`drawInstancesOut.draws[gID]\`:
 $$M = T(\\text{pos.x} + \\text{origin.x}\\cdot \\text{scale.x},\\; \\text{pos.y} + \\text{origin.y}\\cdot \\text{scale.y}) \\cdot R_z(-\\theta) \\cdot T(-\\text{origin.x}\\cdot \\text{scale.x},\\; -\\text{origin.y}\\cdot \\text{scale.y}) \\cdot S(\\text{scale.x},\\; \\text{scale.y})$$
 
-#### 4. Procedural Quad Synthesis in \`shaders/instanced.vert\` & \`instanced.frag\`
+#### Step 4: Drawing Procedural Quads in \`instanced.vert\` & \`instanced.frag\`
 
-Immediately after recording the compute dispatch, \`vk2dRendererFlushSpriteBatch()\` binds \`instancedPipe\` and the 4 descriptor sets (\`[0] = UBO\`, \`[1] = samplerSet\`, \`[2] = texArrayDescriptorSet\`, \`[3] = vertexShaderSBOSet\`) on \`commandBuffer\`. For each active 2D camera, it pushes \`cameraIndex\` and issues a **single non-indexed draw call with zero bound vertex buffers**:
+Right after queueing the compute dispatch, \`vk2dRendererFlushSpriteBatch()\` binds \`instancedPipe\` on \`commandBuffer\` along with the 4 descriptor sets (\`[0] = UBO\`, \`[1] = samplerSet\`, \`[2] = texArrayDescriptorSet\`, \`[3] = vertexShaderSBOSet\`). Then, for each active 2D camera, it pushes \`cameraIndex\` and records:
 \`\`\`c
 vkCmdDraw(buf, 6 * gRenderer->drawCommandCount, 1, 0, 0);
 \`\`\`
 
-Notice how \`Util.c\` configures \`_vk2dGetInstanceVertexInputState()\` to return an **empty** \`VkPipelineVertexInputStateCreateInfo\` (line 62 of \`Util.c\`). Instead of fetching vertex attributes from a VBO, \`shaders/instanced.vert\` derives both the sprite index and the quad corner directly from \`gl_VertexIndex\`:
+Why \`6 * drawCommandCount\` vertices with \`instanceCount = 1\` and **no vertex buffer**? Look at \`shaders/instanced.vert\`: the shader has a constant 6-vertex unit square (\`vertices[0..5]\`) baked right into its code! Using integer division and modulo on \`gl_VertexIndex\`, the vertex shader knows which sprite (\`instance = gl_VertexIndex / 6\`) and which triangle corner (\`vertexIndex = gl_VertexIndex % 6\`) it is currently drawing:
 
 \`\`\`glsl
 int instance = gl_VertexIndex / 6;
@@ -6666,11 +6682,7 @@ fragTexCoord.x = objectBuffer.objects[instance].texturePos.x + (texCoords[vertex
 fragTexCoord.y = objectBuffer.objects[instance].texturePos.y + (texCoords[vertexIndex].y * objectBuffer.objects[instance].texturePos.w);
 \`\`\`
 
-Finally, \`shaders/instanced.frag\` indexes into the bindless texture array using \`nonuniformEXT(instanceTextureIndex)\` and multiplies the sampled texel by \`fragColour\`:
-\`\`\`glsl
-vec4 colour = texture(sampler2D(tex[nonuniformEXT(instanceTextureIndex)], texSampler), fragTexCoord);
-outColor = colour * fragColour;
-\`\`\`
+Finally, \`shaders/instanced.frag\` looks up the sprite's texture inside the global bindless array \`tex[nonuniformEXT(instanceTextureIndex)]\` using pixel coordinates \`fragTexCoord\` and multiplies the pixel color by \`fragColour\`.
 `,
     mermaidCharts: [
       {
@@ -6700,7 +6712,7 @@ flowchart TD
     title: "57. Graphics Pipelines, 4 Blend Modes & Runtime Slang Compiler",
     category: "graphics",
     summary:
-      "How VK2DPipeline pre-builds 4 blend mode variants per shader, embedded SPIR-V blobs (Blobs.h), and runtime Slang shader reflection and SPIR-V compilation in ShaderCompiler.cpp.",
+      "How VK2D pre-builds 4 blend mode variations per pipeline, bakes built-in GLSL shaders into Blobs.h, and compiles custom Slang pixel shaders at runtime with automatic reflection.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/Pipeline.h",
       "extern/Vulkan2d/VK2D/include/VK2D/BlendModes.h",
@@ -6713,50 +6725,82 @@ flowchart TD
       "extern/Vulkan2d/shaders/usershader.vert",
     ],
     content: `
-### Pipeline Architecture & Pre-Baked Blend Mode Permutations (\`Pipeline.c\`)
+### Why Every \`VK2DPipeline\` Holds Four \`VkPipeline\` Handles (\`Pipeline.c\`)
 
-In Vulkan, color blending equations are baked into immutable \`VkPipeline\` objects unless dynamic state extensions are used. \`VK2DPipeline\` (\`struct VK2DPipeline_t\`) solves this cleanly by compiling **four \`VkPipeline\` handles inside every \`VK2DPipeline\`** (\`pipe->pipes[VK2D_BLEND_MODE_MAX]\`), one for each entry in \`VK2D_BLEND_MODES[]\` (\`VK2D/include/VK2D/BlendModes.h\`):
+In Vulkan, once a graphics pipeline (\`VkPipeline\`) is created, its color blending formula is locked in. If a game wants to switch from normal alpha blending to additive blending for a glowing fireball, it has to bind a different \`VkPipeline\`.
 
-| Enum (\`VK2DBlendMode\`) | Color Blend Equation | Alpha Blend Equation | Primary Use Case |
+To make switching blend modes instant, \`vk2dPipelineCreate()\` automatically builds **four \`VkPipeline\` variations** inside every \`VK2DPipeline\` struct (\`pipe->pipes[0..3]\`), using the table in \`VK2D/include/VK2D/BlendModes.h\`:
+
+| Blend Mode (\`VK2DBlendMode\`) | Color Formula | Alpha Formula | What It Is Used For |
 | --- | --- | --- | --- |
-| \`VK2D_BLEND_MODE_BLEND (0)\` | $C_{\\text{src}} \\alpha_{\\text{src}} + C_{\\text{dst}}(1 - \\alpha_{\\text{src}})$ | $\\alpha_{\\text{src}}^2 + \\alpha_{\\text{dst}}(1 - \\alpha_{\\text{src}})$ | Standard alpha-blended sprites, shapes, and UI. |
-| \`VK2D_BLEND_MODE_NONE (1)\` | \`blendEnable = VK_FALSE\` ($C_{\\text{src}}$ overwrites $C_{\\text{dst}}$) | $\\alpha_{\\text{src}}$ overwrites $\\alpha_{\\text{dst}}$ | Clearing render targets to transparent (\`vk2dRendererEmpty\`) or opaque blits. |
-| \`VK2D_BLEND_MODE_ADD (2)\` | $C_{\\text{src}} \\alpha_{\\text{src}} + C_{\\text{dst}} \\cdot 1$ (\`OP_ADD\`) | $\\max(\\alpha_{\\text{src}} \\alpha_{\\text{dst}},\\, \\alpha_{\\text{dst}}^2)$ (\`OP_MAX\`) | Additive point lightmaps, particle glows, and energy beams. |
-| \`VK2D_BLEND_MODE_SUBTRACT (3)\` | $\\max(C_{\\text{src}} \\alpha_{\\text{dst}},\\, C_{\\text{dst}} \\alpha_{\\text{dst}})$ | $C_{\\text{dst}} \\alpha_{\\text{dst}} - C_{\\text{src}} \\alpha_{\\text{src}}$ (\`REVERSE_SUBTRACT\`) | Subtractive masks and darkening effects. |
+| \`VK2D_BLEND_MODE_BLEND (0)\` | $C_{\\text{src}} \\alpha_{\\text{src}} + C_{\\text{dst}}(1 - \\alpha_{\\text{src}})$ | $\\alpha_{\\text{src}}^2 + \\alpha_{\\text{dst}}(1 - \\alpha_{\\text{src}})$ | Default mode for almost everything (transparent sprites, shapes, UI). |
+| \`VK2D_BLEND_MODE_NONE (1)\` | Overwrites destination ($C_{\\text{src}}$) | Overwrites destination ($\\alpha_{\\text{src}}$) | Wiping a texture to transparent (\`vk2dRendererEmpty\`) or raw pixel copies. |
+| \`VK2D_BLEND_MODE_ADD (2)\` | $C_{\\text{src}} \\alpha_{\\text{src}} + C_{\\text{dst}}$ | $\\max(\\alpha_{\\text{src}} \\alpha_{\\text{dst}},\\, \\alpha_{\\text{dst}}^2)$ | Additive lightmaps, torches, lasers, and glowing particles. |
+| \`VK2D_BLEND_MODE_SUBTRACT (3)\` | $\\max(C_{\\text{src}} \\alpha_{\\text{dst}},\\, C_{\\text{dst}} \\alpha_{\\text{dst}})$ | $C_{\\text{dst}} \\alpha_{\\text{dst}} - C_{\\text{src}} \\alpha_{\\text{src}}$ | Carving dark shadows out of a light texture (used in \`examples/shadowsglsl\`). |
 
-Each \`VK2DPipeline\` is assigned a unique base integer ID (\`pipe->id = gID; gID += 0x10;\`, starting at \`0x10 = 16\`). Calling \`vk2dPipelineGetID(pipe, blendMode)\` returns \`pipe->id + blendMode\`. Because \`VK2D_BLEND_MODE_MAX = 4 < 16\`, \`pipe->id + blendMode\` produces a globally unique 32-bit integer for every \`(pipeline, blendMode)\` pair, allowing \`_vk2dRendererFlushBatchIfNeeded()\` to detect both shader switches and blend mode switches with a single integer comparison!
+How does VK2D know if a pipeline or blend mode changed with just one integer check? Every time a \`VK2DPipeline\` is created, it gets a base ID that steps by \`16\` (\`0x10, 0x20, 0x30, ...\`). Calling \`vk2dPipelineGetID(pipe, blendMode)\` returns \`pipe->id + blendMode\`. Because there are only 4 blend modes (\`0..3\`), adding the blend mode into the bottom bits gives every \`(pipeline, blendMode)\` combination a unique ID!
 
-All graphics pipelines enable three dynamic states (\`VK_DYNAMIC_STATE_VIEWPORT\`, \`VK_DYNAMIC_STATE_SCISSOR\`, and \`VK_DYNAMIC_STATE_LINE_WIDTH\`) and configure push constant ranges according to \`VK2DPipelineType\`:
+#### The Seven Built-In Pipelines
 
-| \`VK2DPipelineType\` | Built-In Pipeline Handle(s) | Push Constant Struct | Size | Stage Flags | Rasterization / Depth State |
-| --- | --- | --- | ---: | --- | --- |
-| \`DEFAULT (0)\` | \`primFillPipe\`, \`primLinePipe\` | \`VK2DPushBuffer\` | 84 B | \`VERT \\| FRAG\` | 2D no depth test; triangle list (fill) or line strip (line). |
-| \`3D (1)\` | \`modelPipe\`, \`wireframePipe\` | \`VK2D3DPushBuffer\` | 88 B | \`VERT \\| FRAG\` | Back-face culling (\`VK_CULL_MODE_BACK_BIT\`), depth test & write enabled (\`VK_COMPARE_OP_LESS\`). |
-| \`INSTANCING (2)\` | \`instancedPipe\` | \`VK2DInstancedPushBuffer\` | 4 B | \`VERTEX_BIT\` | 6-vertex procedural quads per instance; 4 descriptor sets bound. |
-| \`SHADOWS (3)\` | \`shadowsPipe\` | \`VK2DShadowsPushBuffer\` | 100 B | \`VERT \\| FRAG\` | \`VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST\`; extrudes shadow edges in vertex shader. |
-| \`USER_SHADER (4)\` | \`customShaders[i]->pipe\` | \`VK2DShaderPushBuffer\` | 112 B | \`VERT \\| FRAG\` | Pairs built-in \`VK2DVertUsershader\` with custom SPIR-V or Slang fragment shader. |
+During startup (\`_vk2dRendererCreatePipelines\`), VK2D builds 6 graphics pipelines and 1 compute pipeline:
 
-### Pre-Compiled Built-In Shaders (\`shaders/genblobs.py\` $\\to$ \`Blobs.h\`)
+| Pipeline Handle | \`VK2DPipelineType\` | Push Constant Struct | Size | What It Draws |
+| --- | --- | --- | ---: | --- |
+| \`primFillPipe\` | \`DEFAULT (0)\` | \`VK2DPushBuffer\` | 84 B | Filled 2D rectangles, circles, and triangulated polygons. |
+| \`primLinePipe\` | \`DEFAULT (0)\` | \`VK2DPushBuffer\` | 84 B | 2D outlines and lines (\`VK_PRIMITIVE_TOPOLOGY_LINE_STRIP\`). |
+| \`modelPipe\` | \`3D (1)\` | \`VK2D3DPushBuffer\` | 88 B | Textured 3D \`.obj\` models with depth testing and back-face culling. |
+| \`wireframePipe\` | \`3D (1)\` | \`VK2D3DPushBuffer\` | 88 B | 3D wireframe meshes (\`VK_POLYGON_MODE_LINE\`). |
+| \`instancedPipe\` | \`INSTANCING (2)\` | \`VK2DInstancedPushBuffer\` | 4 B | All batched 2D sprites (reads \`DrawInstance\` SSBO at Set 3). |
+| \`shadowsPipe\` | \`SHADOWS (3)\` | \`VK2DShadowsPushBuffer\` | 100 B | Hardware-accelerated 2D shadow volumes. |
+| \`spriteBatchPipe\` | *(Compute)* | \`VK2DComputePushBuffer\` | 4 B | Runs \`spritebatch.comp\` to compute $4 \\times 4$ sprite matrices. |
 
-All built-in GLSL 450 shaders in \`extern/Vulkan2d/shaders/\` (\`colour.vert/frag\`, \`instanced.vert/frag\`, \`model.vert/frag\`, \`shadows.vert/frag\`, \`spritebatch.comp\`, and \`usershader.vert\`) are compiled offline via \`glslc\` using \`shaders/genblobs.py\` into C byte arrays stored in \`VK2D/include/VK2D/Blobs.h\` (such as \`VK2DVertColour\`, \`VK2DCompSpritebatch\`, \`VK2DVertUsershader\`). This guarantees that VK2D boots with zero external shader file dependencies.
+### Built-In Shaders Compiled into C Arrays (\`shaders/genblobs.py\` $\\to$ \`Blobs.h\`)
 
-### Custom Shaders & The Runtime Slang Compiler (\`Shader.c\` & \`ShaderCompiler.cpp\`)
+You never have to ship a \`shaders/\` folder alongside your game executable for VK2D's built-in pipelines. The Python script \`extern/Vulkan2d/shaders/genblobs.py\` runs \`glslc\` on the GLSL 450 files in \`shaders/\` and converts the compiled SPIR-V binaries into C \`unsigned char[]\` hex arrays inside \`VK2D/include/VK2D/Blobs.h\` (\`VK2DVertColour\`, \`VK2DFragInstanced\`, \`VK2DCompSpritebatch\`, \`VK2DVertUsershader\`, etc.).
 
-VK2D supports two paths for custom texture shaders:
-1. **Pre-Compiled SPIR-V (\`vk2dShaderFrom\`):** Accepts raw vertex and fragment SPIR-V byte buffers plus \`uniformBufferSize\` (which must be a multiple of 4 and $\\le \\text{limits.maxShaderBufferSize}$).
-2. **Runtime Slang Compilation (\`vk2dSlangFrom\` / \`vk2dSlangLoad\`):** Isolated in \`VK2D/src/ShaderCompiler.cpp\` (the only C++ translation unit in \`VK2D/src/\`, wrapped in \`extern "C"\`).
+### Writing Custom Slang Pixel Shaders (\`Shader.c\` & \`ShaderCompiler.cpp\`)
 
-When \`_vk2dShaderCompile(slangSource, size, &compiledShaders)\` runs:
-1. It creates a Slang local session targeting \`SLANG_SPIRV\` with profile \`glsl_450\`, loads the user source blob, and locates the fragment entry point named \`PixelShader\`.
-2. **Automatic Reflection & Strict Layout Validation:** Before linking, VK2D inspects \`program->getLayout()->getGlobalParamsVarLayout()\` and validates every global resource declared in the Slang shader:
-   * \`push\`: Must have type \`ConstantBuffer<Push, DefaultPushConstantDataLayout>\` and size **exactly 112 bytes** (matching \`struct VK2DShaderPushBuffer\`: \`cameraIndex\`, \`textureIndex\`, \`_padding\`, \`texturePos\`, \`colour\`, \`model\`).
-   * \`sampler\`: Must have type \`SamplerState\` at \`[[vk::binding(1, 1)]]\` (Set 1, Binding 1).
-   * \`textures\`: Must have type \`Texture2D<vector<float,4>>[]\` at \`[[vk::binding(2, 2)]]\` (Set 2, Binding 2).
-   * **Optional User Uniform Buffer:** If a field is bound at \`[[vk::binding(3, 3)]]\` (Set 3, Binding 3), VK2D verifies it is a \`ConstantBuffer\` and automatically extracts its byte size into \`compiledShaders->userDataSize = fieldTypeLayout->getElementTypeLayout()->getSize()\`!
-   * Any missing required resource or unrecognized binding logs a descriptive error and aborts compilation.
-3. It links the Slang program, extracts the compiled fragment SPIR-V (\`getEntryPointCode(0, 0, ...)\`), pairs it with the built-in 6-vertex quad vertex shader \`VK2DVertUsershader\` (\`shaders/usershader.vert\`), and registers the resulting \`VK2DShader\` in \`gRenderer->customShaders[]\` so its pipeline is automatically rebuilt if MSAA settings change on swapchain reset.
+Want to write a custom pixel shader for water ripples, CRT scanlines, or post-processing? VK2D embeds the **Slang** compiler (\`VK2D/src/ShaderCompiler.cpp\`) so you can load human-readable \`.slang\` files directly via \`vk2dSlangLoad(filename)\` or \`vk2dSlangFrom(sourceString, length)\`! *(If your project does not need custom shaders and you want faster CMake builds, you can pass \`-DVK2D_DISABLE_SHADERS=ON\` to skip building Slang.)*
 
-When \`vk2dRendererDrawShader(shader, data, tex, ...)\` is called, if \`shader->uniformSize > 0\`, VK2D copies \`data\` into the current frame's \`VK2DDescriptorBuffer\`, allocates a fresh \`VkDescriptorSet\` for Set 3 from \`descConShaders[currentFrame]\`, updates Binding 3 to point to that slice of the device buffer, and records \`vkCmdDraw(buf, 6, 1, 0, 0)\`.
+When you compile a Slang shader in VK2D, you only write the **Pixel (Fragment) Shader** function named \`PixelShader(float2 uv)\`. VK2D automatically pairs your pixel shader with its built-in 6-vertex quad vertex shader (\`shaders/usershader.vert\`, stored in \`VK2DVertUsershader\`).
+
+#### Automatic Shader Reflection & Validation
+
+Before linking your Slang shader into SPIR-V, \`_vk2dShaderCompile()\` inspects your shader's global variables using Slang's reflection API (\`program->getLayout()->getGlobalParamsVarLayout()\`) and checks three required bindings plus one optional uniform block:
+
+1. **Required Push Constants (\`push\`):** Must be named \`push\`, declared as \`[[vk::push_constant]] Push push;\`, and have an exact size of **112 bytes** (matching \`VK2DShaderPushBuffer\`).
+2. **Required Sampler (\`sampler\`):** Must be named \`sampler\` and bound at Set 1, Binding 1 (\`[[vk::binding(1, 1)]] SamplerState sampler;\`).
+3. **Required Texture Array (\`textures\`):** Must be named \`textures\` and bound at Set 2, Binding 2 (\`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\`).
+4. **Optional Custom Uniform Data (\`[[vk::binding(3, 3)]]\`):** If you declare a \`ConstantBuffer<MyData>\` at Set 3, Binding 3, VK2D automatically reads its byte size from Slang reflection (\`userDataSize\`) so you never have to pass \`sizeof(MyData)\` manually!
+
+Here is a complete, ready-to-use Slang shader template (from \`docs/Shaders.md\`):
+
+\`\`\`hlsl
+struct Push {
+    int cameraIndex;
+    uint textureIndex;
+    float4 texturePos; // x, y, w, h in pixels
+    float4 colour;     // current renderer colourMod
+    float4x4 model;
+};
+[[vk::push_constant]] Push push;
+
+[[vk::binding(1, 1)]] SamplerState sampler;
+[[vk::binding(2, 2)]] Texture2D<float4> textures[];
+
+struct UserData {
+    float time;
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 texColor = textures[push.textureIndex].Sample(sampler, uv);
+    return push.colour * texColor;
+}
+\`\`\`
+
+*(Alignment Tip: In Slang/Vulkan constant buffers, \`float4\` / \`vec4\` fields align to 16-byte boundaries. If your C struct has a \`float time;\` followed by a \`vec4 colour;\`, remember to put \`float _pad[3];\` between them on the C side so the C struct matches the shader's 16-byte alignment!)*
 `,
     mermaidCharts: [
       {
@@ -6783,7 +6827,7 @@ flowchart TD
     title: "58. Offscreen Render Targets, 3 RenderPasses & 10-Camera UBO System",
     category: "graphics",
     summary:
-      "Why VK2D maintains three distinct VkRenderPass objects, how vk2dRendererSetTarget transitions image layouts mid-frame, and how up to 10 simultaneous 2D/3D cameras are evaluated.",
+      "Why VK2D keeps three separate VkRenderPass objects, how switching render targets works mid-frame, how UNIT_VIEW clears textures, and how up to 10 cameras render split-screen or 3D views.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/Camera.h",
       "extern/Vulkan2d/VK2D/include/VK2D/Texture.h",
@@ -6793,65 +6837,65 @@ flowchart TD
       "extern/Vulkan2d/VK2D/src/RendererMeta.c",
     ],
     content: `
-### Why VK2D Creates Three \`VkRenderPass\` Objects (\`RendererMeta.c\`)
+### Why VK2D Needs Three Separate \`VkRenderPass\` Objects (\`RendererMeta.c\`)
 
-A key design requirement of a 2D game renderer is allowing the user to switch between drawing to the window swapchain (\`VK2D_TARGET_SCREEN\`) and drawing to offscreen render-target textures (\`vk2dTextureCreate(w, h)\`, such as lightmaps or virtual pixel canvases) at any point during the frame without losing previously drawn pixels.
+In a 2D game, you often start drawing to the screen, switch mid-frame to an offscreen texture (to draw a lightmap or a low-resolution retro canvas), and then switch back to the screen to composite everything together.
 
-In \`_vk2dRendererCreateRenderPass()\`, VK2D constructs **three** compatible \`VkRenderPass\` objects (each with 2 attachments when MSAA is \`1x\`—Color + Depth—or 3 attachments when MSAA $> 1x$—Multisampled Color + Multisampled Depth + 1x Resolve):
+In Vulkan, a \`VkRenderPass\` specifies what happens to the pixels of an image at the exact moment the pass begins (\`loadOp\`). If VK2D only had one \`VkRenderPass\` with \`VK_ATTACHMENT_LOAD_OP_CLEAR\`, switching back to the screen after drawing a lightmap would **wipe everything you drew to the screen earlier in the frame**!
 
-| RenderPass Handle | Color \`loadOp\` | Depth \`loadOp\` | Color \`initialLayout\` $\\to$ \`finalLayout\` (1x MSAA) | When It Is Used |
-| --- | --- | --- | --- | --- |
-| \`renderPass\` | \`LOAD_OP_CLEAR\` | \`LOAD_OP_CLEAR\` | \`UNDEFINED\` $\\to$ \`PRESENT_SRC_KHR\` | Started automatically in \`vk2dRendererStartFrame()\` to clear the swapchain backbuffer and depth attachment. |
-| \`externalTargetRenderPass\` | \`LOAD_OP_LOAD\` | \`LOAD_OP_CLEAR\` | \`COLOR_ATTACHMENT_OPTIMAL\` $\\to$ \`COLOR_ATTACHMENT_OPTIMAL\` | Started when \`vk2dRendererSetTarget(tex)\` binds an offscreen \`VK2DTexture\`. Preserves existing texture pixels unless \`vk2dRendererClear()\` or \`vk2dRendererEmpty()\` is called. |
-| \`midFrameSwapRenderPass\` | \`LOAD_OP_LOAD\` | \`LOAD_OP_LOAD\` | \`PRESENT_SRC_KHR\` $\\to$ \`PRESENT_SRC_KHR\` | Started when \`vk2dRendererSetTarget(VK2D_TARGET_SCREEN)\` returns from an offscreen texture back to the swapchain mid-frame, preserving both color and depth! |
+To prevent this, \`_vk2dRendererCreateRenderPass()\` creates **three** compatible render passes:
 
-### Mid-Frame Target Switching & Image Layout Transitions (\`vk2dRendererSetTarget\`)
+| RenderPass Name | Color \`loadOp\` | Depth \`loadOp\` | What Happens When It Starts |
+| --- | --- | --- | --- |
+| **1. \`renderPass\`** | \`LOAD_OP_CLEAR\` | \`LOAD_OP_CLEAR\` | Used once at the very start of the frame (\`vk2dRendererStartFrame\`). Wipes the screen backbuffer and depth buffer clean. |
+| **2. \`externalTargetRenderPass\`** | \`LOAD_OP_LOAD\` | \`LOAD_OP_CLEAR\` | Used when \`vk2dRendererSetTarget(tex)\` switches to an offscreen texture. **Keeps** whatever pixels were already in that texture from earlier passes or frames! |
+| **3. \`midFrameSwapRenderPass\`** | \`LOAD_OP_LOAD\` | \`LOAD_OP_LOAD\` | Used when \`vk2dRendererSetTarget(VK2D_TARGET_SCREEN)\` returns to the screen mid-frame. **Keeps** both the screen colors and depth buffer intact! |
 
-Offscreen textures created via \`vk2dTextureCreate(w, h)\` own:
-* \`img\`: A \`VK_FORMAT_B8G8R8A8_SRGB\` image initialized in \`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\`.
-* \`sampledImg\` (when MSAA $> 1x$) and \`depthBuffer\`.
-* \`fbo\`: A \`VkFramebuffer\` compatible with \`externalTargetRenderPass\`.
-* \`ubo\` and \`uboSet\`: A dedicated \`VK2DUniformBufferObject\` initialized with a $w \\times h$ pixel-space orthographic matrix at camera slot 0.
+### Switching Render Targets Mid-Frame (\`vk2dRendererSetTarget\`)
 
-When \`vk2dRendererSetTarget(target)\` is called in \`Renderer.c\`:
-1. **Flush Active Batch:** Calls \`vk2dRendererFlushSpriteBatch()\` so all queued draws for the previous target are recorded before ending the pass.
-2. **Direct Texture-to-Texture Guard:** If switching directly from Texture A to Texture B (\`target != VK2D_TARGET_SCREEN && gRenderer->target != VK2D_TARGET_SCREEN\`), VK2D recursively calls \`vk2dRendererSetTarget(VK2D_TARGET_SCREEN)\` first so Texture A is properly transitioned back to \`SHADER_READ_ONLY_OPTIMAL\`.
-3. **End Current Render Pass:** Calls \`vkCmdEndRenderPass(commandBuffer)\`.
-4. **Insert Image Memory Barrier (\`_vk2dTransitionImageLayout\`):**
-   * When leaving an offscreen texture for the screen, transitions \`gRenderer->targetImage\` from \`VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL\` (\`COLOR_ATTACHMENT_WRITE\`) to \`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\` (\`SHADER_READ\` in \`FRAGMENT_SHADER_BIT\`) so the texture can be sampled immediately!
-   * When entering an offscreen texture \`target\`, transitions \`target->img->img\` from \`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\` to \`VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL\`.
-5. **Begin New Render Pass & Reset Cache:** Starts \`midFrameSwapRenderPass\` (for screen) or \`externalTargetRenderPass\` (for texture) and calls \`_vk2dRendererResetBoundPointers()\`.
+When you create an offscreen render-target texture with \`vk2dTextureCreate(w, h)\`, VK2D allocates:
+* \`img\`: The color image (\`VK_FORMAT_B8G8R8A8_SRGB\`), starting in \`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL\`.
+* \`sampledImg\` (if MSAA is enabled) and \`depthBuffer\` (so 3D models can even be drawn into offscreen textures!).
+* \`fbo\`: The \`VkFramebuffer\` tying those images together.
+* \`ubo\` & \`uboSet\`: A built-in camera UBO matching the texture's $w \\times h$ pixel dimensions.
 
-*(Note: How does \`vk2dRendererClear()\` clear an offscreen texture when \`externalTargetRenderPass\` uses \`VK_ATTACHMENT_LOAD_OP_LOAD\`? Look at lines 833–860 of \`Renderer.c\`: \`vk2dRendererClear()\` draws \`gRenderer->unitSquare\` using \`primFillPipe\` with \`cameraIndex = VK2D_INVALID_CAMERA (-1)\`! In \`shaders/colour.vert\`, \`cameraIndex == -1\` selects the hardcoded \`UNIT_VIEW\` matrix that maps $[0, 1]^2$ directly to Vulkan normalized device coordinates $[-1, 1]^2$, covering the entire target with the current \`colourBlend\`. \`vk2dRendererEmpty()\` temporarily sets \`colourBlend = {0,0,0,0}\` and \`VK2D_BLEND_MODE_NONE\` and calls \`vk2dRendererClear()\` to wipe an offscreen texture to $100\\%$ transparent!)*
+When you call \`vk2dRendererSetTarget(target)\`:
+1. **Flush Sprites:** Calls \`vk2dRendererFlushSpriteBatch()\` so any sprites waiting in the batch are drawn to the old target before leaving it.
+2. **Texture-to-Texture Safety:** If you are currently targeting Texture A and call \`vk2dRendererSetTarget(TextureB)\`, VK2D first switches back to \`VK2D_TARGET_SCREEN\` so Texture A gets transitioned back to shader-readable mode cleanly.
+3. **End Current Pass & Transition Layout:** Ends the current render pass (\`vkCmdEndRenderPass\`) and records a pipeline image barrier (\`_vk2dTransitionImageLayout\`):
+   * If entering a texture target: transitions \`target->img->img\` from \`SHADER_READ_ONLY_OPTIMAL\` to \`COLOR_ATTACHMENT_OPTIMAL\` so the GPU can draw into it.
+   * If returning to \`VK2D_TARGET_SCREEN\`: transitions the texture you just finished drawing from \`COLOR_ATTACHMENT_OPTIMAL\` back to \`SHADER_READ_ONLY_OPTIMAL\` so shaders can sample it right away!
+4. **Begin New Pass:** Starts \`externalTargetRenderPass\` (for a texture) or \`midFrameSwapRenderPass\` (for the screen) and resets cached pipeline pointers.
 
-### The 10-Camera UBO Array & Multi-Viewport Loop (\`Camera.c\` & \`Math.h\`)
+#### How \`vk2dRendererClear()\` and \`vk2dRendererEmpty()\` Work Inside a \`LOAD_OP_LOAD\` Pass
 
-VK2D supports up to \`VK2D_MAX_CAMERAS = 10\` simultaneous cameras in \`gRenderer->cameras[0..9]\`. Camera \`0\` (\`VK2D_DEFAULT_CAMERA\`) is created automatically at startup and cannot be deleted. Additional cameras (for split-screen, minimaps, or 3D overlays) are created via \`vk2dCameraCreate(VK2DCameraSpec)\`.
+Since \`externalTargetRenderPass\` preserves existing texture pixels (\`LOAD_OP_LOAD\`), how do you clear an offscreen texture?
+* \`vk2dRendererClear()\`: Draws \`gRenderer->unitSquare\` using \`primFillPipe\` with \`cameraIndex = VK2D_INVALID_CAMERA (-1)\`. Look at \`shaders/colour.vert\`: when \`cameraIndex == -1\`, the vertex shader ignores the camera UBO and multiplies the $[0, 1]^2$ unit square by a constant matrix \`UNIT_VIEW\` that stretches $[0, 1]^2$ across the entire $[-1, 1]^2$ screen clip space, filling every pixel with the current \`colourMod\`!
+* \`vk2dRendererEmpty()\`: Saves your current blend mode and color mod, sets the color to \`{0, 0, 0, 0}\` and the blend mode to \`VK2D_BLEND_MODE_NONE\` (which overwrites destination alpha with \`0\`), calls \`vk2dRendererClear()\`, and restores your previous settings. *(Important: Always call \`vk2dRendererEmpty()\` or \`vk2dRendererClear()\` the first time you bind a freshly created \`vk2dTextureCreate\` target before sampling it!)*
 
-Each \`VK2DCameraSpec\` defines both a **virtual world lens** (\`x, y, w, h, zoom, rot\`, or 3D \`Perspective.{eyes, centre, up, fov}\`) and a **physical window viewport/scissor rectangle** (\`xOnScreen, yOnScreen, wOnScreen, hOnScreen\`).
+### The 10-Camera System: World Lens vs Screen Viewport (\`Camera.c\`)
 
-#### Why Camera Updates at Any Point in the Frame Take Effect Retroactively for That Frame
+VK2D can keep up to \`VK2D_MAX_CAMERAS = 10\` cameras active at the same time (\`gRenderer->cameras[0..9]\`). Camera \`0\` (\`VK2D_DEFAULT_CAMERA\`) always exists and matches the window size. You can create up to 9 extra cameras with \`vk2dCameraCreate(spec)\` for scrolling worlds, split-screen multiplayer (\`examples/splitscreen\`), minimaps, or 3D model overlays (\`examples/retrolook\`).
 
-All 10 cameras' combined view-projection matrices reside in a single uniform buffer struct:
-\`\`\`c
-struct VK2DUniformBufferObject {
-    mat4 viewproj[VK2D_MAX_CAMERAS]; // 10 * 64 bytes = 640 bytes
-};
-\`\`\`
+Every \`VK2DCameraSpec\` separates **what the camera sees in the world** from **where that view appears on the window**:
+* **World Lens (\`x, y, w, h, zoom, rot\`):** \`(x, y)\` is the top-left world coordinate seen by the camera; \`(w, h)\` is the virtual width and height in world pixels; \`zoom\` magnifies the view ($w / \\text{zoom},\\, h / \\text{zoom}$); and \`rot\` rotates the camera in radians.
+* **Window Viewport (\`xOnScreen, yOnScreen, wOnScreen, hOnScreen\`):** Controls the hardware \`VkViewport\` and \`VkRect2D\` scissor rectangle on the actual window where this camera is drawn. For example, a $256 \\times 224$ retro camera (\`w = 256, h = 224\`) with \`wOnScreen = 768, hOnScreen = 672\` automatically scales up $3\\times$ to fill the window!
 
-During the frame, draw calls bind \`gRenderer->uboDescriptorSets[currentFrame]\` at Set 0, Binding 0, and pass \`cameraIndex\` via push constants. However, the actual matrices in \`gRenderer->workingUBO.viewproj[i]\` are computed and flushed into the \`VK2DDescriptorBuffer\` **at the very end of the frame** inside \`vk2dRendererEndFrame()\`:
+#### Why Camera Position Updates Apply at the End of the Frame
+
+All 10 camera matrices live in one 640-byte uniform buffer (\`struct VK2DUniformBufferObject { mat4 viewproj[10]; }\`). When you record draw calls during the frame, shaders only receive the integer \`cameraIndex\` via push constants. Right before the frame is submitted in \`vk2dRendererEndFrame()\`, VK2D loops through all active cameras, builds their view-projection matrices in \`gRenderer->workingUBO\`, and flushes \`workingUBO\` into the \`VK2DDescriptorBuffer\`:
 \`\`\`c
 for (int i = 0; i < VK2D_MAX_CAMERAS; i++)
   if (gRenderer->cameras[i].state == VK2D_CAMERA_STATE_NORMAL)
     _vk2dCameraUpdateUBO(&gRenderer->workingUBO, &gRenderer->cameras[i].spec, i);
 _vk2dRendererFlushUBOBuffers();
 \`\`\`
+Because the UBO is flushed at the end of the frame and copied on \`dbCommandBuffer\` before \`commandBuffer\` runs, **updating a camera's \`x, y, zoom\` with \`vk2dCameraUpdate()\` at any point in the frame updates the view for the entire frame**.
 
-Because \`_vk2dRendererFlushUBOBuffers()\` writes \`workingUBO\` into the staging page and updates \`uboDescriptorSets[currentFrame]\` (enabled by \`VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT\` on \`dslBufferVP\`) before \`dbCommandBuffer\` copies the page to VRAM, all draw commands recorded earlier in the frame read those final camera matrices when the GPU executes \`commandBuffer\`.
-
-#### Texture Space vs Camera Space (\`enableTextureCameraUBO\`)
-
-When rendering to the screen (or to an offscreen texture when \`vk2dRendererSetTextureCamera(true)\` is enabled), every 2D draw function (\`_vk2dRendererDraw\`, \`_vk2dRendererDrawShader\`, \`_vk2dRendererDrawShadows\`, and \`vk2dRendererFlushSpriteBatch\`) loops over \`i = 0 .. VK2D_MAX_CAMERAS - 1\` and issues the draw for every camera in \`VK2D_CAMERA_STATE_NORMAL\` with \`type == VK2D_CAMERA_TYPE_DEFAULT\` (unless restricted to a single camera via \`vk2dRendererLockCameras(cam)\`). Conversely, when rendering to an offscreen texture with \`enableTextureCameraUBO == false\` (the default), VK2D binds \`target->uboSet\` and draws once with \`cameraIndex = 0\`, mapping coordinates \`(0..w, 0..h)\` directly to the texture's pixels.
+By contrast, **camera states and locks take effect immediately mid-frame** (because they flush the current sprite batch):
+* By default, every 2D draw call loops through all enabled 2D cameras and draws once into each camera's viewport.
+* Calling \`vk2dRendererLockCameras(camIndex)\` tells VK2D to draw **only** to \`camIndex\` (for example, locking to \`VK2D_DEFAULT_CAMERA\` when drawing your HUD overlay so the HUD does not get drawn four times inside a 4-player split-screen!). Calling \`vk2dRendererUnlockCameras()\` resumes drawing to all active cameras.
+* When drawing to an offscreen texture, VK2D uses the texture's own $w \\times h$ pixel space by default unless you call \`vk2dRendererSetTextureCamera(true)\` to make offscreen texture draws use your world cameras.
 `,
     mermaidCharts: [
       {
@@ -6888,7 +6932,7 @@ sequenceDiagram
     title: "59. Polygons, 2D Shadow Volumes, 3D Models, Nuklear GUI & Raw Vulkan",
     category: "graphics",
     summary:
-      "Fan-triangulated polygons, unit shape caching, vertex-extruded 2D shadow environments, Wavefront OBJ 3D models, Nuklear semaphore chaining, and VulkanInterface.h.",
+      "How VK2D draws shapes without per-frame allocations, extrudes 2D shadow edges on the GPU, loads Wavefront .obj 3D models, chains Nuklear GUI semaphores, and exposes raw Vulkan handles.",
     sourceFiles: [
       "extern/Vulkan2d/VK2D/include/VK2D/Polygon.h",
       "extern/Vulkan2d/VK2D/include/VK2D/ShadowEnvironment.h",
@@ -6902,39 +6946,42 @@ sequenceDiagram
       "extern/Vulkan2d/VK2D/src/VulkanInterface.c",
     ],
     content: `
-### Unit Primitives, Fan Triangulation & Dynamic Geometry (\`Polygon.c\`)
+### Drawing Shapes: Reusable Unit VBOs vs Custom Polygons (\`Polygon.c\`)
 
-For vector shapes, VK2D provides two rendering paths using \`primFillPipe\` (\`VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST\`) and \`primLinePipe\` (\`VK_PRIMITIVE_TOPOLOGY_LINE_STRIP\`):
+VK2D has three ways to draw 2D vector shapes using \`primFillPipe\` (filled triangles) and \`primLinePipe\` (line strips):
 
-1. **Pre-Allocated Unit Polygons (\`_vk2dRendererCreateUnits\`):**
-   At startup, VK2D builds five reusable device-local \`VK2DPolygon\` VBOs:
-   * \`unitSquare\` (6 vertices covering $[0, 1]^2$) and \`unitSquareOutline\` (5-vertex closed line strip).
-   * \`unitCircle\` and \`unitCircleOutline\` (generated with \`VK2D_CIRCLE_VERTICES = 36\` vertices of radius $0.5$).
-   * \`unitLine\` (2 vertices from $(0,0)$ to $(1,0)$).
-   Calling \`vk2dRendererDrawRectangle()\`, \`vk2dRendererDrawCircle()\`, or \`vk2dRendererDrawLine()\` requires zero vertex allocations: VK2D simply computes a scaling and rotation push-constant matrix (\`VK2DPushBuffer\`) and draws the unit VBO! (For instance, \`vk2dRendererDrawLine(x1, y1, x2, y2)\` computes $L = \\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}$ and $\\theta = \\operatorname{atan2}(y_2-y_1,\\, x_2-x_1)$ and draws \`unitLine\` scaled by $L$ and rotated by $\\theta$.)
-2. **Custom Convex Polygons & Immediate-Mode Geometry:**
-   * \`vk2dPolygonCreate(vertices, vertexCount)\` triangulates a convex vertex ring into $(N - 2) \\times 3$ \`VK2DVertexColour\` vertices using a triangle fan anchored at \`vertices[0]\` and uploads them to a permanent device-local \`VK2DBuffer\`.
-   * \`vk2dRendererDrawGeometry(vertices, count, ...)\` streams arbitrary per-frame \`VK2DVertexColour\` arrays (up to \`limits.maxGeometryVertices = (vramPageSize / sizeof(VK2DVertexColour)) - 1 = 9,141\` vertices) directly through \`descriptorBuffers[currentFrame]\` without creating a \`VK2DPolygon\`.
+1. **Zero-Allocation Unit Shapes (\`_vk2dRendererCreateUnits\`):**
+   At startup, VK2D builds five small vertex buffers in VRAM that stay loaded for the life of the program:
+   * \`unitSquare\` (6 vertices forming a $1 \\times 1$ square) and \`unitSquareOutline\` (5 vertices forming its border).
+   * \`unitCircle\` and \`unitCircleOutline\` (built with \`VK2D_CIRCLE_VERTICES = 72\` vertices in \`Constants.c\` for a smooth circle of radius $0.5$).
+   * \`unitLine\` (2 vertices from $(0, 0)$ to $(1, 0)$).
+   When you call \`vk2dRendererDrawRectangle()\`, \`vk2dRendererDrawCircle()\`, or \`vk2dRendererDrawLine()\`, VK2D does **not** generate new vertices on the CPU. Instead, it binds the pre-built unit shape and passes a scaling, rotation, and translation matrix in push constants (\`VK2DPushBuffer\`)! For example, \`vk2dRendererDrawLine(x1, y1, x2, y2)\` simply measures the line length $L = \\sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}$ and angle $\\theta = \\operatorname{atan2}(y_2-y_1,\\, x_2-x_1)$, and stretches and rotates \`unitLine\` to connect the two points.
+2. **Permanent Custom Polygons (\`vk2dPolygonCreate\` & \`vk2dPolygonShapeCreateRaw\`):**
+   * If you have a list of \`vec2\` corner points for a convex shape, \`vk2dPolygonCreate(vertices, count)\` automatically turns them into $(N - 2) \\times 3$ triangles using a simple **triangle fan** anchored at \`vertices[0]\` and uploads them into a permanent GPU buffer (\`VK2DPolygon\`).
+   * If you want each vertex to have its own custom color gradient, \`vk2dPolygonShapeCreateRaw(vertexData, count)\` uploads your pre-triangulated \`VK2DVertexColour\` array directly.
+3. **Immediate-Mode Dynamic Geometry (\`vk2dRendererDrawGeometry\`):**
+   If your vertices change every frame, \`vk2dRendererDrawGeometry(vertices, count, ...)\` copies up to \`limits.maxGeometryVertices\` (\`9,141\` vertices for a 256 KB page) directly into the current frame's \`VK2DDescriptorBuffer\` and draws them on the spot without creating a \`VK2DPolygon\` object.
 
-### Hardware-Accelerated 2D Shadow Volumes (\`ShadowEnvironment.c\` & \`shadows.vert\`)
+### Hardware-Accelerated 2D Drop Shadows (\`ShadowEnvironment.c\` & \`shadows.vert\`)
 
-\`VK2DShadowEnvironment\` renders hard 2D drop shadows cast by line-segment occluders from a point light source \`vec2 lightSource\`:
+Want walls or pillars to cast real-time 2D shadows away from torches or player lights? \`VK2DShadowEnvironment\` does the heavy lifting on the GPU:
 
-1. **Edge Registration (\`vk2dShadowEnvironmentAddEdge\`):**
-   Each occluder object (\`vk2dShadowEnvironmentAddObject\`) records a contiguous slice (\`startingVertex\`, \`vertexCount\`) inside a master \`vec3\` vertex array and maintains its own $4 \\times 4$ transform matrix (\`objectInfos[object].model\`). Calling \`vk2dShadowEnvironmentAddEdge(se, x1, y1, x2, y2)\` appends **6 vertices** (two triangles forming a quad degenerate along the segment $(x_1, y_1) \\to (x_2, y_2)$):
+1. **Adding Wall Edges on the CPU (\`vk2dShadowEnvironmentAddEdge\`):**
+   You create a shadow environment with \`vk2dShadowEnvironmentCreate()\`, optionally group walls into movable objects with \`vk2dShadowEnvironmentAddObject()\`, and trace the outer edges of each wall with \`vk2dShadowEnvironmentAddEdge(se, x1, y1, x2, y2)\`.
+   For every wall edge $(x_1, y_1) \\to (x_2, y_2)$, VK2D appends **6 vertices** (two triangles) into its vertex list:
    \`\`\`c
    vec3 vert[6] = {
-       {x2, y2, 0}, // 0: Static
-       {x2, y2, 0}, // 1: Projected by shadows.vert
-       {x1, y1, 0}, // 2: Static
-       {x1, y1, 0}, // 3: Static
-       {x1, y1, 0}, // 4: Projected by shadows.vert
-       {x2, y2, 0}, // 5: Projected by shadows.vert
+       {x2, y2, 0}, // Index 0: Stays on the wall edge
+       {x2, y2, 0}, // Index 1: Pushed away from light by shadows.vert!
+       {x1, y1, 0}, // Index 2: Stays on the wall edge
+       {x1, y1, 0}, // Index 3: Stays on the wall edge
+       {x1, y1, 0}, // Index 4: Pushed away from light by shadows.vert!
+       {x2, y2, 0}, // Index 5: Pushed away from light by shadows.vert!
    };
    \`\`\`
-   Calling \`vk2dShadowEnvironmentFlushVBO(se)\` uploads all registered edges into a single device-local VBO (\`se->vbo\`).
-2. **GPU Vertex Extrusion (\`shaders/shadows.vert\`):**
-   When \`vk2dRendererDrawShadows(se, colour, lightSource)\` runs, it iterates all enabled \`VK2DShadowObjectInfo\` entries, pushes \`model\`, \`lightSource\`, and \`colour\`, and draws \`objInfo->vertexCount\` vertices starting at \`objInfo->startingVertex\`. Inside \`shadows.vert\`, vertices at indices \`gl_VertexIndex % 6\` equal to \`1\`, \`4\`, or \`5\` are projected $1{,}000\\times$ away from \`lightSource\` in world space:
+   Once all edges are added, calling \`vk2dShadowEnvironmentFlushVBO(se)\` uploads the whole list into a single GPU vertex buffer (\`se->vbo\`). Even if a wall object moves or rotates every frame, you **never** have to rebuild the VBO: just call \`vk2dShadowEnvironmentObjectUpdate(se, obj, x, y, scaleX, scaleY, rot, ox, oy)\` to update that object's $4 \\times 4$ model matrix!
+2. **Extruding Shadow Quads on the GPU (\`shaders/shadows.vert\`):**
+   When you call \`vk2dRendererDrawShadows(se, colour, lightSource)\`, VK2D binds \`shadowsPipe\` and pushes the object's \`model\` matrix and the light's \`(x, y)\` position. Inside \`shaders/shadows.vert\`, the vertex shader checks \`gl_VertexIndex % 6\`. Vertices \`0, 2, 3\` stay anchored on the wall segment, while vertices \`1, 4, 5\` are flung $1{,}000\\times$ outward along the ray from \`lightSource\` through the wall corner:
    \`\`\`glsl
    int mod = gl_VertexIndex % 6;
    vec4 position = pushBuffer.model * vec4(inPosition, 1.0);
@@ -6948,23 +6995,29 @@ For vector shapes, VK2D provides two rendering paths using \`primFillPipe\` (\`V
        gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * position;
    }
    \`\`\`
+   That stretches the 6 vertices from a flat line segment into a long shadow quad covering everything behind the wall!
 
-### 3D Wavefront OBJ Models (\`Model.c\`)
+### 3D Wavefront \`.obj\` Models (\`Model.c\`)
 
-Although VK2D is primarily a 2D renderer, it includes a full depth-buffered 3D pipeline (\`modelPipe\` and \`wireframePipe\`) for 2.5D/3D props (inspired by *Castlevania: Symphony of the Night*). \`vk2dModelLoad()\` / \`vk2dModelFrom()\` parses Wavefront \`.obj\` meshes using embedded \`tinyobj_loader_c.h\` with \`TINYOBJ_FLAG_TRIANGULATE\`, flips vertical UV coordinates (\`uv[1] = 1 - texcoords[vt_idx * 2 + 1]\`), deduplicates identical \`VK2DVertex3D\` vertices, and packs both the vertex array and 16-bit index array into a single \`VK2DBuffer\` via \`vk2dBufferLoad2()\`. 3D models only render to cameras whose \`spec.type\` is \`VK2D_CAMERA_TYPE_PERSPECTIVE\` or \`VK2D_CAMERA_TYPE_ORTHOGRAPHIC\`.
+While VK2D is built for 2D games, it includes a depth-buffered 3D mesh pipeline (\`modelPipe\` and \`wireframePipe\`) so you can drop rotating 3D save crystals, items, or background props into a 2D game (just like *Castlevania: Symphony of the Night*).
+* \`vk2dModelLoad(objFile, texture)\` parses \`.obj\` files using embedded \`tinyobj_loader_c.h\`, automatically triangulates faces, flips the vertical UV coordinate (\`1 - v\`) to match Vulkan texture space, merges duplicate vertices, and uploads both the \`VK2DVertex3D\` vertices and 16-bit indices into a single GPU buffer via \`vk2dBufferLoad2()\`.
+* Remember: \`vk2dRendererDrawModel()\` only draws to cameras whose \`type\` is set to \`VK2D_CAMERA_TYPE_PERSPECTIVE\` or \`VK2D_CAMERA_TYPE_ORTHOGRAPHIC\`!
 
-### Embedded Nuklear GUI & Semaphore Chaining (\`Gui.c\` & \`nuklear.c\`)
+### Built-In Nuklear GUI & Semaphore Chaining (\`Gui.c\` & \`nuklear.c\`)
 
-When \`VK2DStartupOptions.enableNuklear = true\`, \`_vk2dRendererInitNuklear()\` initializes a Vulkan-backed Nuklear context (\`nk_sdl_init\`) with a 512 KB vertex buffer, 128 KB element buffer, and a default 16 px font atlas (plus custom named fonts hashed via \`uthash.h\` in \`VK2DFontHandle\`).
+If you set \`options.enableNuklear = true\` at startup, VK2D initializes an embedded **Nuklear** immediate-mode GUI context (\`vk2dGuiContext()\`). In your event loop, wrap \`SDL_PollEvent(&e)\` between \`vk2dGuiStartInput()\`, \`vk2dGuiProcessEvent(&e)\`, and \`vk2dGuiEndInput()\`, then build your debug windows with standard \`nk_begin()\` / \`nk_end()\` calls.
 
-At the end of \`vk2dRendererEndFrame()\`, after VK2D submits its own three command buffers (which signal \`renderFinishedSemaphores[scImageIndex]\`), Nuklear renders its UI pass via \`nk_sdl_render()\` waiting on \`renderFinishedSemaphores[scImageIndex]\` and returning a chained \`nkSemaphore\`. \`vkQueuePresentKHR\` then waits on \`nkSemaphore\`, ensuring the GUI overlay composites cleanly atop the finished 2D/3D frame before presentation.
+How does Nuklear draw on top of your game without clashing with VK2D's command buffers? At the end of \`vk2dRendererEndFrame()\`:
+1. VK2D submits its own 3 command buffers to \`ld->queue\`, which signal \`renderFinishedSemaphores[scImageIndex]\` when done.
+2. VK2D then calls \`nk_sdl_render(..., renderFinishedSemaphores[scImageIndex])\`, which tells Nuklear's Vulkan command buffer to **wait** for VK2D's rendering to finish before drawing the GUI, and returns a new semaphore (\`nkSemaphore\`).
+3. Finally, \`vkQueuePresentKHR\` waits on \`nkSemaphore\` before showing the frame on screen!
 
 ### Direct Vulkan Escape Hatch (\`VulkanInterface.h\`)
 
-For advanced applications that need to record custom Vulkan commands alongside VK2D, \`VK2D/include/VK2D/VulkanInterface.h\` exposes the internal handles of the active frame:
-* \`vk2dVulkanGetDrawBuffer()\`, \`vk2dVulkanGetComputeBuffer()\`, \`vk2dVulkanGetCopyBuffer()\`: Returns the active command buffers for \`scImageIndex\` and automatically calls \`_vk2dRendererResetBoundPointers()\` so VK2D knows its cached pipeline/descriptor state may have been modified by user Vulkan calls.
-* \`vk2dVulkanCopyDataIntoBuffer(data, size, &outBuffer, &bufferOffset)\`: Sub-allocates dynamic frame data directly through \`descriptorBuffers[currentFrame]\`.
-* \`vk2dVulkanGetDevice()\`, \`vk2dVulkanGetPhysicalDevice()\`, \`vk2dVulkanGetQueue()\`, \`vk2dVulkanGetVMA()\`: Exposes core Vulkan and VMA handles.
+If you ever want to write raw Vulkan commands alongside VK2D, \`VK2D/include/VK2D/VulkanInterface.h\` gives you safe access to the active internals:
+* \`vk2dVulkanGetDrawBuffer()\`, \`vk2dVulkanGetComputeBuffer()\`, \`vk2dVulkanGetCopyBuffer()\`: Returns the active command buffers for this frame and automatically calls \`_vk2dRendererResetBoundPointers()\` so VK2D knows to rebind its own pipelines on the next VK2D draw call.
+* \`vk2dVulkanCopyDataIntoBuffer(data, size, &outBuffer, &bufferOffset)\`: Uploads custom per-frame data through the current frame's \`VK2DDescriptorBuffer\`.
+* \`vk2dVulkanGetDevice()\`, \`vk2dVulkanGetPhysicalDevice()\`, \`vk2dVulkanGetQueue()\`, \`vk2dVulkanGetVMA()\`: Returns the underlying Vulkan and VMA handles.
 `,
     mermaidCharts: [
       {
@@ -6987,6 +7040,251 @@ flowchart LR
         Pres["vkQueuePresentKHR<br/>Waits on nkSemaphore (or renderFinished)"]:::queue
         Sub --> NK --> Pres
     end
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-validation-logging-utils",
+    title: "60. Error Handling, Thread-Safe Logger, Initializers & Utilities",
+    category: "graphics",
+    summary:
+      "How VK2D reports recoverable vs fatal errors (Validation.c), formats thread-safe logs and custom logger callbacks (Logger.c), zero-initializes Vulkan structs (Initializers.c), and implements hybrid sleep and LCG random numbers (Util.c).",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/include/VK2D/Validation.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Logger.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Util.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Initializers.h",
+      "extern/Vulkan2d/VK2D/src/Validation.c",
+      "extern/Vulkan2d/VK2D/src/Logger.c",
+      "extern/Vulkan2d/VK2D/src/Util.c",
+      "extern/Vulkan2d/VK2D/src/Initializers.c",
+    ],
+    content: `
+### Recoverable vs Fatal Status Codes (\`Validation.c\`)
+
+Not every error in a game should crash the program. If a modder types the wrong filename for a sprite (\`vk2dTextureLoad("missing.png")\`), the game can log a warning and keep running. On the other hand, if the GPU driver crashes (\`VK_ERROR_DEVICE_LOST\`) or runs out of VRAM, continuing to record Vulkan commands would segfault.
+
+VK2D tracks errors using a bitmask enum called \`VK2DStatus\` (\`Structs.h\`). Whenever something goes wrong, internal functions call \`vk2dRaise(VK2DStatus status, const char *fmt, ...)\`, which bitwise-ORs the flag into \`gStatus\` and appends the formatted message into a 4,096-byte buffer (\`gLogBuffer\`).
+
+\`vk2dStatusFatal()\` in \`VK2D/src/Validation.c\` separates **non-fatal warnings** from **fatal hardware failures** with a single bitmask check:
+
+\`\`\`c
+bool vk2dStatusFatal() {
+  return (gStatus & ~(VK2D_STATUS_NONE |
+                      VK2D_STATUS_SDL_ERROR |
+                      VK2D_STATUS_FILE_NOT_FOUND |
+                      VK2D_STATUS_BAD_ASSET |
+                      VK2D_STATUS_TOO_MANY_CAMERAS |
+                      VK2D_STATUS_BEYOND_LIMIT)) != 0;
+}
+\`\`\`
+
+| \`VK2DStatus\` Flag | Bit Value | Fatal? | When It Happens |
+| --- | --- | --- | --- |
+| \`VK2D_STATUS_FILE_NOT_FOUND\` | \`1 << 0\` | No | A texture, model, or shader file could not be opened on disk. |
+| \`VK2D_STATUS_BAD_FORMAT\` | \`1 << 1\` | **Yes** | Invalid image bytes, corrupt \`.obj\` file, or shader uniform size not a multiple of 4. |
+| \`VK2D_STATUS_TOO_MANY_CAMERAS\` | \`1 << 2\` | No | All 10 camera slots in \`gRenderer->cameras[]\` are already in use. |
+| \`VK2D_STATUS_DEVICE_LOST\` | \`1 << 3\` | **Yes** | GPU hang or driver reset (\`VK_ERROR_DEVICE_LOST\`). |
+| \`VK2D_STATUS_VULKAN_ERROR\` | \`1 << 4\` | **Yes** | Unrecoverable Vulkan API failure during setup or command submission. |
+| \`VK2D_STATUS_OUT_OF_RAM\` | \`1 << 5\` | **Yes** | \`malloc\`, \`calloc\`, or \`realloc\` returned \`NULL\`. |
+| \`VK2D_STATUS_OUT_OF_VRAM\` | \`1 << 6\` | **Yes** | VMA or Vulkan ran out of GPU video memory (\`VK_ERROR_OUT_OF_DEVICE_MEMORY\`). |
+| \`VK2D_STATUS_RENDERER_NOT_INITIALIZED\` | \`1 << 7\` | **Yes** | Calling VK2D functions before \`vk2dRendererInit()\` or after \`vk2dRendererQuit()\`. |
+| \`VK2D_STATUS_SDL_ERROR\` | \`1 << 8\` | No | General SDL3 windowing or event error. |
+| \`VK2D_STATUS_BEYOND_LIMIT\` | \`1 << 9\` | No | Requested shader uniform size or texture update region exceeds hardware/image bounds. |
+| \`VK2D_STATUS_BAD_ASSET\` | \`1 << 10\` | No | Passing a \`NULL\` texture/polygon/shader pointer to a draw call, or running out of bindless texture slots. |
+
+If \`options.quitOnError\` is \`true\` (the default) and \`vk2dStatusFatal()\` becomes true, \`vk2dRaise()\` logs the message with \`VK2D_LOG_SEVERITY_FATAL\`, which immediately flushes the log file and calls \`abort()\`. If you set \`options.quitOnError = false\`, you can poll \`vk2dStatus()\`, \`vk2dStatusFatal()\`, and \`vk2dStatusMessage()\` in your game loop to display a friendly crash dialog before shutting down! *(Reading \`vk2dStatus()\` or \`vk2dStatusMessage()\` sets \`gResetLog = true\` so the next \`vk2dRaise()\` starts a fresh status mask.)*
+
+### Thread-Safe Logging & Custom Logger Callbacks (\`Logger.c\`)
+
+All console and file logging in VK2D routes through \`VK2D/src/Logger.c\`:
+* **Six Severity Levels:** \`debug\`, \`info\`, \`warn\`, \`error\`, \`fatal\`, and \`unknown\`, with convenient \`printf\`-style wrappers (\`vk2dLogInfo(...)\`, \`vk2dLogWarn(...)\`, \`vk2dLogError(...)\`).
+* **Zero-Allocation Fast Path:** In \`vk2dLoggerLogv()\`, messages up to **127 characters** are formatted directly into a stack buffer (\`char msgBuf[128]\`) with zero heap allocations; only longer messages allocate a temporary heap buffer.
+* **Dual Output (Console + Error File):** Protected by \`SDL_Mutex\`, the default logger (\`VK2DDefaultLogger\`) prints \`info\` and \`debug\` to \`stdout\` and \`warn\`/\`error\`/\`fatal\` to \`stderr\` (when \`stdoutLogging\` is enabled). Regardless of whether console logging is on or off, **every warning, error, and fatal message is also written with a timestamp to \`errorFile\`** (\`vk2derror.txt\`), preceded by the system hardware header (\`vk2dHostInformation()\`):
+  \`\`\`text
+  Windows, SDL 3.x.x | Host: 16 logical cores, 31.92gb RAM | Device: NVIDIA GeForce RTX ..., Vulkan 1.3.x, Vulkan2D 0.8.0
+  \`\`\`
+* **Custom Logger Hook (\`vk2dSetLogger\`):** Want VK2D logs to appear inside your own game engine's log file or on-screen console? Fill out a \`VK2DLogger\` struct (\`log\`, \`destroy\`, \`severityFn\`, \`context\`) and pass it to \`vk2dSetLogger(&myLogger)\`—even before calling \`vk2dRendererInit()\`!
+
+### Vulkan Struct Initializers (\`Initializers.c\`) & Helpers (\`Util.c\`)
+
+1. **Boilerplate-Free Vulkan Structs (\`Initializers.c\`):**
+   Every Vulkan \`vkCreate*\` call requires a large \`Vk*CreateInfo\` struct with a mandatory \`sType\` tag. \`VK2D/src/Initializers.c\` isolates all 38 of these struct builders (\`vk2dInitInstanceCreateInfo\`, \`vk2dInitSwapchainCreateInfoKHR\`, \`vk2dInitGraphicsPipelineCreateInfo\`, \`vk2dInitSamplerCreateInfo\`, etc.), zero-initializing each struct (\`= {0}\`) and setting its exact \`VK_STRUCTURE_TYPE_*\` enum so \`RendererMeta.c\` stays clean and readable.
+2. **Hybrid Frame Limiter Sleep (\`vk2dSleep\` in \`Util.c\`):**
+   OS sleep functions like \`SDL_Delay(ms)\` only have millisecond granularity and often oversleep by 1 to 2 ms due to OS thread scheduling, causing frame-pacing micro-stutter. \`vk2dSleep(double seconds)\` combines a coarse \`SDL_Delay(floor(seconds * 1000))\` with a sub-millisecond high-precision spin-wait loop using \`SDL_GetPerformanceCounter()\` for the remaining fraction of a millisecond:
+   \`\`\`c
+   void vk2dSleep(double seconds) {
+     if (seconds <= 0) return;
+     double start = SDL_GetPerformanceCounter();
+     double milliseconds = floor(seconds * 1000);
+     SDL_Delay(milliseconds);
+     while ((SDL_GetPerformanceCounter() - start) / (double)SDL_GetPerformanceFrequency() < seconds) {
+       volatile int i = 0;
+     }
+   }
+   \`\`\`
+3. **Thread-Safe Atomic LCG Random Number Generator (\`vk2dRandom\`):**
+   Need a quick random float between \`min\` and \`max\` for particle spread or light colors? \`vk2dRandom(float min, float max)\` in \`Renderer.c\` updates a global \`SDL_AtomicInt gRNG\` (seeded with \`time(0)\` at startup) using the classic linear congruential generator ($r \\leftarrow (1103515245 \\cdot r + 12345) \\bmod 2^{31}$) and maps it across 5,000 steps between \`min\` and \`max\`.
+4. **Color Conversion Helpers (\`vk2dColourHex\`, \`vk2dColourInt\`, \`vk2dColourRGBA\`):**
+   Converts CSS-style hex strings (\`"#59d9d7"\`), 32-bit packed RGBA integers (\`0xFF8000FF\`), or \`0..255\` byte tuples into normalized \`vec4\` floats (\`0.0f .. 1.0f\`).
+`,
+    mermaidCharts: [
+      {
+        title: "Error Raising, Severity Routing & Log Sinks (Validation.c -> Logger.c)",
+        chart: `
+flowchart TD
+    classDef call fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef check fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef sink fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Raise["vk2dRaise(status, fmt, ...)<br/>gStatus |= status<br/>Appends to gLogBuffer[4096]"]:::call
+    FatalCheck{"quitOnError && vk2dStatusFatal()?"}:::check
+    SevFatal["Severity = VK2D_LOG_SEVERITY_FATAL"]:::check
+    SevErr["Severity = VK2D_LOG_SEVERITY_ERROR"]:::check
+    Logger["vk2dLoggerLogv (Stack Buf if <= 127 chars)<br/>Routes to gLogger->log()"]:::call
+    Stdout["Console stdout / stderr<br/>(if stdoutLogging == true)"]:::sink
+    ErrFile["errorFile (vk2derror.txt)<br/>Always records WARN, ERROR & FATAL"]:::sink
+    Abort["abort() if FATAL"]:::sink
+
+    Raise --> FatalCheck
+    FatalCheck -->|Yes| SevFatal --> Logger
+    FatalCheck -->|No| SevErr --> Logger
+    Logger --> Stdout
+    Logger --> ErrFile
+    ErrFile --> Abort
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-examples-cookbook",
+    title: "61. Practical Vulkan2D Cookbook & Sample Walkthroughs",
+    category: "graphics",
+    summary:
+      "Step-by-step code walkthroughs of real VK2D patterns from extern/Vulkan2d/examples/: integer-scaled retro pixel canvases, multi-light subtractive 2D shadows, 4-player split-screen cameras, dynamic texture streaming, and bitmap font overlays.",
+    sourceFiles: [
+      "extern/Vulkan2d/examples/main/main.c",
+      "extern/Vulkan2d/examples/retrolook/main.c",
+      "extern/Vulkan2d/examples/shadowsglsl/main.c",
+      "extern/Vulkan2d/examples/splitscreen/main.c",
+      "extern/Vulkan2d/examples/gui/main.c",
+      "extern/Vulkan2d/examples/testing/main.c",
+      "extern/Vulkan2d/examples/debug.c",
+    ],
+    content: `
+### Recipe 1: Integer-Scaled Retro Pixel Canvas (\`examples/retrolook/main.c\`)
+
+Many pixel-art games want to render at a fixed low resolution (like $256 \\times 224$ or $480 \\times 270$) and scale up cleanly to whatever window size the player chooses with nearest-neighbor filtering (\`VK2D_FILTER_TYPE_NEAREST\`).
+
+\`examples/retrolook/main.c\` shows the exact 4-step pattern:
+1. Create an offscreen render-target texture at your virtual resolution: \`VK2DTexture texTarget = vk2dTextureCreate(256, 224);\`.
+2. At the start of your draw loop, bind \`texTarget\` and clear it:
+   \`\`\`c
+   vk2dRendererSetTarget(texTarget);
+   vk2dRendererSetColourMod(clear);
+   vk2dRendererClear();
+   vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
+   \`\`\`
+3. Draw your entire game world (sprites, tilemaps, particles, or even 3D models if \`vk2dRendererSetTextureCamera(true)\` is enabled) into \`texTarget\`.
+4. Switch back to \`VK2D_TARGET_SCREEN\`, lock to \`VK2D_DEFAULT_CAMERA\`, compute the integer scale factor, and draw \`texTarget\` centered in the window:
+   \`\`\`c
+   vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
+   float scale = minf(floorf(windowW / 256.0f), floorf(windowH / 224.0f));
+   float xOnWindow = (windowW - (256.0f * scale)) / 2.0f;
+   float yOnWindow = (windowH - (224.0f * scale)) / 2.0f;
+   vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+   vk2dDrawTextureExt(texTarget, xOnWindow, yOnWindow, scale, scale, 0, 0, 0);
+   \`\`\`
+
+### Recipe 2: Multi-Light 2D Shadows Using Subtractive Blending (\`examples/shadowsglsl/main.c\`)
+
+How do you combine \`VK2DShadowEnvironment\` with multiple colored point lights so each light casts its own independent shadows across the room? \`examples/shadowsglsl/main.c\` demonstrates this using a reusable offscreen light texture (\`lightTex\`) and \`VK2D_BLEND_MODE_SUBTRACT\`:
+
+1. **Setup Once:** Create your wall polygons, trace their edges into a \`VK2DShadowEnvironment\` with \`vk2dShadowEnvironmentAddEdge()\`, and upload the shadow VBO once via \`vk2dShadowEnvironmentFlushVBO(shadows)\`. Create one offscreen texture \`lightTex = vk2dTextureCreate(400, 300)\`.
+2. **Per-Light Loop Every Frame:** For each point light \`i\`:
+   * Switch target to \`lightTex\` and wipe it to transparent with \`vk2dRendererEmpty()\`.
+   * Draw the radial light orb sprite centered at \`lights[i].pos\` tinted with \`lights[i].colour\`.
+   * Switch blend mode to **subtractive** (\`VK2D_BLEND_MODE_SUBTRACT\`) and call \`vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos)\`. Because \`VK2D_BLEND_MODE_SUBTRACT\` subtracts the shadow's alpha from the destination alpha (\`VK_BLEND_OP_REVERSE_SUBTRACT\`), this **erases** the light orb's alpha everywhere behind the walls!
+   * Restore \`VK2D_BLEND_MODE_BLEND\`, switch back to \`VK2D_TARGET_SCREEN\`, and draw \`lightTex\` onto the screen!
+3. Finally, draw your wall polygons and player sprites on top of the accumulated lights.
+
+\`\`\`c
+for (int i = 0; i < lightCount; i++) {
+  vk2dRendererSetTarget(lightTex);
+  vk2dRendererEmpty(); // Clear to {0, 0, 0, 0}
+
+  vk2dRendererSetColourMod(lights[i].colour);
+  vk2dDrawTexture(lightOrbTex,
+                  lights[i].pos[0] - vk2dTextureWidth(lightOrbTex) / 2,
+                  lights[i].pos[1] - vk2dTextureHeight(lightOrbTex) / 2);
+  vk2dRendererSetColourMod(VK2D_DEFAULT_COLOUR_MOD);
+
+  // Carve shadows out of this light's alpha channel!
+  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_SUBTRACT);
+  vk2dRendererDrawShadows(shadows, VK2D_BLACK, lights[i].pos);
+  vk2dRendererSetBlendMode(VK2D_BLEND_MODE_BLEND);
+
+  vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
+  vk2dDrawTexture(lightTex, 0, 0);
+}
+\`\`\`
+
+### Recipe 3: Four-Quadrant Split-Screen + UI Overlay (\`examples/splitscreen/main.c\`)
+
+Because VK2D automatically loops over all enabled 2D cameras on every draw call, setting up a 4-player split-screen takes almost no extra drawing code:
+
+1. Create 4 cameras with \`vk2dCameraCreate()\`, setting their \`xOnScreen, yOnScreen, wOnScreen, hOnScreen\` to the 4 quadrants of the window (top-left, top-right, bottom-left, bottom-right), each with its own independent world \`x, y, zoom, rot\`.
+2. Before drawing the game world, temporarily disable the full-window default camera so the world is only drawn into the 4 split-screen quadrants:
+   \`\`\`c
+   vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_DISABLED);
+   // Draw your world once — VK2D automatically renders it into all 4 quadrant cameras!
+   vk2dDrawPolygon(testPoly, 0, 0);
+   vk2dDrawTextureExt(texCaveguy, x, y, 10, 10, time, 8, 8);
+   vk2dCameraSetState(VK2D_DEFAULT_CAMERA, VK2D_CAMERA_STATE_NORMAL);
+   \`\`\`
+3. To draw screen-space UI borders and HUD text across the whole window without repeating them in each quadrant, lock the renderer to \`VK2D_DEFAULT_CAMERA\`:
+   \`\`\`c
+   vk2dRendererLockCameras(VK2D_DEFAULT_CAMERA);
+   // Draw screen-space UI / borders / debug overlay here
+   vk2dRendererUnlockCameras();
+   \`\`\`
+
+### Recipe 4: Sprite-Sheet Bitmap Font & Telemetry Overlay (\`examples/debug.c\`)
+
+All the example programs include \`examples/debug.c\`, which shows how to render a bitmap font sprite sheet (\`assets/font.png\`, a 128-pixel-wide grid of $8 \\times 16$ ASCII characters) and display live frame time and VRAM telemetry:
+* Each ASCII character \`c = text[i]\` is sliced from the texture atlas at pixel coordinates:
+  $$x_{\\text{tex}} = (c \\times 8) \\bmod 128, \\qquad y_{\\text{tex}} = \\lfloor c / 16 \\rfloor \\times 16$$
+  and drawn with \`vk2dRendererDrawTexture(gDebugFont, x, y, 2, 2, 0, 0, 0, xTex, yTex, 8, 16)\`.
+* Because every character uses the same \`gDebugFont\` texture, drawing a 100-character string simply appends 100 \`VK2DDrawCommand\` structs into the current sprite batch and renders the entire paragraph in **one instanced GPU draw call**!
+* Always remember the golden shutdown rule shown at the bottom of every example: **call \`vk2dRendererWait()\` before freeing any textures, polygons, models, or shaders** so the GPU finishes its last submitted command buffer before VMA destroys the underlying buffers!
+
+### Recipe 5: CMake Integration & Build Flags (\`extern/Vulkan2d/CMakeLists.txt\`)
+
+Adding \`extern/Vulkan2d\` to a C or C++ project only requires \`add_subdirectory\` and linking against \`Vulkan2D\`. Four CMake options in \`extern/Vulkan2d/CMakeLists.txt\` let you tailor the build:
+
+| CMake Option | Default | What It Controls |
+| --- | --- | --- |
+| \`VK2D_BUILD_SDL\` | \`ON\` | Builds the bundled \`extern/SDL\` (SDL3) submodule automatically. Set to \`OFF\` if your project already provides an \`SDL3\` target. |
+| \`VK2D_DISABLE_SHADERS\` | \`OFF\` | When set to \`ON\`, defines \`DISABLE_SHADER_COMPILATION\` and skips building the embedded \`extern/slang\` compiler for much faster CMake build times if you only need built-in pipelines or pre-compiled SPIR-V. |
+| \`VK2D_DISABLE_VECS\` | \`OFF\` | Defines \`VK2D_DISABLE_VECTOR_TYPES\` so \`Structs.h\` does not typedef \`vec2\`, \`vec3\`, \`vec4\`, and \`mat4\` (helpful if you already use \`cglm\` or another math library with those type names). |
+| \`VK2D_BUILD_EXAMPLES\` | \`OFF\` | Builds all 6 sample executables under \`examples/\` (\`main\`, \`gui\`, \`retrolook\`, \`shadowsglsl\`, \`splitscreen\`, \`testing\`). |
+`,
+    mermaidCharts: [
+      {
+        title: "Subtractive 2D Shadow & Multi-Light Composition Loop (examples/shadowsglsl)",
+        chart: `
+flowchart LR
+    classDef pass1 fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef pass2 fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef pass3 fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Empty["1. vk2dRendererSetTarget(lightTex)<br/>vk2dRendererEmpty() -> RGBA (0,0,0,0)"]:::pass1
+    Orb["2. Draw Colored Light Orb<br/>(VK2D_BLEND_MODE_BLEND)"]:::pass1
+    Sub["3. vk2dRendererSetBlendMode(SUBTRACT)<br/>vk2dRendererDrawShadows(shadows, lightPos)<br/>Carves alpha = 0 behind wall edges"]:::pass2
+    Comp["4. vk2dRendererSetTarget(SCREEN)<br/>Draw lightTex over scene<br/>Repeat for each Light[0..7]"]:::pass3
+
+    Empty --> Orb --> Sub --> Comp
 `,
       },
     ],

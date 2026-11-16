@@ -184,6 +184,14 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-primitives-shadows-gui",
         shortTitle: "Polygons, 2D Shadows, 3D Models & Nuklear",
       },
+      {
+        id: "vk2d-validation-logging-utils",
+        shortTitle: "Validation, Thread-Safe Logger & Utilities",
+      },
+      {
+        id: "vk2d-examples-cookbook",
+        shortTitle: "Practical Cookbook & Sample Walkthroughs",
+      },
     ],
   },
   {
@@ -351,6 +359,12 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
         subtitle: "Vulkan, LightField & Radix Sort",
         icon: Layers,
         badge: "LAB",
+      },
+      {
+        id: "vk2d-architecture",
+        title: "Vulkan2D Subsystem",
+        subtitle: "3 Command Buffers & Bindless GPU Batching",
+        icon: Layers,
       },
       {
         id: "terrain-construction",
