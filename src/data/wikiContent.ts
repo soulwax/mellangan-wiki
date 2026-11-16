@@ -7671,6 +7671,8 @@ When Vulkan creates a graphics pipeline in \`vk2dPipelineCreate()\`, it needs a 
 | **Batched Sprites (\`instancedPipe\`)** | \`_vk2dGetInstanceVertexInputState()\` | \`0 B\` *(No VBO!)* | Procedural corners derived from \`gl_VertexIndex\` and SSBO Set 3 |
 | **Custom Slang Shaders (\`USER_SHADER\`)** | \`_vk2dGetTextureVertexInputState()\` | \`0 B\` *(No VBO!)* | Procedural $1 \\times 1$ quad corners indexed directly by \`gl_VertexIndex\` |
 
+Look closely at \`_vk2dGetInstanceVertexInputState()\` in \`Util.c\`: it constructs a per-instance vertex attribute table for \`VK2DDrawInstance\`, then hits an early \`return vk2dInitPipelineVertexInputStateCreateInfo(VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0);\` right before returning—because \`instanced.vert\` reads all per-sprite attributes straight out of the compute shader's Set 3 SSBO instead!
+
 *(Zero-VBO Trick: Both \`instanced.vert\` and \`usershader.vert\` bake a static 6-vertex unit square array right into GLSL constant memory. Because \`vkCmdBindVertexBuffers\` is skipped completely, VK2D never allocates or binds vertex buffers for sprites or custom shaders!)*
 
 ### Inside Every Built-In GLSL 450 Shader Pair (\`shaders/\`)
