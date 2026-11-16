@@ -9873,4 +9873,264 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "vk2d-shader-book-pbr-lighting-and-post",
+    title: "73. GPU & Shader Book VIII: Physically Based 2D Lighting, ACES Tone Mapping & Procedural Noise",
+    category: "graphics",
+    summary:
+      "Upgrade from flat Lambertian shading to Cook-Torrance microfacet PBR (GGX + Schlick Fresnel), preserve bright colors with ACES Filmic HDR tone mapping, synthesize Voronoi caustics and fBm domain-warped textures in pure math, and solve Assignments 20–22.",
+    sourceFiles: [
+      "extern/Vulkan2d/assets/shader.slang",
+      "extern/Vulkan2d/shaders/usershader.vert",
+    ],
+    content: `
+# 73. GPU & Shader Book VIII: Physically Based 2D Lighting, ACES Tone Mapping & Procedural Noise
+
+In Books I–VII we built up from individual GPU warps to 3D raymarching and parallax relief. Now in **Book VIII**, we dive into the three techniques that give modern indie and AAA 2D games their signature richness:
+1. **Physically Based Rendering (PBR)** using **GGX microfacets** and **Schlick Fresnel** so metal armor, wet cobblestones, and rough wood react believably to light.
+2. **ACES Filmic Tone Mapping** so bright fire and magic spells stay vivid instead of clipping into ugly flat white.
+3. **Procedural GPU Noise (Voronoi, fBm, Domain Warping)** to generate water caustics, clouds, and swirling portals with zero texture memory.
+
+---
+
+### Chapter 1: Physically Based 2D Lighting (Microfacets & Fresnel)
+
+Why does simple \`max(dot(N, L), 0)\` make every surface look like matte chalk or cheap plastic? Real surfaces are covered in microscopic facets:
+- **Roughness** ($r \\in [0.05, 1.0]$): Smooth surfaces ($r = 0.1$) align their microfacets like a mirror, producing tight, bright specular highlights. Rough surfaces ($r = 0.9$) scatter light everywhere.
+- **Metallic** ($m \\in [0.0, 1.0]$): Non-metals (wood, stone, cloth) reflect **white/light-colored** specular highlights while scattering diffuse light from inside. Metals (gold, iron, copper) have **no diffuse bounce** and tint their specular reflections with their own base color!
+
+#### Schlick Fresnel & GGX Distribution (Line-by-Line)
+
+Look at a wooden table straight down: it looks matte. Look across the same table at a shallow grazing angle toward a window: it acts like a mirror! That universal optical law is **Fresnel reflectance**, approximated cleanly by Christophe Schlick:
+
+$$F(\\theta) = F_0 + (1 - F_0)(1 - \\cos\\theta)^5$$
+
+Here $F_0$ is the base reflectivity at straight-on incidence ($0.04$ for non-metals, or \`albedo\` for metals). Combine that with the **GGX / Trowbridge-Reitz** microfacet distribution:
+
+\`\`\`hlsl
+float D_GGX(float NdotH, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+    return a2 / (3.14159265 * denom * denom + 0.0001);
+}
+
+float3 F_Schlick(float cosTheta, float3 F0) {
+    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
+}
+\`\`\`
+
+- **Why \`+ 0.0001\` in \`D_GGX\`?** When \`roughness == 0.0\` and \`NdotH == 1.0\`, \`denom\` becomes \`0.0\`, which would output \`NaN\` and poison any downstream bloom pass (Book V)!
+
+---
+
+### Chapter 2: HDR Brightness & ACES Filmic Tone Mapping
+
+Imagine a bright orange torch flame outputting \`float3(4.0, 1.4, 0.2)\`. If you send that straight to an 8-bit swapchain, the GPU **clamps** every channel above \`1.0\`:
+- \`4.0\` clips to \`1.0\`, \`1.4\` clips to \`1.0\`, and \`0.2\` stays \`0.2\` -> your rich orange fire washes out into pale yellow-white!
+
+**Tone Mapping** compresses High Dynamic Range (HDR) light ($0 .. \\infty$) smoothly into $[0, 1]$ while gently desaturating only the very brightest cores, just like cinema film! The industry-standard **Narkowicz ACES Filmic** curve takes only 5 instructions:
+
+\`\`\`hlsl
+float3 acesFilm(float3 x) {
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+\`\`\`
+
+#### Wrap Diffuse Lighting for Soft Organic Materials
+
+Hard Lambertian lighting (\`max(dot(N, L), 0)\`) cuts off abruptly at $90^\\circ$. For leaves, snow, or skin where light scatters slightly underneath the surface, use **Wrap Diffuse**:
+
+\`\`\`hlsl
+float wrapDiffuse(float3 N, float3 L, float wrap) {
+    return saturate((dot(N, L) + wrap) / (1.0 + wrap));
+}
+\`\`\`
+
+---
+
+### Chapter 3: Procedural Textures: Voronoi, fBm & Domain Warping
+
+When you need water caustics, swirling magic portals, or weathered stone without bloating VRAM with huge tileable textures, you can synthesize them mathematically per pixel:
+
+#### 1. 2D Voronoi / Cellular Noise (Water Caustics & Cracks)
+
+Divide UV space into integer grid cells \`i = floor(p)\` and \`f = frac(p)\`. Place one jittered random seed point inside each of the $3 \\times 3$ neighboring cells, and measure the **minimum distance** from the pixel to the closest seed:
+
+\`\`\`hlsl
+float2 hash22(float2 p) {
+    float3 p3 = frac(float3(p.xyx) * float3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.xx + p3.yz) * p3.zy);
+}
+
+float voronoi(float2 p, float time) {
+    float2 n = floor(p);
+    float2 f = frac(p);
+    float minDist = 8.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            float2 g = float2(float(x), float(y));
+            float2 o = hash22(n + g);
+            o = 0.5 + 0.5 * sin(time + 6.2831 * o);
+            float2 r = g + o - f;
+            minDist = min(minDist, dot(r, r));
+        }
+    }
+    return sqrt(minDist);
+}
+\`\`\`
+
+- Raising \`voronoi()\` to a power (\`pow(v, 3.0)\`) makes the cell centers dark and the bright cell ridges crisp, instantly creating **underwater caustics**!
+
+#### 2. Fractal Brownian Motion (fBm) & Domain Warping
+
+One octave of \`valueNoise\` looks blurry. **fBm** stacks 4 octaves, doubling the detail frequency ($\\times 2.0$) and halving the strength ($\\times 0.5$) each step. Feeding one \`fbm()\` into the coordinates of a second \`fbm()\` (**Domain Warping**) creates organic swirling smoke and marble:
+
+\`\`\`hlsl
+float fbm(float2 p) {
+    float sum = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; ++i) {
+        sum += amp * valueNoise(p);
+        p *= 2.03;
+        amp *= 0.5;
+    }
+    return sum;
+}
+// Swirled domain warp:
+float pattern = fbm(uv * 4.0 + float2(fbm(uv * 3.0 + time), fbm(uv * 3.0 - time)));
+\`\`\`
+
+---
+
+### Chapter 4: Graded Assignments 20–22 (With Starter Code & Full Solutions)
+
+#### Assignment 20: Cook-Torrance 2D PBR Sprite Shader
+- **Objective:** Combine an albedo sprite (\`push.textureIndex\`), a normal map (\`userData.normalTexID\`), \`userData.roughness\`, and \`userData.metallic\` using \`D_GGX\` and \`F_Schlick\` to shade metallic armor vs matte cloth under a moving point light!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData {
+    float3 lightPosLocal;
+    uint normalTexID;
+    float roughness;
+    float metallic;
+    float pad0;
+    float pad1;
+};
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float D_GGX(float NdotH, float r) {
+    float a = max(r * r, 0.01);
+    float a2 = a * a;
+    float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+    return a2 / (3.14159265 * d * d + 0.0001);
+}
+
+float3 F_Schlick(float cosT, float3 F0) {
+    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosT), 5.0);
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float3 albedo = pow(max(tex.rgb, 0.0), 2.2);
+    float3 N = normalize(textures[userData.normalTexID].Sample(sampler, uv).xyz * 2.0 - 1.0);
+
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float3 L = normalize(userData.lightPosLocal - float3(localUV, 0.0));
+    float3 V = float3(0.0, 0.0, 1.0);
+    float3 H = normalize(L + V);
+
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotH = max(dot(N, H), 0.0);
+    float3 F0 = lerp(float3(0.04), albedo, userData.metallic);
+
+    float3 F = F_Schlick(max(dot(H, V), 0.0), F0);
+    float D = D_GGX(NdotH, userData.roughness);
+    float3 spec = (D * F) * 0.25;
+    float3 kD = (1.0 - F) * (1.0 - userData.metallic);
+    float3 lit = albedo * 0.08 + (kD * albedo / 3.14159265 + spec) * NdotL * 2.2;
+
+    return float4(pow(max(lit, 0.0), 1.0 / 2.2) * push.colour.rgb, tex.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 21: ACES Filmic HDR Tone Mapping Pass
+- **Objective:** Take an offscreen scene texture \`sceneTex\` with bright emissive light values boosted by \`userData.exposure\`, apply \`acesFilm()\`, and output saturated filmic colors without harsh channel clipping!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float exposure; float pad0; float pad1; float pad2; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float3 acesFilm(float3 x) {
+    return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 c = textures[push.textureIndex].Sample(sampler, uv);
+    float3 hdr = pow(max(c.rgb, 0.0), 2.2) * userData.exposure;
+    float3 mapped = acesFilm(hdr);
+    return float4(pow(mapped, 1.0 / 2.2) * push.colour.rgb, c.a * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 22: Animated Voronoi Pool Caustics Overlay
+- **Objective:** Project shimmering cyan-white Voronoi caustics (\`pow(voronoi(localUV * 6.0, userData.time), 3.0)\`) additively over an underwater sprite!
+- **Reference Solution:**
+\`\`\`hlsl
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 tex = textures[push.textureIndex].Sample(sampler, uv);
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float v = voronoi(localUV * 6.0, userData.time * 1.4);
+    float caustic = pow(saturate(v), 3.2) * 0.85;
+    float3 rgb = tex.rgb + float3(0.35, 0.85, 1.0) * caustic;
+    return float4(rgb * push.colour.rgb, tex.a * push.colour.a);
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "2D Cook-Torrance PBR & ACES Tone Mapping Pipeline",
+        chart: `
+flowchart LR
+    classDef tex fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef pbr fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef hdr fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Inputs["Albedo (Linear) + Normal Map<br/>Roughness & Metallic"]:::tex
+    Micro["Microfacet BRDF<br/>kD Diffuse + D_GGX * F_Schlick Specular"]:::pbr
+    HDR["HDR Radiance Sum<br/>Values > 1.0 Stay Unclipped"]:::hdr
+    ACES["acesFilm() + Gamma 1/2.2<br/>Vivid Saturated Output"]:::out
+
+    Inputs --> Micro --> HDR --> ACES
+`,
+      },
+      {
+        title: "Procedural GPU Texture Synthesis: From 2D Hash to Domain Warping",
+        chart: `
+flowchart LR
+    classDef h fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef n fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef w fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Hash["hash22(cell)<br/>Deterministic Grid Seeds"]:::h
+    Vor["Voronoi (3x3 Cells)<br/>pow(minDist, 3) -> Water Caustics"]:::n
+    FBM["fBm (4 Octaves)<br/>freq * 2, amp * 0.5 -> Clouds & Terrain"]:::n
+    Warp["Domain Warping<br/>fbm(p + fbm(p)) -> Swirled Magma & Portals"]:::w
+
+    Hash --> Vor
+    Hash --> FBM --> Warp
+`,
+      },
+    ],
+  },
 ];

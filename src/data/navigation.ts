@@ -364,6 +364,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-shader-book-3d-depth-raymarching",
         shortTitle: "Book VII: 3D Depth, Raymarching & Parallax",
       },
+      {
+        id: "vk2d-shader-book-pbr-lighting-and-post",
+        shortTitle: "Book VIII: 2D PBR, ACES & Procedural Noise",
+      },
     ],
   },
 ];
