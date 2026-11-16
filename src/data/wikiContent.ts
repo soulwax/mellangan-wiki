@@ -6941,18 +6941,18 @@ sequenceDiagram
     App->>R: vk2dRendererSetTarget(offscreenTex)
     R->>R: vk2dRendererFlushSpriteBatch()
     R->>Cmd: vkCmdEndRenderPass()
-    R->>Cmd: _vk2dTransitionImageLayout(offscreenTex->img)<br/>SHADER_READ_ONLY_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
-    R->>Cmd: vkCmdBeginRenderPass(externalTargetRenderPass, offscreenTex->fbo)
+    R->>Cmd: Transition offscreenTex SHADER_READ_ONLY to COLOR_ATTACHMENT
+    R->>Cmd: vkCmdBeginRenderPass(externalTargetRenderPass, offscreenFBO)
     R->>R: _vk2dRendererResetBoundPointers()
 
-    App->>R: Draw lights / sprites to offscreenTex
+    App->>R: Draw lights and sprites to offscreenTex
     App->>R: vk2dRendererSetTarget(VK2D_TARGET_SCREEN)
     R->>R: vk2dRendererFlushSpriteBatch()
     R->>Cmd: vkCmdEndRenderPass()
-    R->>Cmd: _vk2dTransitionImageLayout(offscreenTex->img)<br/>COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+    R->>Cmd: Transition offscreenTex COLOR_ATTACHMENT to SHADER_READ_ONLY
     R->>Cmd: vkCmdBeginRenderPass(midFrameSwapRenderPass, swapchainFBO)
     R->>R: _vk2dRendererResetBoundPointers()
-    App->>R: Sample offscreenTex in post-process or sprite batch!
+    App->>R: Sample offscreenTex in post-process or sprite batch
 `,
       },
     ],
