@@ -109,23 +109,39 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
             (i) => i.id === activeSection.id,
           );
 
+          const isVulkan2d = group.key === "vulkan2d";
+
           return (
             <div
               key={group.key}
-              className="wiki-nav-group overflow-hidden"
+              className={`wiki-nav-group overflow-hidden ${
+                isVulkan2d
+                  ? "mt-2 rounded-lg border border-fuchsia-500/35 bg-gradient-to-br from-fuchsia-950/35 via-dark-900/90 to-orange-950/25 shadow-[0_0_16px_-4px_rgba(232,121,249,0.22)]"
+                  : ""
+              }`}
             >
               <button
                 onClick={() => toggleGroup(group.key)}
                 aria-expanded={isOpen}
                 className={`w-full px-2 py-1.5 flex items-center justify-between gap-1.5 text-left transition-colors ${
-                  hasActiveChild
-                    ? "bg-dark-850/90 text-slate-100"
-                    : "hover:bg-dark-900/80 text-slate-300"
+                  isVulkan2d
+                    ? hasActiveChild
+                      ? "bg-fuchsia-500/15 text-fuchsia-100"
+                      : "hover:bg-fuchsia-500/10 text-fuchsia-200"
+                    : hasActiveChild
+                      ? "bg-dark-850/90 text-slate-100"
+                      : "hover:bg-dark-900/80 text-slate-300"
                 }`}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Icon className={`w-3.5 h-3.5 shrink-0 ${group.color}`} />
-                  <span className="text-[11.5px] font-display font-bold tracking-tight truncate">
+                  <span
+                    className={`text-[11.5px] font-display font-bold tracking-tight truncate ${
+                      isVulkan2d
+                        ? "bg-gradient-to-r from-fuchsia-300 via-pink-200 to-orange-300 bg-clip-text text-transparent"
+                        : ""
+                    }`}
+                  >
                     {group.label}
                   </span>
                 </div>

@@ -1,5 +1,5 @@
 import type { ElementType } from "react";
-import { Cpu, Layers, Compass, Swords, Terminal, Wrench, BookOpen, Sparkles, Calculator, FileCode2, Workflow } from "lucide-react";
+import { Cpu, Layers, Compass, Swords, Terminal, Wrench, BookOpen, Sparkles, Calculator, FileCode2, Workflow, Flame } from "lucide-react";
 
 interface NavTreeItem {
   id: string;
@@ -150,59 +150,6 @@ export const NAV_TREE: NavTreeGroup[] = [
     ],
   },
   {
-    key: "vulkan2d",
-    label: "Vulkan2D Subsystem (extern/Vulkan2d)",
-    icon: Layers,
-    color: "text-cyan-400",
-    badgeColor: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
-    items: [
-      {
-        id: "vk2d-architecture",
-        shortTitle: "Renderer Architecture & Frame Lifecycle",
-      },
-      {
-        id: "vk2d-devices-memory",
-        shortTitle: "Devices, VMA & Paged DescriptorBuffers",
-      },
-      {
-        id: "vk2d-descriptors-textures",
-        shortTitle: "Bindless Texture Array & DescriptorControl",
-      },
-      {
-        id: "vk2d-sprite-batching",
-        shortTitle: "Compute Sprite Batching & Instanced Draws",
-      },
-      {
-        id: "vk2d-pipelines-shaders",
-        shortTitle: "Pipelines, Blend Modes & Slang Compiler",
-      },
-      {
-        id: "vk2d-targets-cameras",
-        shortTitle: "Render Targets, 3 Passes & 10-Camera UBO",
-      },
-      {
-        id: "vk2d-primitives-shadows-gui",
-        shortTitle: "Polygons, 2D Shadows, 3D Models & Nuklear",
-      },
-      {
-        id: "vk2d-validation-logging-utils",
-        shortTitle: "Validation, Thread-Safe Logger & Utilities",
-      },
-      {
-        id: "vk2d-examples-cookbook",
-        shortTitle: "Practical Cookbook & Sample Walkthroughs",
-      },
-      {
-        id: "vk2d-math-matrices",
-        shortTitle: "Math.h Matrix Engine & Coordinate Transforms",
-      },
-      {
-        id: "vk2d-api-reference",
-        shortTitle: "Complete Public API Reference & Struct Layout",
-      },
-    ],
-  },
-  {
     key: "world-terrain",
     label: "World & Terrain Synthesis",
     icon: Compass,
@@ -329,6 +276,60 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
     ],
   },
+  {
+    key: "vulkan2d",
+    label: "Vulkan2D Subsystem (extern/Vulkan2d)",
+    icon: Flame,
+    color: "text-fuchsia-400 drop-shadow-[0_0_6px_rgba(232,121,249,0.55)]",
+    badgeColor:
+      "bg-gradient-to-r from-fuchsia-500/25 to-orange-500/25 text-fuchsia-200 border-fuchsia-400/50 shadow-[0_0_8px_rgba(232,121,249,0.25)]",
+    items: [
+      {
+        id: "vk2d-architecture",
+        shortTitle: "Renderer Architecture & Frame Lifecycle",
+      },
+      {
+        id: "vk2d-devices-memory",
+        shortTitle: "Devices, VMA & Paged DescriptorBuffers",
+      },
+      {
+        id: "vk2d-descriptors-textures",
+        shortTitle: "Bindless Texture Array & DescriptorControl",
+      },
+      {
+        id: "vk2d-sprite-batching",
+        shortTitle: "Compute Sprite Batching & Instanced Draws",
+      },
+      {
+        id: "vk2d-pipelines-shaders",
+        shortTitle: "Pipelines, Blend Modes & Slang Compiler",
+      },
+      {
+        id: "vk2d-targets-cameras",
+        shortTitle: "Render Targets, 3 Passes & 10-Camera UBO",
+      },
+      {
+        id: "vk2d-primitives-shadows-gui",
+        shortTitle: "Polygons, 2D Shadows, 3D Models & Nuklear",
+      },
+      {
+        id: "vk2d-validation-logging-utils",
+        shortTitle: "Validation, Thread-Safe Logger & Utilities",
+      },
+      {
+        id: "vk2d-examples-cookbook",
+        shortTitle: "Practical Cookbook & Sample Walkthroughs",
+      },
+      {
+        id: "vk2d-math-matrices",
+        shortTitle: "Math.h Matrix Engine & Coordinate Transforms",
+      },
+      {
+        id: "vk2d-api-reference",
+        shortTitle: "Complete Public API Reference & Struct Layout",
+      },
+    ],
+  },
 ];
 
 interface FeaturedTopic {
@@ -372,7 +373,7 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
         id: "vk2d-architecture",
         title: "Vulkan2D Subsystem",
         subtitle: "3 Command Buffers & Bindless GPU Batching",
-        icon: Layers,
+        icon: Flame,
       },
       {
         id: "terrain-construction",
