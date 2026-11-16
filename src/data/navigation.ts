@@ -192,6 +192,14 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-examples-cookbook",
         shortTitle: "Practical Cookbook & Sample Walkthroughs",
       },
+      {
+        id: "vk2d-math-matrices",
+        shortTitle: "Math.h Matrix Engine & Coordinate Transforms",
+      },
+      {
+        id: "vk2d-api-reference",
+        shortTitle: "Complete Public API Reference & Struct Layout",
+      },
     ],
   },
   {

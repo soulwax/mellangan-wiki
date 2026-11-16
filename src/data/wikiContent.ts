@@ -6249,6 +6249,26 @@ When a user resizes or minimizes the window (causing \`VK_ERROR_OUT_OF_DATE_KHR\
 1. If the window is minimized (\`SDL_WINDOW_MINIMIZED\`), \`_vk2dRendererResetSwapchain()\` pauses in a lightweight \`SDL_PumpEvents()\` loop until the window is restored.
 2. It waits for the GPU to finish (\`vkDeviceWaitIdle\`) and rebuilds the swapchain, MSAA buffer, depth buffer, framebuffers, camera UBOs, samplers, and sync objects.
 3. **Smart MSAA Rebuild:** Because Vulkan bakes MSAA sample counts into render passes, pipelines, and offscreen framebuffers, VK2D checks \`bool msaaChanged = gRenderer->newConfig.msaa != gRenderer->config.msaa;\`. Only when MSAA actually changed does it destroy and recreate the 3 \`VkRenderPass\` objects, rebuild all pipelines (keeping custom shaders alive), and call \`_vk2dRendererRefreshTargets()\` to resize the MSAA resolve images of every offscreen texture target!
+
+### Detailed Swapchain Image Acquisition & Fence Tracking (\`vk2dRendererStartFrame\`)
+
+Let's trace what happens at the very start of a frame inside \`vk2dRendererStartFrame()\`:
+1. **Wait on the Frame-in-Flight Fence:** First, the CPU calls \`vkWaitForFences(ld->dev, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX)\`. Because \`inFlightFences[0..1]\` are created in the **signaled** state (\`VK_FENCE_CREATE_SIGNALED_BIT\`), the very first two frames do not block at all.
+2. **Acquire a Swapchain Image in a Retry Loop:** Next, it calls \`vkAcquireNextImageKHR(..., imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &scImageIndex)\`:
+   * \`VK_SUCCESS\`: Image acquired cleanly; break out of the loop and proceed.
+   * \`VK_SUBOPTIMAL_KHR\`: The image is still usable for this frame, so VK2D sets \`gRenderer->resetSwapchain = true\` (to rebuild the swapchain right after presenting this frame) and breaks out of the loop to draw normally.
+   * \`VK_ERROR_OUT_OF_DATE_KHR\`: The window size changed and the image cannot be used. VK2D immediately calls \`_vk2dRendererResetSwapchain()\` and \`continue\`s the \`for (;;)\` loop to acquire a fresh image from the newly rebuilt swapchain!
+   * \`VK_NOT_READY\` or \`VK_TIMEOUT\`: Sets \`procedStartFrame = false\` and skips the frame without crashing.
+3. **Check if That Swapchain Image Is Still in Flight (\`imagesInFlight\`):** Because a swapchain usually has 3 images while \`VK2D_MAX_FRAMES_IN_FLIGHT\` is 2, \`imagesInFlight[scImageIndex]\` stores the \`VkFence\` of whichever frame last rendered to \`scImageIndex\`. If \`imagesInFlight[scImageIndex] != VK_NULL_HANDLE\`, VK2D waits on that fence before reassigning \`imagesInFlight[scImageIndex] = inFlightFences[currentFrame]\`.
+4. **Rolling 1-Second Frame Time Average:** At the end of \`vk2dRendererEndFrame()\`, VK2D measures the elapsed wall time since \`previousTime\` in milliseconds using \`SDL_GetPerformanceCounter()\`, adds it to \`accumulatedTime\`, and increments \`amountOfFrames\`. Once \`accumulatedTime >= 1000.0\` ms (one full second), it updates \`gRenderer->frameTimeAverage = accumulatedTime / amountOfFrames\` and resets both counters to zero. That way, calling \`vk2dRendererGetAverageFrameTime()\` returns a stable, jitter-free millisecond reading ($1000 / \\text{avg}$ = FPS)!
+
+### Reverse-Order Teardown (\`vk2dRendererQuit\`)
+
+When your game exits and calls \`vk2dRendererQuit()\`, VK2D cleans up in the exact reverse order of initialization:
+1. If a frame is currently open (\`procedStartFrame == true\`), it calls \`vk2dRendererEndFrame()\` to flush and submit it cleanly.
+2. It calls \`vkQueueWaitIdle(gRenderer->ld->queue)\` so the GPU finishes all work in flight before any buffer or image is destroyed.
+3. It shuts down the Slang compiler (\`_vk2dQuitShaderCompiler\`) and Nuklear GUI (\`_vk2dRendererQuitNuklear\`), then destroys sprite batching, sync objects, target lists, unit polygons, samplers, descriptor pools, descriptor buffers, framebuffers, pipelines, descriptor set layouts, render passes, depth and MSAA buffers, the swapchain, window surface, debug callbacks, and \`vmaDestroyAllocator\`.
+4. Finally, it frees the logical device, physical device, \`VkInstance\`, logger/validation mutexes, and \`gRenderer\` itself.
 `,
     mermaidCharts: [
       {
@@ -6428,6 +6448,16 @@ To solve this, VK2D creates one \`VK2DDescriptorBuffer\` per frame in flight (\`
 4. **Two-Stage Pipeline Barriers (\`RecordCopyPipelineBarrier\` & \`RecordComputePipelineBarrier\`):**
    * At the end of \`dbCommandBuffer\`: Records a buffer barrier on all active pages so the **Compute Shader** waits until the **DMA Transfer** finishes writing \`deviceBuffer\`.
    * At the end of \`computeCommandBuffer\`: Records a second buffer barrier on all active pages so the **Vertex Shader** waits until the **Compute Shader** finishes writing the sprite instance matrices into \`deviceBuffer\`.
+
+#### How \`vramPageSize\` Controls Your Renderer Limits
+
+Because a single allocation inside \`VK2DDescriptorBuffer\` can never span across two separate 256 KB pages (\`if (size < db->pageSize)\`), the value of \`options.vramPageSize\` directly sets the three hardware limits returned by \`vk2dRendererGetLimits()\`:
+
+| Limit Field in \`VK2DRendererLimits\` | Formula in \`Renderer.c\` / \`RendererMeta.c\` | Value at Default \`256,000\` B Page |
+| --- | --- | ---: |
+| \`maxInstancedDraws\` | $\\min(\\lfloor\\text{vramPageSize} / 64\\rfloor,\\, \\lfloor\\text{vramPageSize} / 112\\rfloor) - 1$ | **2,284** sprites per batch |
+| \`maxGeometryVertices\` | $\\lfloor\\text{vramPageSize} / \\text{sizeof(VK2DVertexColour)}\\rfloor - 1 = \\lfloor 256{,}000 / 28 \\rfloor - 1$ | **9,141** vertices per \`DrawGeometry\` call |
+| \`maxShaderBufferSize\` | $\\min(\\text{maxUniformBufferRange},\\, \\text{vramPageSize})$ | **65,536 B** (or **256,000 B** if GPU allows) |
 `,
     mermaidCharts: [
       {
@@ -7007,6 +7037,11 @@ While VK2D is built for 2D games, it includes a depth-buffered 3D mesh pipeline 
 
 If you set \`options.enableNuklear = true\` at startup, VK2D initializes an embedded **Nuklear** immediate-mode GUI context (\`vk2dGuiContext()\`). In your event loop, wrap \`SDL_PollEvent(&e)\` between \`vk2dGuiStartInput()\`, \`vk2dGuiProcessEvent(&e)\`, and \`vk2dGuiEndInput()\`, then build your debug windows with standard \`nk_begin()\` / \`nk_end()\` calls.
 
+Inside \`VK2D/src/nuklear.c\`, Nuklear maintains its own dedicated Vulkan resources (\`struct nk_sdl_device\`):
+* **Per-Swapchain-Image Mapped Buffers:** Allocates a \`512 KB\` vertex buffer (\`MAX_VERTEX_BUFFER\`), \`128 KB\` 16-bit index buffer (\`MAX_ELEMENT_BUFFER\`), and \`64-byte\` orthographic projection UBO per swapchain image, keeping them persistently mapped (\`mapped_vertexs\`, \`mapped_indexs\`, \`mapped_uniforms\`) so \`nk_convert()\` writes UI triangles straight into host-visible memory each frame.
+* **Font Atlas & up to 256 UI Textures:** Bakes a default 16 px font into a \`VK_FORMAT_R8G8B8A8_UNORM\` \`VkImage\` (\`font_image\`) and caches up to \`NK_SDL_MAX_TEXTURES = 256\` combined image sampler descriptor sets (\`texture_descriptor_sets\`).
+* **Automatic SDL3 Clipboard Integration:** Hooks \`nk_sdl_clipboard_copy\` and \`nk_sdl_clipboard_paste\` directly to \`SDL_SetClipboardText()\` and \`SDL_GetClipboardText()\` so copy-pasting into Nuklear text boxes works out of the box.
+
 How does Nuklear draw on top of your game without clashing with VK2D's command buffers? At the end of \`vk2dRendererEndFrame()\`:
 1. VK2D submits its own 3 command buffers to \`ld->queue\`, which signal \`renderFinishedSemaphores[scImageIndex]\` when done.
 2. VK2D then calls \`nk_sdl_render(..., renderFinishedSemaphores[scImageIndex])\`, which tells Nuklear's Vulkan command buffer to **wait** for VK2D's rendering to finish before drawing the GUI, and returns a new semaphore (\`nkSemaphore\`).
@@ -7285,6 +7320,252 @@ flowchart LR
     Comp["4. vk2dRendererSetTarget(SCREEN)<br/>Draw lightTex over scene<br/>Repeat for each Light[0..7]"]:::pass3
 
     Empty --> Orb --> Sub --> Comp
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-math-matrices",
+    title: "62. Math.h Matrix Engine, Clip Space & Coordinate Transforms",
+    category: "graphics",
+    summary:
+      "How VK2D's standalone Math.h builds 2D and 3D view, orthographic, and perspective matrices for Vulkan's Y-down and [0, 1] depth clip space, plus pivot rotation math.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/include/VK2D/Math.h",
+      "extern/Vulkan2d/VK2D/src/RendererMeta.c",
+      "extern/Vulkan2d/shaders/spritebatch.comp",
+      "extern/Vulkan2d/shaders/colour.vert",
+    ],
+    content: `
+### Why VK2D Includes Its Own \`Math.h\` Instead of CGLM
+
+Many C graphics projects use \`cglm\` (an OpenGL-focused math library). However, **Vulkan's clip space is different from OpenGL's clip space in two big ways**:
+1. **Flipped $Y$-Axis:** In OpenGL, clip-space $Y = -1$ is the bottom of the screen and $Y = +1$ is the top. In Vulkan, $Y = -1$ is the **top** of the screen and $Y = +1$ is the **bottom**!
+2. **Half-Range Depth ($Z \\in [0, 1]$):** OpenGL maps near-to-far depth into $[-1, +1]$, whereas Vulkan maps near-to-far depth into $[0, 1]$.
+
+To avoid fighting OpenGL matrix conventions, \`VK2D/include/VK2D/Math.h\` embeds a clean, self-contained 247-line vector and $4 \\times 4$ matrix library (originally written by Ali Emre Gülcü under the MIT license) tailored specifically for Vulkan's coordinate system.
+
+### Vector Operations & $4 \\times 4$ Matrix Layout (\`Math.h\`)
+
+VK2D defines four basic float array types in \`Structs.h\` (unless disabled via \`VK2D_DISABLE_VECTOR_TYPES\`):
+\`\`\`c
+typedef float vec2[2];
+typedef float vec3[3];
+typedef float vec4[4];
+typedef float mat4[16];
+\`\`\`
+
+In \`Math.h\`, a \`mat4\` is a flat 16-element float array where the translation components $(t_x, t_y, t_z)$ live in indices \`m[12]\`, \`m[13]\`, and \`m[14]\` (the fourth 4-float column vector in GLSL column-major memory layout):
+* \`identityMatrix(m)\`: Sets the main diagonal \`m[0] = m[5] = m[10] = m[15] = 1.0f\`.
+* \`normalize(v)\`: Computes $L = \\sqrt{v_0^2 + v_1^2 + v_2^2}$ and divides $v$ by $L$ if $L > \\epsilon$ ($\epsilon = 0.0009765625 = 2^{-10}$).
+* \`dot(a, b)\` and \`cross(a, b, c)\`: Standard 3D dot product and cross product.
+* \`scaleMatrix(m, v)\` and \`translateMatrix(m, v)\`: Pre-multiplies matrix \`m\` by a $4 \\times 4$ scale or translation matrix \`k\` (\`multiplyMatrix(k, m, t)\`).
+* \`rotateMatrix(m, w, r)\`: Normalizes rotation axis \`w\` and applies **Rodrigues' 3D axis-angle rotation formula** for angle \`r\` (in radians):
+  $$R(\\mathbf{w}, r) = \\begin{bmatrix} x^2(1-c)+c & xy(1-c)+sz & xz(1-c)-sy & 0 \\\\ xy(1-c)-sz & y^2(1-c)+c & yz(1-c)+sx & 0 \\\\ xz(1-c)+sy & yz(1-c)-sx & z^2(1-c)+c & 0 \\\\ 0 & 0 & 0 & 1 \\end{bmatrix}$$
+  where $s = \\sin(r)$ and $c = \\cos(r)$.
+
+### How 2D and 3D Cameras Build Their View-Projection Matrix (\`_vk2dCameraUpdateUBO\`)
+
+At the end of every frame, \`_vk2dCameraUpdateUBO()\` in \`RendererMeta.c\` builds \`ubo->viewproj[index]\` by multiplying a **View Matrix** (\`cameraMatrix\`) and a **Projection Matrix** (\`orthographicMatrix\` or \`perspectiveMatrix\`):
+
+#### 1. Look-At View Matrix (\`cameraMatrix\`)
+
+Given camera position \`eye\`, target point \`cent\`, and up vector \`top\`, \`cameraMatrix(m, eye, cent, top)\` computes three orthonormal basis vectors:
+* Forward: $\\mathbf{f} = \\operatorname{normalize}(\\text{cent} - \\text{eye})$
+* Left: $\\mathbf{l} = \\operatorname{normalize}(\\mathbf{f} \\times \\text{top})$
+* True Up: $\\mathbf{u} = \\mathbf{l} \\times \\mathbf{f}$
+
+For a **2D Default Camera** (\`VK2D_CAMERA_TYPE_DEFAULT\`) with top-left world position $(x, y)$, virtual size $(w, h)$, and rotation angle \`rot\`, \`_vk2dCameraUpdateUBO()\` places the camera eye at the center of the screen at $z = -2$ looking straight toward $z = 0$:
+\`\`\`c
+vec3 eyes   = {camera->x + (camera->w * 0.5f), camera->y + (camera->h * 0.5f), -2.0f};
+vec3 center = {eyes[0], eyes[1], 0.0f};
+vec3 up     = {sin(-camera->rot), -cos(-camera->rot), 0.0f};
+cameraMatrix(view, eyes, center, up);
+\`\`\`
+
+#### 2. Vulkan Orthographic & Perspective Projection Matrices
+
+Look at \`orthographicMatrix(m, h, r, n, f)\` and \`perspectiveMatrix(m, fov, asp, n, f)\` in \`Math.h\`, where \`h\` is the zoomed height ($h / \\text{zoom}$), \`r\` / \`asp\` is the aspect ratio ($w / h$), \`n = 0.1\` is the near plane, and \`f = 10.0\` is the far plane:
+
+$$P_{\\text{ortho}} = \\begin{bmatrix} \\frac{2}{h \\cdot r} & 0 & 0 & 0 \\\\ 0 & -\\frac{2}{h} & 0 & 0 \\\\ 0 & 0 & \\frac{1}{n - f} & 0 \\\\ 0 & 0 & \\frac{n}{n - f} & 1 \\end{bmatrix}, \\qquad P_{\\text{persp}} = \\begin{bmatrix} \\frac{1}{\\tan(\\text{fov}/2) \\cdot \\text{asp}} & 0 & 0 & 0 \\\\ 0 & -\\frac{1}{\\tan(\\text{fov}/2)} & 0 & 0 \\\\ 0 & 0 & \\frac{f}{n - f} & -1 \\\\ 0 & 0 & \\frac{n \\cdot f}{n - f} & 0 \\end{bmatrix}$$
+
+Notice two key details in both matrices:
+* The second diagonal entry (`m[5]`) is **negative** ($-2/h$ and $-1/\\tan(\\text{fov}/2)$) to match Vulkan's top-down clip space.
+* The third row maps $z = n$ to $0$ and $z = f$ to $1$, matching Vulkan's $[0, 1]$ depth buffer range!
+
+### Pivot-Point Rotation Math (CPU vs GPU Compute)
+
+When you rotate a 2D sprite or shape around a local pivot point \`(originX, originY)\` with scale \`(xscale, yscale)\` at world position \`(x, y)\`, VK2D cannot simply rotate around $(0, 0)$ or the sprite would orbit around the top-left corner of the world.
+
+Instead, both the CPU draw path (\`_vk2dRendererDrawRaw\` in \`RendererMeta.c\`) and the GPU compute shader (\`shaders/spritebatch.comp\`) perform a **three-step sandwich transform**:
+1. Scale the pivot offset by the sprite's scale: $\\text{ox}' = -\\text{originX} \\cdot \\text{xscale}$ and $\\text{oy}' = \\text{originY} \\cdot \\text{yscale}$.
+2. Translate to the world pivot point $(x - \\text{ox}',\\, y + \\text{oy}')$, rotate by angle $\\theta$ around the $Z$-axis, and translate back by $(\\text{ox}',\\, -\\text{oy}')$.
+3. Multiply by the scaling matrix $(\\text{xscale},\\, \\text{yscale},\\, 1)$.
+
+*(Performance Optimization: In \`_vk2dRendererDrawRaw\` and \`_vk2dRendererDrawRawShader\`, if \`rot == 0\`, VK2D skips the three pivot translation/rotation matrix multiplications completely and performs a single \`translateMatrix\` call! Similarly, if \`xscale == 1 && yscale == 1\`, it skips \`scaleMatrix\`!)*
+`,
+    mermaidCharts: [
+      {
+        title: "2D World Space to Vulkan Normalized Device Coordinates (NDC) Pipeline",
+        chart: `
+flowchart LR
+    classDef local fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef world fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef cam fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef ndc fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Local["Local Quad Corner<br/>(0..w, 0..h)"]:::local
+    Model["Model Matrix (M)<br/>T(pivot) * Rz(rot) * T(-pivot) * S(scale)"]:::world
+    View["Camera View Matrix (V)<br/>eye = (x + w/2, y + h/2, -2)<br/>up = (sin(-rot), -cos(-rot), 0)"]:::cam
+    Proj["Orthographic Matrix (P)<br/>Scale (2/w, -2/h), Z in [0, 1]"]:::cam
+    Clip["Vulkan Clip Space (gl_Position)<br/>X in [-1, +1], Y in [-1 (top), +1 (bottom)], Z in [0, 1]"]:::ndc
+
+    Local --> Model --> View --> Proj --> Clip
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-api-reference",
+    title: "63. Complete Vulkan2D Public API Reference & Struct Cheat Sheet",
+    category: "graphics",
+    summary:
+      "A single-page lookup table of every public C function, shorthand drawing macro, push-constant struct layout, and opaque handle across all headers in extern/Vulkan2d/VK2D/include/VK2D/.",
+    sourceFiles: [
+      "extern/Vulkan2d/VK2D/include/VK2D/VK2D.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Renderer.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Structs.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Texture.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Camera.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Polygon.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Shader.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/ShadowEnvironment.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Model.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Gui.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/Logger.h",
+      "extern/Vulkan2d/VK2D/include/VK2D/VulkanInterface.h",
+    ],
+    content: `
+### 1. Renderer Lifecycle, Config & Frame Control (\`Renderer.h\`)
+
+| Function Signature | Summary & Notes |
+| --- | --- |
+| \`VK2DResult vk2dRendererInit(SDL_Window *window, VK2DRendererConfig config, const VK2DStartupOptions *options)\` | Initializes Vulkan 1.2, VMA, swapchain, pipelines, and starts Frame 1. Pass \`NULL\` for \`options\` to use defaults. |
+| \`void vk2dRendererPresent()\` | Ends the current frame (\`vk2dRendererEndFrame\`), submits the 3 command buffers, presents the swapchain, and immediately begins the next frame (\`vk2dRendererStartFrame\`). |
+| \`void vk2dRendererWait()\` | Calls \`vkQueueWaitIdle\`. **Must** be called before freeing any textures, polygons, models, or shaders! |
+| \`void vk2dRendererQuit()\` | Ends the active frame, waits for the GPU to idle, and frees all internal Vulkan/VMA/Nuklear/Slang resources. |
+| \`VK2DRendererConfig vk2dRendererGetConfig()\` | Returns the active (hardware-clamped) MSAA, screen mode, and filter configuration. |
+| \`void vk2dRendererSetConfig(VK2DRendererConfig config)\` | Queues a new MSAA or VSync/Immediate/TripleBuffer mode; takes effect on the next swapchain reset at the end of the frame. |
+| \`void vk2dRendererResetSwapchain()\` | Manually flags the swapchain to rebuild at the end of the current frame. |
+| \`VK2DRendererLimits vk2dRendererGetLimits()\` | Returns host GPU limits (\`maxMSAA\`, \`maxInstancedDraws\`, \`maxShaderBufferSize\`, \`maxGeometryVertices\`, \`supportsVRAMUsage\`, etc.). |
+| \`void vk2dRendererGetVRAMUsage(float *inUse, float *total)\` | Queries VMA heap budgets and writes used and total device-local VRAM in **MiB**. |
+| \`double vk2dRendererGetAverageFrameTime()\` | Returns the rolling 1-second average frame time in milliseconds ($1000 / \\text{ms}$ = FPS). |
+| \`const char *vk2dHostInformation()\` | Returns a formatted string with OS, SDL3 version, CPU core count, system RAM, GPU name, and Vulkan/VK2D versions. |
+| \`void vk2dSleep(double seconds)\` | Hybrid \`SDL_Delay\` + high-precision performance-counter spin-wait for exact frame rate limiting. |
+| \`double vk2dTime()\` | Returns elapsed time in seconds since \`vk2dRendererInit()\`. |
+| \`float vk2dRandom(float min, float max)\` | Thread-safe atomic LCG random float in $[\\text{min}, \\text{max}]$ with $1/5000$ step resolution. |
+
+### 2. Render Targets, Blend Modes, Colors & Cameras (\`Renderer.h\` & \`Camera.h\`)
+
+| Function Signature | Summary & Notes |
+| --- | --- |
+| \`void vk2dRendererSetTarget(VK2DTexture target)\` | Switches drawing to an offscreen render-target texture or back to \`VK2D_TARGET_SCREEN\` (\`NULL\`). Flushes the sprite batch and transitions image layouts automatically. |
+| \`void vk2dRendererClear()\` | Fills the current render target with the current \`colourMod\` using a full-screen \`UNIT_VIEW\` quad. |
+| \`void vk2dRendererEmpty()\` | Clears every pixel of the current render target to transparent black \`{0, 0, 0, 0}\` using \`VK2D_BLEND_MODE_NONE\`. |
+| \`void vk2dRendererSetBlendMode(VK2DBlendMode blendMode)\` | Flushes the sprite batch and sets the blend mode (\`BLEND\`, \`NONE\`, \`ADD\`, or \`SUBTRACT\`). |
+| \`VK2DBlendMode vk2dRendererGetBlendMode()\` | Returns the currently active \`VK2DBlendMode\`. |
+| \`void vk2dRendererSetColourMod(const vec4 mod)\` | Sets the global RGBA color multiplier applied to subsequent draws (default \`VK2D_DEFAULT_COLOUR_MOD = {1,1,1,1}\`). |
+| \`void vk2dRendererGetColourMod(vec4 dst)\` | Copies the current RGBA color modifier into \`dst\`. |
+| \`void vk2dColourHex(vec4 dst, const char *hex)\` | Parses a 7-char hex string like \`"#59d9d7"\` into normalized RGBA floats (alpha = \`1.0f\`). |
+| \`void vk2dColourInt(vec4 dst, uint32_t colour)\` | Unpacks a 32-bit \`0xRRGGBBAA\` integer into normalized RGBA floats. |
+| \`void vk2dColourRGBA(vec4 dst, uint8_t r, uint8_t g, uint8_t b, uint8_t a)\` | Converts four \`0..255\` bytes into normalized RGBA floats. |
+| \`VK2DCameraIndex vk2dCameraCreate(VK2DCameraSpec spec)\` | Allocates a new camera slot (\`1..9\`, or \`VK2D_INVALID_CAMERA\` if full) and sets its state to \`NORMAL\`. |
+| \`void vk2dCameraUpdate(VK2DCameraIndex index, VK2DCameraSpec spec)\` | Updates a camera's world lens and screen viewport spec (replaces zero \`wOnScreen\`/\`hOnScreen\` with window size). |
+| \`VK2DCameraSpec vk2dCameraGetSpec(VK2DCameraIndex index)\` | Returns the current \`VK2DCameraSpec\` of camera \`index\`. |
+| \`void vk2dCameraSetState(VK2DCameraIndex index, VK2DCameraState state)\` | Flushes the sprite batch and sets camera state (\`NORMAL\`, \`DISABLED\`, or \`DELETED\`). Cannot delete \`VK2D_DEFAULT_CAMERA (0)\`. |
+| \`VK2DCameraState vk2dCameraGetState(VK2DCameraIndex index)\` | Returns the current \`VK2DCameraState\` of camera \`index\`. |
+| \`void vk2dRendererSetCamera(VK2DCameraSpec camera)\` | Updates \`VK2D_DEFAULT_CAMERA (0)\` while keeping its viewport locked to the full window size. |
+| \`VK2DCameraSpec vk2dRendererGetCamera()\` | Returns the \`VK2DCameraSpec\` of \`VK2D_DEFAULT_CAMERA (0)\`. |
+| \`void vk2dRendererLockCameras(VK2DCameraIndex cam)\` | Flushes the sprite batch and restricts subsequent draws to render **only** to camera \`cam\`. |
+| \`void vk2dRendererUnlockCameras()\` | Flushes the sprite batch and resumes rendering to all enabled cameras. |
+| \`void vk2dRendererSetTextureCamera(bool useCameraOnTextures)\` | When \`true\`, drawing to an offscreen texture uses active world cameras instead of raw texture pixel coordinates. |
+
+### 3. Drawing Functions & Zero-Overhead Shorthand Macros (\`Renderer.h\`)
+
+| Full Function & Shorthand Macro(s) | What It Draws |
+| --- | --- |
+| \`vk2dRendererDrawTexture(tex, x, y, xscale, yscale, rot, ox, oy, xInTex, yInTex, texW, texH)\`<br/>• \`vk2dDrawTexture(tex, x, y)\`<br/>• \`vk2dDrawTextureExt(tex, x, y, xscale, yscale, rot, ox, oy)\`<br/>• \`vk2dDrawTexturePart(tex, x, y, xPos, yPos, w, h)\` | Appends a 2D sprite to the compute-accelerated sprite batch (\`instancedPipe\`). Negative \`xscale\` or \`yscale\` flips the sprite horizontally or vertically. |
+| \`vk2dRendererAddBatch(VK2DDrawCommand *commands, uint32_t count)\` | Appends an array of pre-built \`VK2DDrawCommand\` structs to the sprite batch, flushing automatically whenever the batch limit is reached. |
+| \`vk2dRendererFlushSpriteBatch()\` | Manually flushes the active sprite batch to the compute and draw command buffers. |
+| \`vk2dRendererDrawShader(shader, data, tex, x, y, xscale, yscale, rot, ox, oy, xInTex, yInTex, texW, texH)\`<br/>• \`vk2dDrawShader(shader, data, tex, x, y)\` | Flushes the sprite batch, uploads \`data\` (if \`uniformSize > 0\`) to Set 3, and draws \`tex\` using custom \`VK2DShader\` \`shader\`. |
+| \`vk2dRendererDrawRectangle(x, y, w, h, r, ox, oy)\`<br/>• \`vk2dDrawRectangle(x, y, w, h)\` | Draws a filled rectangle using \`unitSquare\` and \`primFillPipe\`. |
+| \`vk2dRendererDrawRectangleOutline(x, y, w, h, r, ox, oy, lineWidth)\`<br/>• \`vk2dDrawRectangleOutline(x, y, w, h, lw)\` | Draws a rectangle border using \`unitSquareOutline\` and \`primLinePipe\`. |
+| \`vk2dRendererDrawCircle(x, y, r)\` / \`vk2dDrawCircle(x, y, r)\`<br/>\`vk2dRendererDrawCircleOutline(x, y, r, lw)\` / \`vk2dDrawCircleOutline(x, y, r, lw)\` | Draws a filled or outlined 72-vertex circle of radius \`r\` centered at \`(x, y)\`. |
+| \`vk2dRendererDrawLine(x1, y1, x2, y2)\` / \`vk2dDrawLine(x1, y1, x2, y2)\` | Draws a line segment from \`(x1, y1)\` to \`(x2, y2)\` by scaling and rotating \`unitLine\`. |
+| \`vk2dRendererDrawPolygon(poly, x, y, filled, lineWidth, xscale, yscale, rot, ox, oy)\`<br/>• \`vk2dDrawPolygon(poly, x, y)\`<br/>• \`vk2dDrawPolygonOutline(poly, x, y, width)\` | Draws a pre-allocated \`VK2DPolygon\` VBO filled or outlined. |
+| \`vk2dRendererDrawGeometry(vertices, count, x, y, filled, lineWidth, xscale, yscale, rot, ox, oy)\` | Streams up to \`maxGeometryVertices\` (\`9,141\`) \`VK2DVertexColour\` vertices through the current frame's \`VK2DDescriptorBuffer\` and draws them immediately. |
+| \`vk2dRendererDrawShadows(shadowEnvironment, colour, lightSource)\` | Extrudes and draws all enabled 2D shadow objects in \`shadowEnvironment\` away from \`vec2 lightSource\`. |
+| \`vk2dRendererDrawModel(model, x, y, z, xscale, yscale, zscale, rot, axis, ox, oy, oz)\`<br/>• \`vk2dDrawModel(model, x, y, z)\` / \`vk2dDrawModelExt(...)\`<br/>• \`vk2dRendererDrawWireframe(...)\` / \`vk2dDrawWireframe(...)\` | Draws a 3D \`VK2DModel\` (filled or wireframe) to all active 3D cameras (\`PERSPECTIVE\` or \`ORTHOGRAPHIC\`). |
+
+### 4. Asset Management: Textures, Images, Polygons, Models, Shaders & Shadows
+
+| Header | Functions |
+| --- | --- |
+| **\`Texture.h\`** | \`vk2dTextureLoad(filename)\`, \`vk2dTextureFrom(data, size)\`, \`vk2dTextureLoadFromImage(image)\`, \`vk2dTextureCreate(w, h)\` (offscreen target), \`vk2dTextureUpdate(tex, pixels)\`, \`vk2dTextureUpdateRegion(tex, pixels, x, y, w, h)\`, \`vk2dTextureCopyPixels(tex, outPixels)\`, \`vk2dTextureWidth(tex)\`, \`vk2dTextureHeight(tex)\`, \`vk2dTextureIsTarget(tex)\`, \`vk2dTextureGetImage(tex)\`, \`vk2dTextureGetID(tex)\` (thread-safe atomic bindless ID), \`vk2dTextureFree(tex)\`. |
+| **\`Image.h\`** | \`vk2dImageCreate(dev, w, h, format, aspectMask, usage, samples)\`, \`vk2dImageLoad(dev, filename)\`, \`vk2dImageFromPixels(dev, pixels, w, h, mainThread)\`, \`vk2dImageUpdate(img, pixels, x, y, w, h)\`, \`vk2dImageFree(img)\`. |
+| **\`Polygon.h\`** | \`vk2dPolygonCreate(vertices, count)\` (auto-triangulates convex \`vec2\` loop), \`vk2dPolygonCreateOutline(vertices, count)\`, \`vk2dPolygonShapeCreateRaw(vertexData, count)\` (pre-triangulated \`VK2DVertexColour\`), \`vk2dPolygonFree(poly)\`. |
+| **\`Shader.h\`** | \`vk2dSlangLoad(slangFile)\`, \`vk2dSlangFrom(slangSource, size)\`, \`vk2dShaderFrom(vertSpv, vertSize, fragSpv, fragSize, uniformSize)\`, \`vk2dShaderFree(shader)\`. |
+| **\`ShadowEnvironment.h\`** | \`vk2dShadowEnvironmentCreate()\`, \`vk2dShadowEnvironmentAddObject(se)\`, \`vk2dShadowEnvironmentAddEdge(se, x1, y1, x2, y2)\`, \`vk2dShadowEnvironmentFlushVBO(se)\`, \`vk2dShadowEnvironmentObjectSetPos(se, obj, x, y)\`, \`vk2dShadowEnvironmentObjectUpdate(se, obj, x, y, sx, sy, rot, ox, oy)\`, \`vk2dShadowEnvironmentObjectSetStatus(se, obj, enabled)\`, \`vk2dShadowEnvironmentObjectGetStatus(se, obj)\`, \`vk2dShadowEnvironmentResetEdges(se)\`, \`vk2dShadowEnvironmentFree(se)\`. |
+| **\`Model.h\`** | \`vk2dModelLoad(objFile, tex)\`, \`vk2dModelFrom(objBytes, size, tex)\`, \`vk2dModelCreate(vertices, vCount, indices, iCount, tex)\`, \`vk2dModelFree(model)\` (does not free \`tex\`). |
+| **\`Gui.h\`** | \`vk2dGuiContext()\`, \`vk2dGuiStartInput()\`, \`vk2dGuiProcessEvent(SDL_Event *e)\`, \`vk2dGuiEndInput()\`. |
+| **\`Validation.h\` & \`Logger.h\`** | \`vk2dStatus()\`, \`vk2dStatusFatal()\`, \`vk2dStatusMessage()\`, \`vk2dRaise(status, fmt, ...)\`, \`vk2dSetLogger(logger)\`, \`vk2dDefaultLoggerSetSeverity(sev)\`, \`vk2dDefaultLoggerSetStandardOutput(out)\`, \`vk2dDefaultLoggerSetErrorOutput(out)\`, \`vk2dDefaultLoggerSetErrorFile(file)\`, \`vk2dLogDebug/Info/Warn/Error/Fatal(fmt, ...)\`. |
+| **\`VulkanInterface.h\`** | \`vk2dVulkanGetDrawBuffer()\`, \`vk2dVulkanGetComputeBuffer()\`, \`vk2dVulkanGetCopyBuffer()\`, \`vk2dVulkanGetSingleUseBuffer()\`, \`vk2dVulkanSubmitSingleUseBuffer(buf)\`, \`vk2dVulkanCopyDataIntoBuffer(data, size, &outBuf, &offset)\`, \`vk2dVulkanGetFrame()\`, \`vk2dVulkanGetSwapchainImageIndex()\`, \`vk2dVulkanGetSwapchainImageCount()\`, \`vk2dVulkanGetMaxFramesInFlight()\`, \`vk2dVulkanGetDevice()\`, \`vk2dVulkanGetPhysicalDevice()\`, \`vk2dVulkanGetQueue()\`, \`vk2dVulkanGetQueueFamily()\`, \`vk2dVulkanGetVMA()\`. |
+
+### 5. GPU Push Constant & Instance Buffer Byte Layout Cheat Sheet (\`Structs.h\`)
+
+When writing custom shaders or inspecting GPU captures in RenderDoc, every VK2D pipeline uses one of these exact binary layouts:
+
+| C Struct Name | Total Size | Byte Offsets & Fields |
+| --- | ---: | --- |
+| \`VK2DVertexColour\` | **28 B** | \`[0..11]\` \`vec3 pos\` $\\cdot$ \`[12..27]\` \`vec4 colour\` |
+| \`VK2DVertex3D\` | **20 B** | \`[0..11]\` \`vec3 pos\` $\\cdot$ \`[12..19]\` \`vec2 uv\` |
+| \`VK2DDrawCommand\` | **64 B** | \`[0..15]\` \`vec4 texturePos\` $\\cdot$ \`[16..31]\` \`vec4 colour\` $\\cdot$ \`[32..39]\` \`vec2 pos\` $\\cdot$ \`[40..47]\` \`vec2 origin\` $\\cdot$ \`[48..55]\` \`vec2 scale\` $\\cdot$ \`[56..59]\` \`float rotation\` $\\cdot$ \`[60..63]\` \`uint32_t textureIndex\` |
+| \`VK2DDrawInstance\` | **112 B** | \`[0..15]\` \`vec4 texturePos\` $\\cdot$ \`[16..31]\` \`vec4 colour\` $\\cdot$ \`[32..35]\` \`uint32_t textureIndex\` $\\cdot$ \`[36..47]\` \`vec3 padding\` $\\cdot$ \`[48..111]\` \`mat4 model\` |
+| \`VK2DPushBuffer\` | **84 B** | \`[0..63]\` \`mat4 model\` $\\cdot$ \`[64..79]\` \`vec4 colourMod\` $\\cdot$ \`[80..83]\` \`int32_t cameraIndex\` |
+| \`VK2D3DPushBuffer\` | **88 B** | \`[0..63]\` \`mat4 model\` $\\cdot$ \`[64..79]\` \`vec4 colourMod\` $\\cdot$ \`[80..83]\` \`uint32_t textureIndex\` $\\cdot$ \`[84..87]\` \`uint32_t cameraIndex\` |
+| \`VK2DShadowsPushBuffer\` | **100 B** | \`[0..63]\` \`mat4 model\` $\\cdot$ \`[64..71]\` \`vec2 lightSource\` $\\cdot$ \`[72..79]\` \`vec2 _alignment\` $\\cdot$ \`[80..95]\` \`vec4 colour\` $\\cdot$ \`[96..99]\` \`uint32_t cameraIndex\` |
+| \`VK2DShaderPushBuffer\` | **112 B** | \`[0..3]\` \`int32_t cameraIndex\` $\\cdot$ \`[4..7]\` \`uint32_t textureIndex\` $\\cdot$ \`[8..15]\` \`vec2 _padding\` $\\cdot$ \`[16..31]\` \`vec4 texturePos\` $\\cdot$ \`[32..47]\` \`vec4 colour\` $\\cdot$ \`[48..111]\` \`mat4 model\` |
+| \`VK2DInstancedPushBuffer\` | **4 B** | \`[0..3]\` \`uint32_t cameraIndex\` |
+| \`VK2DComputePushBuffer\` | **4 B** | \`[0..3]\` \`uint32_t drawCount\` |
+`,
+    mermaidCharts: [
+      {
+        title: "VK2D Header Dependency & Module Map (VK2D/include/VK2D/VK2D.h)",
+        chart: `
+flowchart TD
+    classDef umbrella fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef pub fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef low fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    Umbrella["VK2D/VK2D.h<br/>Single Umbrella Include"]:::umbrella
+
+    subgraph High_Level_API ["Included Automatically by VK2D.h"]
+        Rend["Renderer.h<br/>(Init, Present, Draw*, Config, Limits)"]:::pub
+        Tex["Texture.h & Image.h<br/>(Load, Create Target, Update, Readback)"]:::pub
+        Cam["Camera.h<br/>(Create, Update, State, 2D & 3D Specs)"]:::pub
+        Poly["Polygon.h & Model.h<br/>(2D Shapes & 3D .obj Meshes)"]:::pub
+        Shad["Shader.h & ShadowEnvironment.h<br/>(Slang Shaders & 2D Drop Shadows)"]:::pub
+        GuiH["Gui.h<br/>(Nuklear Input & Context)"]:::pub
+    end
+
+    subgraph Low_Level_Opt ["Optional Direct / Internal Headers"]
+        VkInt["VulkanInterface.h<br/>(Raw Command Buffers, Device & VMA)"]:::low
+        LogVal["Logger.h & Validation.h<br/>(Custom Loggers & Status Inspection)"]:::low
+        Opaque["Opaque.h, Structs.h & Constants.h<br/>(Internal Struct Definitions & Limits)"]:::low
+    end
+
+    Umbrella --> High_Level_API
+    High_Level_API --> Low_Level_Opt
 `,
       },
     ],
