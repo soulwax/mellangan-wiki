@@ -348,6 +348,14 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-shader-book-advanced-workshop",
         shortTitle: "Book III: Advanced Shaders & Labs",
       },
+      {
+        id: "vk2d-shader-book-compute-and-shadows",
+        shortTitle: "Book IV: Compute, Shadows & Blending",
+      },
+      {
+        id: "vk2d-shader-book-debugging-and-performance",
+        shortTitle: "Book V: SDFs, Profiling & Debugging",
+      },
     ],
   },
 ];

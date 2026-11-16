@@ -8665,4 +8665,635 @@ flowchart LR
       },
     ],
   },
+  {
+    id: "vk2d-shader-book-compute-and-shadows",
+    title: "69. GPU & Shader Book IV: Compute Shaders, Vertex Projection & Hardware Blending",
+    category: "graphics",
+    summary:
+      "Leave triangles behind with SIMT compute grids (dissecting all 85 lines of spritebatch.comp), master homogeneous w=0 infinity shadow projection in shadows.vert, understand ROP blend math and premultiplied alpha, and solve Assignments 8–10.",
+    sourceFiles: [
+      "extern/Vulkan2d/shaders/spritebatch.comp",
+      "extern/Vulkan2d/shaders/shadows.vert",
+      "extern/Vulkan2d/shaders/shadows.frag",
+      "extern/Vulkan2d/VK2D/src/Pipeline.c",
+    ],
+    content: `
+# 69. GPU & Shader Book IV: Compute Shaders, Vertex Projection & Hardware Blending
+
+In Books I–III we mastered how a **Fragment (Pixel) Shader** colors pixels inside a quad. In Book IV, we step back and examine the other three programmable and fixed-function powerhouses on the GPU:
+1. **Compute Shaders** (\`vkCmdDispatch\`), which run arbitrary parallel programs without any triangles, rasterizer, or screen pixels.
+2. **Vertex Projection** (\`shadows.vert\`), which bends 4D homogeneous coordinates ($w = 1$ vs $w = 0$) to extrude 2D shadow volumes to infinity on the GPU.
+3. **Hardware Blending (ROPs)**, which mixes your shader's output \`float4\` with the framebuffer at millions of pixels per millisecond.
+
+---
+
+### Chapter 1: Compute Shaders Explained From Zero
+
+A graphics pipeline (Vertex + Rasterizer + Fragment) is specialized for turning triangles into pixels. A **Compute Shader** throws away the entire triangle machinery and gives you raw access to the GPU's SIMT cores as a giant parallel array processor.
+
+#### How Dispatching a Grid Works
+
+When the CPU calls \`vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ)\`, it launches a 3D grid of **Workgroups**. Inside the shader, you declare how many threads live in each workgroup:
+
+\`\`\`glsl
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+\`\`\`
+
+Why \`64\`? As we learned in Book I:
+- On AMD RDNA GPUs, one **Wavefront** is 64 threads (or 32 in Wave32 mode).
+- On NVIDIA GPUs, one **Warp** is 32 threads, so 64 threads cleanly fills **2 full warps** with zero wasted lanes.
+- If you need to process $N = 10{,}000$ sprites, the CPU dispatches $\\lceil 10{,}000 / 64 \\rceil = 157$ workgroups ($157 \\times 64 = 10{,}048$ threads). The last 48 threads simply hit a bounds check \`if (gID < drawCount)\` and exit safely!
+
+| Built-In Variable | Meaning in a 1D Compute Grid (\`local_size_x = 64\`) |
+| :--- | :--- |
+| \`gl_WorkGroupID.x\` | Which workgroup this thread belongs to ($0 .. \\text{groupCountX} - 1$) |
+| \`gl_LocalInvocationID.x\` | Thread's local seat inside its workgroup ($0 .. 63$) |
+| \`gl_GlobalInvocationID.x\` | Unique global index: \`gl_WorkGroupID.x * 64 + gl_LocalInvocationID.x\` |
+
+#### Storage Buffers (SSBOs) vs Push Constants vs Shared Memory
+
+Compute shaders read and write **Shader Storage Buffer Objects (SSBOs)** instead of returning a pixel color:
+- **Push Constants** (\`112\`–\`128\` bytes): Tiny read-only parameters (e.g., \`uint drawCount\`, \`float dt\`). Fastest possible read.
+- **SSBOs** (\`buffer ...\`): Megabytes of structured arrays in VRAM. Can be \`readonly\`, \`writeonly\`, or read-write.
+- **Workgroup Shared Memory** (\`shared\` in GLSL, \`groupshared\` in HLSL/Slang): Typically \`32\` to \`64\` KB of ultra-fast on-chip SRAM shared only among the 64 threads inside the *same* workgroup. Use \`barrier()\` so all 64 threads finish writing to \`shared\` memory before any thread reads a neighbor's value.
+
+---
+
+### Chapter 2: Line-by-Line Dissection of \`shaders/spritebatch.comp\` (All 85 Lines)
+
+Vulkan2D uses a compute shader (\`extern/Vulkan2d/shaders/spritebatch.comp\`) to transform thousands of tiny CPU sprite descriptions (\`DrawCommand\`) into full $4 \\times 4$ transformation matrices (\`DrawInstance\`) in parallel before drawing them in a single instanced draw call.
+
+Let us read all 85 lines and dissect every single block:
+
+\`\`\`glsl
+#version 450
+
+struct DrawInstance {
+    vec4 texturePos;
+    vec4 colour;
+    uint textureIndex;
+    mat4 model;
+};
+
+struct DrawCommand {
+    vec4 texturePos;
+    vec4 colour;
+    vec2 pos;
+    vec2 origin;
+    vec2 scale;
+    float rotation;
+    uint textureIndex;
+};
+
+layout(push_constant) uniform PushBuffer {
+    uint drawCount;
+} ubo;
+
+layout(std140, binding = 0) readonly buffer DrawCommandsIn {
+    DrawCommand draws[ ];
+} drawCommandsIn;
+
+layout(std140, binding = 1) buffer DrawInstancesOut {
+    DrawInstance draws[ ];
+} drawInstancesOut;
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+\`\`\`
+
+- **Lines 3–18 (\`DrawInstance\` vs \`DrawCommand\`)**: On the CPU, building a $4 \\times 4$ matrix (64 bytes, 16 floats, 2 trig calls \`sin\`/\`cos\`, 4 matrix multiplies) for 50,000 sprites wastes CPU cycles and PCIe upload bandwidth. Instead, the CPU uploads a compact \`DrawCommand\` (just \`pos\`, \`origin\`, \`scale\`, \`rotation\`) and lets the GPU compute \`mat4 model\` in parallel!
+- **Lines 20–22 (\`PushBuffer\`)**: Passes the exact number of sprites queued this frame (\`ubo.drawCount\`) in 4 bytes of push constant memory.
+- **Lines 24–30 (Boundless Array SSBOs)**: \`DrawCommand draws[ ]\` has an unsized array bracket \`[ ]\`, meaning the GPU can read/write as many elements as fit inside the bound \`VkBuffer\`. Notice \`readonly\` on \`DrawCommandsIn\` allows the GPU texture/L1 cache to cache reads aggressively.
+- **Line 32**: Launches 64 threads per workgroup along X.
+
+Now inspect the matrix helper functions (lines 34–59):
+
+\`\`\`glsl
+mat4 translationMatrix(vec2 delta) {
+    return mat4(
+        vec4(1.0, 0.0, 0.0, 0.0),
+        vec4(0.0, 1.0, 0.0, 0.0),
+        vec4(0.0, 0.0, 1.0, 0.0),
+        vec4(delta, 0.0, 1.0)
+    );
+}
+
+mat4 scalingMatrix(vec2 scale) {
+    return mat4(
+        vec4(scale.x, 0.0, 0.0, 0.0),
+        vec4(0.0, scale.y, 0.0, 0.0),
+        vec4(0.0, 0.0, 1.0, 0.0),
+        vec4(0.0, 0.0, 0.0, 1.0)
+    );
+}
+
+mat4 zrotationMatrix(float theta) {
+    return mat4(
+        vec4(cos(theta), -sin(theta), 0.0, 0.0),
+        vec4(sin(theta), cos(theta), 0.0, 0.0),
+        vec4(0.0, 0.0, 1.0, 0.0),
+        vec4(0.0, 0.0, 0.0, 1.0)
+    );
+}
+\`\`\`
+
+- **Column-Major Trap**: In GLSL, \`mat4(col0, col1, col2, col3)\` takes **4 columns**, NOT 4 rows! That is why \`vec4(delta, 0.0, 1.0)\` is the **4th argument** (column 3, the translation column), even though when written vertically in source code it looks like the bottom row.
+
+Finally, lines 61–85 execute per sprite thread:
+
+\`\`\`glsl
+void main() {
+    uint gID = gl_GlobalInvocationID.x;
+
+    if (gID < ubo.drawCount) {
+        DrawCommand draw = drawCommandsIn.draws[gID];
+        mat4 model = mat4(1.0);
+        draw.origin.x *= -draw.scale.x;
+        draw.origin.y *= draw.scale.y;
+        vec2 origin = {-draw.origin.x + draw.pos.x, draw.origin.y + draw.pos.y};
+        vec2 originTranslation = {draw.origin.x, -draw.origin.y};
+
+        // Assemble the model matrix
+        model *= translationMatrix(origin);
+        model *= zrotationMatrix(-draw.rotation);
+        model *= translationMatrix(originTranslation);
+        model *= scalingMatrix(draw.scale);
+
+        // Copy data over
+        drawInstancesOut.draws[gID].model = model;
+
+        drawInstancesOut.draws[gID].texturePos = drawCommandsIn.draws[gID].texturePos;
+        drawInstancesOut.draws[gID].colour = drawCommandsIn.draws[gID].colour;
+        drawInstancesOut.draws[gID].textureIndex = drawCommandsIn.draws[gID].textureIndex;
+    }
+}
+\`\`\`
+
+- **Line 62**: Each GPU thread grabs its unique sprite index \`gID\`.
+- **Line 64**: Tail threads where \`gID >= ubo.drawCount\` have their SIMT execution mask turned off so they never read or write out of bounds.
+- **Lines 67–76 (Pivot Math)**: To rotate a sprite around an arbitrary \`origin\` (like a sword hilt or wheel center) instead of its top-left corner, you must:
+  1. \`scalingMatrix(draw.scale)\`: Scale the unit quad \`[0..1]\` to pixel width/height.
+  2. \`translationMatrix(originTranslation)\`: Shift the pivot point to \`(0, 0)\`.
+  3. \`zrotationMatrix(-draw.rotation)\`: Rotate around \`(0, 0)\`.
+  4. \`translationMatrix(origin)\`: Shift the rotated sprite to its final world position \`draw.pos\`.
+- **Lines 79–83**: Writes the finished \`model\` matrix and copies \`texturePos\`, \`colour\`, and \`textureIndex\` into \`drawInstancesOut\` so the upcoming \`vkCmdDrawIndexed\` instanced pass can read everything sequentially.
+
+---
+
+### Chapter 3: Vertex Projection & $w = 0$ Infinity Rays (\`shadows.vert\`)
+
+Most 2D shaders treat vertex shaders as boring pass-throughs. \`extern/Vulkan2d/shaders/shadows.vert\` shows how a vertex shader can **extrude 2D wall edges into infinite shadow quads** on the fly without the CPU ever building shadow triangles!
+
+\`\`\`glsl
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+layout(set = 0, binding = 0) uniform UniformBufferObject {
+    mat4 viewproj[10];
+} ubo;
+
+layout(push_constant) uniform PushBuffer {
+    mat4 model;
+    vec2 lightSource;
+    vec2 _alignment;
+    vec4 colour;
+    int cameraIndex;
+} pushBuffer;
+
+layout(location = 0) in vec3 inPosition;
+
+out gl_PerVertex {
+    vec4 gl_Position;
+};
+
+void main() {
+    int mod = gl_VertexIndex % 6;
+    vec4 position = pushBuffer.model * vec4(inPosition, 1.0);
+    if (mod == 1 || mod == 4 || mod == 5) {
+        // One of the vertices that needs to be projected
+        vec4 vertex = vec4(
+            (position.x - pushBuffer.lightSource.x) * 1000,
+            (position.y - pushBuffer.lightSource.y) * 1000,
+            1.0,
+            0.0
+        );
+        gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * vertex;
+    } else {
+        // Static vertices
+        gl_Position = ubo.viewproj[pushBuffer.cameraIndex] * position;
+    }
+}
+\`\`\`
+
+#### Why \`w = 0.0\` Projects to Infinity
+
+In 4D **Homogeneous Coordinates** $(x, y, z, w)$, the GPU rasterizer divides $(x, y, z)$ by $w$ right after the vertex shader (**Perspective Divide**):
+
+$$\\text{NDC} = \\left(\\frac{x}{w},\\; \\frac{y}{w},\\; \\frac{z}{w}\\right)$$
+
+- **Lines 35–36 (Static Wall Vertices, \`w = 1.0\`)**: \`position\` has $w = 1.0$, so dividing by $1.0$ leaves it pinned right on the wall edge.
+- **Lines 27–32 (Extruded Shadow Vertices, \`w = 0.0\`)**: When $w = 0.0$, the vector represents a **pure direction** (a point at mathematical infinity along the ray from \`lightSource\` through \`position\`). Modern GPUs clip triangles in 4D homogeneous clip space *before* dividing by $w$, so \`gl_Position\` cleanly stretches the shadow quad all the way to the edge of the screen without dividing by zero!
+- **Line 23 (\`gl_VertexIndex % 6\`)**: Every wall edge is drawn as 6 vertices (2 triangles = 1 quad). Vertices \`0, 2, 3\` stay glued to the wall; vertices \`1, 4, 5\` shoot away from the light!
+- **\`shadows.frag\`**: Simply outputs \`outColor = vec4(pushBuffer.colour);\` (typically opaque black or dark translucent shadow tint).
+
+---
+
+### Chapter 4: Hardware Blending (ROPs) & Premultiplied Alpha
+
+After your fragment shader returns \`float4 srcColor\`, it does **not** directly overwrite the screen. First it enters the fixed-function **ROP (Render Output Unit)**, which reads the existing pixel \`dstColor\` from VRAM and computes:
+
+$$\\text{outRGB} = \\text{srcRGB} \\cdot F_{\\text{src}} \\;\\oplus\\; \\text{dstRGB} \\cdot F_{\\text{dst}}$$
+
+| VK2D Blend Mode | Blend Equation | Visual Effect |
+| :--- | :--- | :--- |
+| \`VK2D_BLEND_MODE_BLEND\` | $\\text{src} \\cdot \\alpha_{\\text{src}} + \\text{dst} \\cdot (1 - \\alpha_{\\text{src}})$ | Standard alpha transparency (sprites, UI) |
+| \`VK2D_BLEND_MODE_ADD\` | $\\text{src} \\cdot \\alpha_{\\text{src}} + \\text{dst} \\cdot 1$ | Glowing fire, lasers, bloom, magic sparks |
+| \`VK2D_BLEND_MODE_SUBTRACT\` | $\\text{dst} \\cdot 1 - \\text{src} \\cdot \\alpha_{\\text{src}}$ | Darkening masks, ink/shadow cutouts |
+| \`VK2D_BLEND_MODE_NONE\` | $\\text{src} \\cdot 1 + \\text{dst} \\cdot 0$ | Direct overwrite (fastest; skips reading \`dst\`) |
+
+#### The Dark Fringe Bug & Premultiplied Alpha
+
+Have you ever scaled a sprite with bilinear filtering and noticed ugly **dark black halos** around soft edges?
+- Suppose a sprite has a bright yellow pixel \`(1, 1, 0, 1)\` next to a transparent black pixel \`(0, 0, 0, 0)\`.
+- Halfway between them, bilinear interpolation averages them to \`(0.5, 0.5, 0.0, 0.5)\`.
+- Under standard \`BLEND\`, the ROP multiplies \`srcRGB\` by \`srcAlpha\` *again*: \`0.5 * 0.5 = 0.25\` yellow! That lost brightness creates a muddy dark ring.
+- **Fix (Premultiplied Alpha)**: Store or output \`float4(rgb * alpha, alpha)\` and blend with \`ONE, ONE_MINUS_SRC_ALPHA\`, or ensure transparent pixels in your PNG share the neighbor's RGB color instead of \`(0, 0, 0, 0)\`!
+
+---
+
+### Chapter 5: Graded Assignments 8–10 (With Starter Code & Full Solutions)
+
+#### Assignment 8: Write a 1D GPU Particle Integrator Compute Shader
+- **Objective:** Write a GLSL 450 compute shader (\`local_size_x = 64\`) that updates an array of \`Particle\` structs (\`vec2 pos\`, \`vec2 vel\`, \`float life\`, \`float pad[3]\` to align cleanly) with gravity \`(0, 480)\`, drag \`0.99\`, floor bounce at \`y = 700\`, and \`if (id >= push.count) return;\`.
+- **Starter Skeleton:**
+\`\`\`glsl
+#version 450
+struct Particle {
+    vec2 pos;
+    vec2 vel;
+    float life;
+    float pad0;
+    float pad1;
+    float pad2;
+};
+layout(push_constant) uniform Push { uint count; float dt; } push;
+layout(std140, binding = 0) buffer Particles { Particle p[]; } buf;
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    // TODO: 1. Compute global thread ID and guard against push.count
+    // TODO: 2. Integrate vel += vec2(0.0, 480.0) * push.dt; vel *= 0.99;
+    // TODO: 3. Integrate pos += vel * push.dt;
+    // TODO: 4. Bounce off floor y = 700.0 (invert vel.y * -0.65) and decrement life
+}
+\`\`\`
+- **Reference Solution:**
+\`\`\`glsl
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= push.count) return;
+
+    Particle pt = buf.p[id];
+    pt.vel += vec2(0.0, 480.0) * push.dt;
+    pt.vel *= pow(0.99, push.dt * 60.0);
+    pt.pos += pt.vel * push.dt;
+
+    if (pt.pos.y > 700.0) {
+        pt.pos.y = 700.0;
+        pt.vel.y = -abs(pt.vel.y) * 0.65;
+    }
+    pt.life = max(0.0, pt.life - push.dt);
+    buf.p[id] = pt;
+}
+\`\`\`
+
+#### Assignment 9: Custom Vertex Shader Wind Sway via \`vk2dShaderFrom\`
+- **Objective:** Remember from Assignment 7 that \`vk2dShaderFrom(vertSpv, vertSize, fragSpv, fragSize, userSize)\` lets you replace \`VK2DVertUsershader\` with your **own custom vertex shader**! Modify \`shaders/usershader.vert\` in GLSL 450 so the top two vertices of a grass or banner sprite sway horizontally with \`sin(time * 3.0 + pos.x * 0.05)\`, while the bottom vertices stay anchored to the ground!
+- **Hint:** In \`usershader.vert\`, \`inPosition\` is \`(0,0)\` at top-left, \`(1,0)\` at top-right, \`(0,1)\` at bottom-left, and \`(1,1)\` at bottom-right! So \`float swayMask = 1.0 - inPosition.y;\` equals \`1.0\` at the top and \`0.0\` at the roots!
+- **Reference Solution (GLSL 450 Vertex Shader):**
+\`\`\`glsl
+#version 450
+layout(set = 0, binding = 0) uniform UniformBufferObject { mat4 viewproj[10]; } ubo;
+layout(set = 3, binding = 3) uniform UserData { float time; float strengthPx; } userData;
+
+layout(push_constant) uniform PushBuffer {
+    int cameraIndex; uint textureIndex; vec4 texturePos; vec4 colour; mat4 model;
+} push;
+
+layout(location = 0) in vec2 inPosition;
+layout(location = 0) out vec2 fragTexCoord;
+
+void main() {
+    vec4 worldPos = push.model * vec4(inPosition, 0.0, 1.0);
+    float topWeight = 1.0 - inPosition.y; // 1.0 at top edge, 0.0 at bottom roots
+    worldPos.x += sin(userData.time * 3.5 + worldPos.y * 0.02) * userData.strengthPx * topWeight;
+
+    gl_Position = ubo.viewproj[push.cameraIndex] * worldPos;
+    fragTexCoord = push.texturePos.xy + (inPosition * push.texturePos.zw);
+}
+\`\`\`
+
+#### Assignment 10: Additive Energy Halo + Premultiplied Fringe Cleaner
+- **Objective:** Draw a soft circular energy orb in Slang intended for \`vk2dRendererSetBlendMode(VK2D_BLEND_MODE_ADD)\`, using smooth radial falloff \`pow(1.0 - saturate(dist * 2.0), 2.5)\` and premultiplying \`rgb\` by \`alpha\` so additive blending adds zero black artifacts.
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float3 glowColor; float intensity; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float d = length(localUV - float2(0.5, 0.5)) * 2.0; // 0 at center, 1 at edge
+    float falloff = pow(saturate(1.0 - d), 2.5);
+    float3 rgb = userData.glowColor * userData.intensity * falloff;
+    return float4(rgb, falloff); // RGB already scaled by falloff for clean additive ROP!
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "Compute Shader 1D Dispatch: Workgroups, Global IDs & SIMT Tail Masking",
+        chart: `
+flowchart LR
+    classDef cpu fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef wg fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef lane fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef masked fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+
+    Dispatch["CPU: vkCmdDispatch(157, 1, 1)<br/>drawCount = 10,000 sprites"]:::cpu
+    WG0["Workgroup 0..155<br/>64 Active Threads Each<br/>gID = wgID * 64 + localID"]:::wg
+    WGLast["Tail Workgroup 156<br/>gID 9,984 .. 10,047"]:::wg
+    Active["Lanes 0..15 (gID < 10,000)<br/>Compute Model Matrix & Copy"]:::lane
+    Inactive["Lanes 16..63 (gID >= 10,000)<br/>Execution Mask = 0 (Safe No-Op)"]:::masked
+
+    Dispatch --> WG0 --> Active
+    Dispatch --> WGLast --> Active
+    WGLast --> Inactive
+`,
+      },
+      {
+        title: "Projective Shadow Volume Extrusion (w=1 Wall Edge vs w=0 Infinity Ray)",
+        chart: `
+flowchart TD
+    classDef light fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef static fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef ray fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef clip fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Light["Light Source (lx, ly)"]:::light
+    Wall["Wall Segment Endpoints<br/>gl_VertexIndex % 6 in {0,2,3}<br/>w = 1.0 (Pinned to Wall)"]:::static
+    Extrude["Extruded Ray Vertices<br/>gl_VertexIndex % 6 in {1,4,5}<br/>vec4(pos - light, 1.0, w = 0.0)"]:::ray
+    Proj["4D ViewProj Clipping + Rasterizer<br/>Covers Screen to Infinity"]:::clip
+
+    Light --> Wall
+    Light --> Extrude
+    Wall --> Proj
+    Extrude --> Proj
+`,
+      },
+    ],
+  },
+  {
+    id: "vk2d-shader-book-debugging-and-performance",
+    title: "70. GPU & Shader Book V: SDFs, Performance Profiling & Debugging Like a Graphics Engineer",
+    category: "graphics",
+    summary:
+      "Build resolution-independent 2D SDFs with hardware fwidth() anti-aliasing, triage CPU vs ALU vs TMU vs Overdraw GPU bottlenecks, debug NaN/UVs visually and in RenderDoc, and solve Capstone Assignments 11–13.",
+    sourceFiles: [
+      "extern/Vulkan2d/assets/shader.slang",
+      "extern/Vulkan2d/VK2D/src/Renderer.c",
+      "extern/Vulkan2d/VK2D/src/Pipeline.c",
+    ],
+    content: `
+# 70. GPU & Shader Book V: SDFs, Performance Profiling & Debugging Like a Graphics Engineer
+
+Welcome to the final volume of the Vulkan2D GPU & Shader Book. Now that you understand GPU hardware, Slang fragment shaders, alignment rules, compute grids, and blending, we tackle the three skills that separate a casual shader writer from a production graphics engineer:
+1. **Signed Distance Fields (SDFs)** for infinitely sharp UI, outlines, and fluid shapes at any zoom level.
+2. **GPU Bottleneck Triage** so you know *why* a frame takes 16 ms instead of 2 ms.
+3. **Visual Shader Debugging & RenderDoc**, because GPUs have no \`printf()\`.
+
+---
+
+### Chapter 1: Signed Distance Fields (SDFs) & \`fwidth()\` Anti-Aliasing
+
+A bitmap sprite stores colors on a fixed pixel grid. Zoom in $10\\times$ and it turns into blurry or blocky squares. A **Signed Distance Field (SDF)** replaces the bitmap with a pure math function $d = f(p)$ returning the **shortest Euclidean distance** from pixel $p$ to the shape's boundary:
+- $d < 0$: Pixel is **inside** the shape.
+- $d = 0$: Pixel lies **exactly on** the border.
+- $d > 0$: Pixel is **outside** the shape.
+
+#### Essential 2D SDF Primitives (Line-by-Line)
+
+\`\`\`hlsl
+// 1. Circle centered at origin with radius r
+float sdCircle(float2 p, float r) {
+    return length(p) - r;
+}
+
+// 2. Rounded Box with half-extents b = (halfW, halfH) and corner radius r
+float sdRoundedBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+// 3. Smooth Minimum (Polynomial smin) for liquid metaball blending!
+float smin(float a, float b, float k) {
+    float h = saturate(0.5 + 0.5 * (b - a) / k);
+    return lerp(b, a, h) - k * h * (1.0 - h);
+}
+\`\`\`
+
+- **CSG Boolean Operations** take just one intrinsic:
+  - **Union (Combine):** \`min(d1, d2)\`
+  - **Intersection (Overlap):** \`max(d1, d2)\`
+  - **Subtraction (Carve d2 out of d1):** \`max(d1, -d2)\`
+  - **Thick Outline Ring:** \`abs(d) - thickness\`
+
+#### Hardware Anti-Aliasing in One Line: \`fwidth(d)\`
+
+Remember from Book I that the GPU always executes fragment shaders in **$2 \\times 2$ pixel quads**? That exists specifically so the hardware can compute finite differences between neighboring pixels in **1 instruction**:
+- \`ddx(d)\` = how much \`d\` changes per 1 pixel step horizontally.
+- \`ddy(d)\` = how much \`d\` changes per 1 pixel step vertically.
+- \`fwidth(d)\` = \`abs(ddx(d)) + abs(ddy(d))\` = **the exact width of 1 screen pixel in SDF units**, regardless of camera zoom or sprite scale!
+
+\`\`\`hlsl
+// Razor-sharp 1-pixel anti-aliased alpha at ANY resolution or zoom!
+float aa = fwidth(d);
+float alpha = 1.0 - smoothstep(-aa, aa, d);
+\`\`\`
+
+---
+
+### Chapter 2: GPU Performance Profiling & Bottleneck Hunting
+
+When your frame rate drops, guessing "maybe my shader has too many lines" almost always wastes time. GPUs fail in four distinct ways:
+
+| Bottleneck Type | Symptom | Root Cause in Vulkan2D | Concrete Fix |
+| :--- | :--- | :--- | :--- |
+| **CPU / Draw-Call Bound** | GPU is idle between draws; high CPU frame time | Calling \`vk2dRendererDrawShader\` or switching blend modes 5,000 times per frame | Batch normal sprites with \`vk2dRendererDrawTexture\`; group same-shader draws together |
+| **ALU (Math) Bound** | Frame time scales with math complexity, not texture count | Nested loops, \`pow\`, \`sin\`/\`cos\`, \`sqrt\` in SFUs inside every pixel | Precompute constants on CPU; replace \`pow(x, 2.0)\` with \`x * x\`; use \`dot(v, v)\` instead of \`length(v)\` |
+| **TMU / Bandwidth Bound** | Frame time drops sharply when screen resolution shrinks | 25+ texture taps per pixel (large blur) or random noisy UVs thrashing L1 cache | Use separable 2-pass blur (horizontal + vertical = $9 + 9 = 18$ taps instead of $9 \\times 9 = 81$!) |
+| **ROP / Overdraw Bound** | Massive slowdowns when large particle clouds overlap | Drawing 30 fullscreen translucent layers over the same pixel | Tight-crop sprite quads; discard/cull invisible particles; keep blend modes \`NONE\` for opaque background |
+
+#### Three Hidden Shader Performance Traps
+
+1. **\`discard\` (\`clip\`) Kills Early-Z**: If a fragment shader contains \`discard\`, the GPU cannot know whether a pixel survives until *after* running the shader, disabling Early-Z hardware culling. Prefer alpha blending when possible, or only \`discard\` on genuinely opaque cutout masks.
+2. **Non-Uniform Bindless Indexing**: If adjacent threads in a 32-lane warp read \`textures[idx]\` with *different* \`idx\` values (e.g., per-pixel procedural \`idx\`), the GPU cannot issue one texture instruction; it loops sequentially over each unique \`idx\` in the warp (scalarization). For uniform per-draw \`push.textureIndex\`, all 32 lanes share the exact same slot at full speed!
+3. **Scalar vs Vector Operations**: Modern AMD RDNA and NVIDIA GPUs are **scalar** under the hood (\`float4\` takes 4 instructions, not 1!). Computing \`rgb\` when you only need \`a\` wastes 3 ALU cycles.
+
+---
+
+### Chapter 3: Debugging Shaders Without \`printf\`
+
+When a custom shader outputs a black screen or corrupted colors, treat **color channels as a visual oscilloscope**:
+
+\`\`\`hlsl
+// 1. Verify UV range (Should show smooth Red left->right, Green top->bottom)
+return float4(localUV, 0.0, 1.0);
+
+// 2. Verify UserData arrived intact (Pulse brightness if value > 0)
+return float4(saturate(userData.time * 0.2), 0.0, 0.0, 1.0);
+
+// 3. Catch NaN / Infinity poison (Flash bright magenta if ANY pixel is NaN!)
+if (any(isnan(finalColor)) || any(isinf(finalColor))) {
+    return float4(1.0, 0.0, 1.0, 1.0);
+}
+\`\`\`
+
+Why catch \`NaN\` aggressively? If a single pixel computes \`normalize(float2(0, 0))\` or \`pow(-0.5, 2.2)\`, it outputs \`NaN\`. When a bloom or blur pass samples that pixel next frame, \`NaN + neighbor = NaN\`, turning your entire screen into spreading black squares!
+
+#### Inspecting a VK2D Frame in RenderDoc
+
+1. Launch your compiled Vulkan2D executable from **RenderDoc** (\`Launch Application\` + press \`F12\` to capture a single frame).
+2. In the **Event Browser**, locate your \`vkCmdDraw(4, 1, ...)\` call (from \`vk2dRendererDrawShader\`).
+3. Open **Pipeline State -> Fragment Shader (FS)**:
+   - Inspect **Push Constants** (\`cameraIndex\`, \`textureIndex\`, \`texturePos\`, \`colour\`, \`model\`).
+   - Inspect **Descriptor Set 2 Binding 2** to see every texture currently alive in VK2D's bindless array.
+   - Inspect **Descriptor Set 3 Binding 3** to verify the exact raw bytes your C \`UserData\` struct uploaded!
+4. Right-click any pixel in the **Texture Viewer** and click **Debug** to step line-by-line through your Slang/SPIR-V variables!
+
+---
+
+### Chapter 4: Graded Assignments 11–13 (Capstone Labs & Full Solutions)
+
+#### Assignment 11: Resolution-Independent SDF Health Bar With \`fwidth()\` AA
+- **Objective:** Draw a pill-shaped health bar entirely inside \`PixelShader\` (zero texture reads!) using \`sdRoundedBox\`, \`userData.hpRatio\` ($0..1$), green-to-red health fill, dark background track, crisp 2-pixel border, and \`fwidth()\` anti-aliasing.
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float hpRatio; float aspect; float pad0; float pad1; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float sdRoundedBox(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    // Remap to aspect-corrected space centered at (0,0)
+    float2 p = (localUV - 0.5) * float2(userData.aspect, 1.0);
+    float dOuter = sdRoundedBox(p, float2(userData.aspect * 0.46, 0.38), 0.22);
+
+    float aa = fwidth(dOuter);
+    float outerMask = 1.0 - smoothstep(-aa, aa, dOuter);
+    float innerMask = 1.0 - smoothstep(-aa, aa, dOuter + 0.05);
+
+    float fillOn = step(localUV.x, userData.hpRatio);
+    float3 hpCol = lerp(float3(0.95, 0.2, 0.15), float3(0.15, 0.9, 0.35), userData.hpRatio);
+    float3 trackCol = lerp(float3(0.12, 0.12, 0.16), hpCol, fillOn);
+    float3 finalRGB = lerp(float3(0.85, 0.88, 0.95), trackCol, innerMask);
+    return float4(finalRGB * push.colour.rgb, outerMask * push.colour.a);
+}
+\`\`\`
+
+#### Assignment 12: Liquid Metaball Energy Slime (\`smin\` CSG)
+- **Objective:** Combine two orbiting circles using polynomial \`smin(d1, d2, 0.18)\` so they stretch and merge like mercury droplets, shaded with an inner core highlight and \`fwidth()\` smooth edge!
+- **Reference Solution:**
+\`\`\`hlsl
+struct UserData { float time; float pad0; float pad1; float pad2; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+float smin(float a, float b, float k) {
+    float h = saturate(0.5 + 0.5 * (b - a) / k);
+    return lerp(b, a, h) - k * h * (1.0 - h);
+}
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float2 localUV = (uv - push.texturePos.xy) / push.texturePos.zw;
+    float2 p = localUV - 0.5;
+    float2 c1 = float2(cos(userData.time * 2.0) * 0.16, sin(userData.time * 1.3) * 0.08);
+    float2 c2 = -c1;
+
+    float d = smin(length(p - c1) - 0.15, length(p - c2) - 0.13, 0.18);
+    float aa = fwidth(d);
+    float alpha = 1.0 - smoothstep(-aa, aa, d);
+    float core = 1.0 - smoothstep(-0.08, 0.0, d);
+    float3 rgb = lerp(float3(0.15, 0.55, 1.0), float3(0.75, 0.96, 1.0), core);
+    return float4(rgb, alpha) * push.colour;
+}
+\`\`\`
+
+#### Assignment 13: Capstone Multi-Pass NaN-Safe Bloom Pipeline
+- **Objective:** Build a 2-shader offscreen bloom pipeline:
+  1. Render your world into \`sceneTex\`.
+  2. Draw \`sceneTex\` into a half-res \`bloomTex\` using a **Bright-Pass Threshold Shader** (extracting pixels with luminance $> 0.8$ while sanitizing \`isnan\`/\`isinf\`).
+  3. Draw \`sceneTex\` to \`VK2D_TARGET_SCREEN\`, then switch to \`VK2D_BLEND_MODE_ADD\` and draw \`bloomTex\` over it with a 5-tap cross blur!
+- **Reference Solution (Bright-Pass Extract Slang Shader):**
+\`\`\`hlsl
+struct UserData { float threshold; float intensity; float pad0; float pad1; };
+[[vk::binding(3, 3)]] ConstantBuffer<UserData> userData;
+
+[shader("pixel")]
+float4 PixelShader(float2 uv) {
+    float4 c = textures[push.textureIndex].Sample(sampler, uv);
+    // Sanitize NaNs/Infs before threshold so bloom never spreads black squares!
+    if (any(isnan(c)) || any(isinf(c))) return float4(0, 0, 0, 1);
+
+    float luma = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
+    float weight = smoothstep(userData.threshold, userData.threshold + 0.25, luma);
+    return float4(c.rgb * weight * userData.intensity, 1.0);
+}
+\`\`\`
+`,
+    mermaidCharts: [
+      {
+        title: "2×2 Pixel Quad Derivatives: How fwidth(d) Achieves Crisp Zoom-Free Edges",
+        chart: `
+flowchart LR
+    classDef quad fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef diff fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef edge fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Quad["2x2 Pixel Quad in Rasterizer<br/>P00, P10, P01, P11 Run Together"]:::quad
+    Diff["Hardware Finite Differences<br/>ddx = d(P10) - d(P00)<br/>ddy = d(P01) - d(P00)"]:::diff
+    FWidth["fwidth(d) = abs(ddx) + abs(ddy)<br/>Exact 1-Pixel Transition Width"]:::diff
+    AA["smoothstep(-aa, aa, d)<br/>Zero Jaggies at Any Zoom"]:::edge
+
+    Quad --> Diff --> FWidth --> AA
+`,
+      },
+      {
+        title: "GPU Bottleneck Triage Decision Tree",
+        chart: `
+flowchart TD
+    classDef start fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef branch fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef fix fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Q["Slow Frame Rate: Shrink Window Resolution 50%"]:::start
+    ResCheck{"Did Frame Time Drop<br/>Noticeably?"}:::branch
+    CPU["CPU or Draw-Call Bound<br/>Batch Sprites, Reduce State Switches"]:::fix
+    PixelBound{"Halve Texture Taps or<br/>Replace Shader with Flat Color"}:::branch
+    TMU["TMU / Bandwidth Bound<br/>Use Separable Blur, Mipmaps"]:::fix
+    ALUOrROP["ALU or Overdraw Bound<br/>Simplify Math, Trim Overdraw Quads"]:::fix
+
+    Q --> ResCheck
+    ResCheck -->|"No (Same ms)"| CPU
+    ResCheck -->|"Yes (Much Faster)"| PixelBound
+    PixelBound -->|"Much Faster"| TMU
+    PixelBound -->|"Check Math vs Layers"| ALUOrROP
+`,
+      },
+    ],
+  },
 ];
