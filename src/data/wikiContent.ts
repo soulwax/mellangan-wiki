@@ -6286,18 +6286,18 @@ flowchart TD
         VK["VkInstance vk + VkSurfaceKHR surface"]:::dev
         PD["VK2DPhysicalDevice pd<br/>(graphicsFamily / computeFamily)"]:::dev
         LD["VK2DLogicalDevice ld<br/>(VkDevice, queue, loadQueue, pool)"]:::dev
-        VMA["VmaAllocator vma + vmaBudgets[]"]:::dev
+        VMA["VmaAllocator vma + vmaBudgets"]:::dev
     end
 
     subgraph Swapchain_Passes ["Swapchain & 3 RenderPasses"]
-        SC["VkSwapchainKHR swapchain<br/>swapchainImages[] & framebuffers[]"]:::pipe
-        RP["3 VkRenderPass Objects<br/>renderPass | midFrameSwap | externalTarget"]:::pipe
+        SC["VkSwapchainKHR swapchain<br/>swapchainImages & framebuffers"]:::pipe
+        RP["3 VkRenderPass Objects<br/>renderPass, midFrameSwap, externalTarget"]:::pipe
         ATT["Attachments<br/>msaaImage + depthBuffer"]:::pipe
     end
 
     subgraph Per_Frame_Sync ["2 Frames in Flight vs N Swapchain Slots"]
-        FIF["Per-Frame [VK2D_MAX_FRAMES_IN_FLIGHT = 2]<br/>inFlightFences, imageAvailableSemaphores<br/>descriptorBuffers[2], descConCompute/Shaders/SBO[2]"]:::mem
-        CB["Per-Swapchain-Image [scImageIndex]<br/>dbCommandBuffer (Copy)<br/>computeCommandBuffer (Compute)<br/>commandBuffer (Draw)"]:::mem
+        FIF["Per-Frame (VK2D_MAX_FRAMES_IN_FLIGHT = 2)<br/>inFlightFences, imageAvailableSemaphores<br/>descriptorBuffers, descConCompute/Shaders/SBO"]:::mem
+        CB["Per-Swapchain-Image (scImageIndex)<br/>dbCommandBuffer (Copy)<br/>computeCommandBuffer (Compute)<br/>commandBuffer (Draw)"]:::mem
     end
 
     subgraph Pipelines_Descriptors ["Pipelines & Bindless Descriptors"]
@@ -6324,15 +6324,15 @@ sequenceDiagram
     participant GPU as VkQueue (GPU Execution)
 
     Note over App,CPU: Frame already started by vk2dRendererInit() or previous Present()
-    CPU->>CPU: vkWaitForFences(inFlightFences[currentFrame])
+    CPU->>CPU: vkWaitForFences(inFlightFences at currentFrame)
     CPU->>CPU: vkAcquireNextImageKHR -> scImageIndex
     CPU->>DB: vkBeginCommandBuffer + vmaMapMemory(stageBuffers)
     CPU->>Comp: vkBeginCommandBuffer + Bind spriteBatchPipe
     CPU->>Draw: vkBeginCommandBuffer + vkCmdBeginRenderPass(renderPass)
 
     App->>CPU: vk2dRendererDrawTexture(...) / DrawPolygon(...)
-    CPU->>CPU: Append VK2DDrawCommand to drawCommands[]
-    Note over CPU,Draw: On Batch Flush (vk2dRendererFlushSpriteBatch):
+    CPU->>CPU: Append VK2DDrawCommand to drawCommands buffer
+    Note over CPU,Draw: On Batch Flush (vk2dRendererFlushSpriteBatch)
     CPU->>CPU: memcpy drawCommands to mapped stageBuffer & reserve DrawInstance SBO
     CPU->>Comp: vkCmdPushConstants + vkCmdBindDescriptorSets + vkCmdDispatch
     CPU->>Draw: vkCmdBindPipeline(instancedPipe) + vkCmdDraw(6 * count, 1)
@@ -6340,13 +6340,13 @@ sequenceDiagram
     App->>CPU: vk2dRendererPresent() -> vk2dRendererEndFrame()
     CPU->>CPU: Flush final sprite batch & _vk2dRendererFlushUBOBuffers()
     CPU->>Draw: vkCmdEndRenderPass(commandBuffer)
-    CPU->>DB: vmaUnmapMemory + vkCmdCopyBuffer(stage -> device) per page
-    CPU->>DB: Barrier: TRANSFER_WRITE -> COMPUTE_SHADER (READ|WRITE)
-    CPU->>Comp: Barrier: COMPUTE_WRITE -> VERTEX_INPUT | VERTEX_SHADER
-    CPU->>GPU: vkQueueSubmit([dbCommandBuffer, computeCommandBuffer, commandBuffer])
+    CPU->>DB: vmaUnmapMemory + vkCmdCopyBuffer(stage to device) per page
+    CPU->>DB: Barrier TRANSFER_WRITE to COMPUTE_SHADER (READ and WRITE)
+    CPU->>Comp: Barrier COMPUTE_WRITE to VERTEX_INPUT and VERTEX_SHADER
+    CPU->>GPU: vkQueueSubmit(dbCommandBuffer, computeCommandBuffer, commandBuffer)
     GPU->>GPU: 1. DMA Transfer Pages -> 2. Compute Matrices -> 3. Rasterize Draws
     CPU->>GPU: vkQueuePresentKHR(swapchain, scImageIndex)
-    CPU->>CPU: currentFrame = (currentFrame + 1) % 2; vk2dRendererStartFrame()
+    CPU->>CPU: Advance currentFrame and call vk2dRendererStartFrame()
 `,
       },
     ],
@@ -6476,7 +6476,7 @@ flowchart LR
 
     subgraph Page_Pool ["_VK2DDescriptorBufferInternal Pages (256 KB each)"]
         SB["stageBuffer (HOST_VISIBLE)<br/>Mapped via vmaMapMemory<br/>Offset aligned to max(minSSBO, minUBO)"]:::host
-        DB["deviceBuffer (DEVICE_LOCAL)<br/>TRANSFER_DST | UBO | VBO | SSBO"]:::vram
+        DB["deviceBuffer (DEVICE_LOCAL)<br/>TRANSFER_DST, UBO, VBO, SSBO"]:::vram
     end
 
     C1 --> SB
@@ -6494,14 +6494,14 @@ flowchart TD
     classDef draw fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
     subgraph Cmd1 ["1. dbCommandBuffer (Transfer Stage)"]
-        DMA["vkCmdCopyBuffer(stageBuffer -> deviceBuffer)<br/>For all pages i with buffers[i].size > 0"]:::copy
-        B1["vk2dDescriptorBufferRecordCopyPipelineBarrier<br/>STAGE_TRANSFER (TRANSFER_WRITE)<br/>-> STAGE_COMPUTE_SHADER (SHADER_READ | SHADER_WRITE)"]:::copy
+        DMA["vkCmdCopyBuffer(stageBuffer to deviceBuffer)<br/>For all non-empty 256 KB pages"]:::copy
+        B1["vk2dDescriptorBufferRecordCopyPipelineBarrier<br/>STAGE_TRANSFER (TRANSFER_WRITE)<br/>to STAGE_COMPUTE_SHADER (SHADER_READ / WRITE)"]:::copy
         DMA --> B1
     end
 
     subgraph Cmd2 ["2. computeCommandBuffer (Compute Stage)"]
-        DISP["vkCmdDispatch(spriteBatchPipe, (drawCount/64)+1, 1, 1)<br/>Reads DrawCommand[ ], Writes DrawInstance[ ] in deviceBuffer"]:::comp
-        B2["vk2dDescriptorBufferRecordComputePipelineBarrier<br/>STAGE_COMPUTE_SHADER (SHADER_WRITE)<br/>-> STAGE_VERTEX_INPUT | VERTEX_SHADER (VERTEX_ATTR_READ | SHADER_READ)"]:::comp
+        DISP["vkCmdDispatch(spriteBatchPipe, (drawCount/64)+1, 1, 1)<br/>Reads DrawCommand Buffer, Writes DrawInstance Buffer"]:::comp
+        B2["vk2dDescriptorBufferRecordComputePipelineBarrier<br/>STAGE_COMPUTE_SHADER (SHADER_WRITE)<br/>to STAGE_VERTEX_INPUT and VERTEX_SHADER"]:::comp
         DISP --> B2
     end
 
@@ -6584,10 +6584,10 @@ flowchart LR
     classDef gpu fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
     Load["vk2dTextureLoad / vk2dTextureCreate"]:::cpu
-    Scan["Scan textureArray[0..maxTextures]<br/>Find first active == false -> spot"]:::cpu
+    Scan["Scan textureArray (0..maxTextures)<br/>Find first active == false -> spot"]:::cpu
     Update["vkUpdateDescriptorSets<br/>dstSet = texArrayDescriptorSet (Set 2, Binding 2)<br/>dstArrayElement = spot"]:::desc
     Draw["VK2DDrawCommand / PushConstants<br/>textureIndex = vk2dTextureGetID(tex)"]:::cpu
-    Frag["instanced.frag / Slang PixelShader<br/>tex[nonuniformEXT(textureIndex)]<br/>Sampled with unnormalized pixel UVs (Set 1)"]:::gpu
+    Frag["instanced.frag / Slang PixelShader<br/>nonuniformEXT(textureIndex)<br/>Sampled with unnormalized pixel UVs (Set 1)"]:::gpu
 
     Load --> Scan --> Update
     Scan -->|"SDL_SetAtomicInt(&tex->descriptorIndex, spot)"| Draw
@@ -6606,7 +6606,7 @@ flowchart TD
     Req["vk2dDescConGetSet(descCon)"]:::call
     CheckNull{"descCon->pools == NULL?"}:::pool
     AllocPool["vkCreateDescriptorPool (1,000 sets)<br/>poolsInUse++"]:::pool
-    TryAlloc["vkAllocateDescriptorSets(pools[i])"]:::pool
+    TryAlloc["vkAllocateDescriptorSets(currentPool)"]:::pool
     Result{"res == VK_SUCCESS?"}:::pool
     NextPool{"++i == poolsInUse?"}:::pool
     Ret["Return VkDescriptorSet"]:::out
@@ -6725,11 +6725,11 @@ flowchart TD
     classDef frag fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
     DrawCall["vk2dRendererDrawTexture / vk2dRendererAddBatch"]:::cpu
-    CmdArr["gRenderer->drawCommands[0..N-1]<br/>VK2DDrawCommand (pos, scale, rot, origin, uv, colour, texID)"]:::cpu
+    CmdArr["gRenderer->drawCommands (0..N-1)<br/>VK2DDrawCommand (pos, scale, rot, origin, uv, colour, texID)"]:::cpu
     Staging["DescriptorBuffer CopyData & ReserveSpace<br/>drawCommands (SSBO Binding 0)<br/>drawInstances (SSBO Binding 1 / Vertex Set 3 Binding 3)"]:::cpu
-    CompShader["spritebatch.comp (local_size_x = 64)<br/>Builds mat4 model = T(origin) * Rz(-rot) * T(-origin) * S(scale)<br/>Writes DrawInstance[gID]"]:::comp
-    VertShader["instanced.vert (vkCmdDraw 6 * N vertices, 0 VBOs)<br/>instance = gl_VertexIndex / 6, corner = gl_VertexIndex % 6<br/>gl_Position = ubo.cameras[cam] * objects[instance].model * pos"]:::vert
-    FragShader["instanced.frag<br/>texture(sampler2D(tex[nonuniformEXT(texID)], texSampler), uv) * colour"]:::frag
+    CompShader["spritebatch.comp (local_size_x = 64)<br/>Builds mat4 model = T(origin) * Rz(-rot) * T(-origin) * S(scale)<br/>Writes DrawInstance Output"]:::comp
+    VertShader["instanced.vert (vkCmdDraw 6 * N vertices, 0 VBOs)<br/>instance = gl_VertexIndex / 6, corner = gl_VertexIndex % 6<br/>gl_Position = viewproj * model * pos"]:::vert
+    FragShader["instanced.frag<br/>Sample bindless texture array with pixel UVs * colour"]:::frag
 
     DrawCall --> CmdArr -->|"Flush at 2,284 sprites or state change"| Staging
     Staging --> CompShader --> VertShader --> FragShader
@@ -6843,9 +6843,9 @@ flowchart TD
 
     Src["User Slang Source<br/>Entry Point: PixelShader"]:::slang
     Session["Slang IGlobalSession -> ISession<br/>Target: SLANG_SPIRV (glsl_450)"]:::slang
-    Reflect["Global Params Reflection Loop<br/>1. push: ConstantBuffer<Push> == 112B<br/>2. sampler: SamplerState @ (1, 1)<br/>3. textures: Texture2D<float4>[] @ (2, 2)<br/>4. Optional ConstantBuffer @ (3, 3) -> userDataSize"]:::refl
+    Reflect["Global Params Reflection Loop<br/>1. push ConstantBuffer (Push == 112B)<br/>2. sampler SamplerState at (1, 1)<br/>3. textures Texture2D array at (2, 2)<br/>4. Optional ConstantBuffer at (3, 3) -> userDataSize"]:::refl
     Link["program->link() & getEntryPointCode()<br/>Outputs fragmentSpirv + userDataSize"]:::slang
-    Build["vk2dShaderFrom(VK2DVertUsershader, fragmentSpirv, userDataSize)<br/>Creates VK2DPipeline (4 Blend Modes)<br/>Registers in gRenderer->customShaders[]"]:::vk
+    Build["vk2dShaderFrom(VK2DVertUsershader, fragmentSpirv, userDataSize)<br/>Creates VK2DPipeline (4 Blend Modes)<br/>Registers in gRenderer->customShaders"]:::vk
 
     Src --> Session --> Reflect --> Link --> Build
 `,
@@ -7065,12 +7065,12 @@ flowchart LR
 
     subgraph Shadow_Pipeline ["2D Shadow Volume Extrusion"]
         Edge["vk2dShadowEnvironmentAddEdge(x1,y1, x2,y2)<br/>Emits 6 vec3 vertices per segment"]:::shadow
-        Vert["shadows.vert<br/>mod in {0,2,3}: Static World Pos<br/>mod in {1,4,5}: (pos - lightSource) * 1000"]:::shadow
+        Vert["shadows.vert<br/>mod in (0,2,3): Static World Pos<br/>mod in (1,4,5): (pos - lightSource) * 1000"]:::shadow
         Edge --> Vert
     end
 
     subgraph Present_Chain ["EndFrame Queue & Nuklear Semaphore Handoff"]
-        Sub["vkQueueSubmit(db, compute, draw)<br/>Signals renderFinishedSemaphores[scImageIndex]"]:::queue
+        Sub["vkQueueSubmit(db, compute, draw)<br/>Signals renderFinishedSemaphores"]:::queue
         NK["nk_sdl_render(...)<br/>Waits on renderFinishedSemaphores<br/>Signals nkSemaphore"]:::gui
         Pres["vkQueuePresentKHR<br/>Waits on nkSemaphore (or renderFinished)"]:::queue
         Sub --> NK --> Pres
@@ -7173,11 +7173,11 @@ flowchart TD
     classDef check fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef sink fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Raise["vk2dRaise(status, fmt, ...)<br/>gStatus |= status<br/>Appends to gLogBuffer[4096]"]:::call
+    Raise["vk2dRaise(status, fmt, ...)<br/>gStatus |= status<br/>Appends to gLogBuffer (4096 B)"]:::call
     FatalCheck{"quitOnError && vk2dStatusFatal()?"}:::check
     SevFatal["Severity = VK2D_LOG_SEVERITY_FATAL"]:::check
     SevErr["Severity = VK2D_LOG_SEVERITY_ERROR"]:::check
-    Logger["vk2dLoggerLogv (Stack Buf if <= 127 chars)<br/>Routes to gLogger->log()"]:::call
+    Logger["vk2dLoggerLogv (Stack Buf up to 127 chars)<br/>Routes to gLogger->log()"]:::call
     Stdout["Console stdout / stderr<br/>(if stdoutLogging == true)"]:::sink
     ErrFile["errorFile (vk2derror.txt)<br/>Always records WARN, ERROR & FATAL"]:::sink
     Abort["abort() if FATAL"]:::sink
@@ -7317,7 +7317,7 @@ flowchart LR
     Empty["1. vk2dRendererSetTarget(lightTex)<br/>vk2dRendererEmpty() -> RGBA (0,0,0,0)"]:::pass1
     Orb["2. Draw Colored Light Orb<br/>(VK2D_BLEND_MODE_BLEND)"]:::pass1
     Sub["3. vk2dRendererSetBlendMode(SUBTRACT)<br/>vk2dRendererDrawShadows(shadows, lightPos)<br/>Carves alpha = 0 behind wall edges"]:::pass2
-    Comp["4. vk2dRendererSetTarget(SCREEN)<br/>Draw lightTex over scene<br/>Repeat for each Light[0..7]"]:::pass3
+    Comp["4. vk2dRendererSetTarget(SCREEN)<br/>Draw lightTex over scene<br/>Repeat for each Light (0..7)"]:::pass3
 
     Empty --> Orb --> Sub --> Comp
 `,
@@ -7417,8 +7417,8 @@ flowchart LR
     Local["Local Quad Corner<br/>(0..w, 0..h)"]:::local
     Model["Model Matrix (M)<br/>T(pivot) * Rz(rot) * T(-pivot) * S(scale)"]:::world
     View["Camera View Matrix (V)<br/>eye = (x + w/2, y + h/2, -2)<br/>up = (sin(-rot), -cos(-rot), 0)"]:::cam
-    Proj["Orthographic Matrix (P)<br/>Scale (2/w, -2/h), Z in [0, 1]"]:::cam
-    Clip["Vulkan Clip Space (gl_Position)<br/>X in [-1, +1], Y in [-1 (top), +1 (bottom)], Z in [0, 1]"]:::ndc
+    Proj["Orthographic Matrix (P)<br/>Scale (2/w, -2/h), Z in 0..1"]:::cam
+    Clip["Vulkan Clip Space (gl_Position)<br/>X in -1..+1, Y in -1 (top) to +1 (bottom), Z in 0..1"]:::ndc
 
     Local --> Model --> View --> Proj --> Clip
 `,
