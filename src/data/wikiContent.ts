@@ -7856,7 +7856,7 @@ layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 \`\`\`
 VK2D chooses \`local_size_x = 64\` specifically because \`64\` fills **exactly two 32-lane NVIDIA warps or one 64-lane AMD wavefront** per workgroup with zero wasted hardware lanes!
 
-#### How **SIMT (Single Instruction, Multiple Threads)** Works Clock-by-Clock
+#### How SIMT (Single Instruction, Multiple Threads) Works Clock-by-Clock
 
 Inside one 32-lane warp:
 1. All 32 lanes share **one Program Counter (\`PC\`)** and fetch the **same instruction** at the exact same clock cycle.
@@ -7923,7 +7923,7 @@ When VK2D calls \`vk2dInitImageCreateInfo()\` in \`Initializers.c\`, it always s
 - In a normal 2D C array, moving 1 pixel down on screen jumps by \`width * 4\` bytes (often several kilobytes away, causing a cache miss on diagonal sprite rotations!).
 - Under \`OPTIMAL\` tiling, the GPU driver shuffles pixels into **2D space-filling Z-order (Morton) curves** inside $2 \\times 2$, $4 \\times 4$, and $8 \\times 8$ blocks! That means any pixel's neighbors *up, down, left, right, and diagonal* sit in the exact same L1 cache line—which is essential when bilinear texture filtering (\`VK_FILTER_LINEAR\`) samples 4 neighboring texels at once!
 
-### Chapter 4: The Hardware Graphics Pipeline & The $2 \\times 2$ Pixel Quad Rule
+### Chapter 4: The Hardware Graphics Pipeline & The 2×2 Pixel Quad Rule
 
 When \`vk2dRendererDrawShader()\` records \`vkCmdDraw(buf, 6, 1, 0, 0)\` into \`commandBuffer\`, here is what happens inside the silicon:
 
@@ -7932,7 +7932,7 @@ When \`vk2dRendererDrawShader()\` records \`vkCmdDraw(buf, 6, 1, 0, 0)\` into \`
 3. **Viewport Transform & Scissor Culling:** Clips triangles outside $[-1, +1]^2$ NDC (and $z \\in [0, 1]$), converts to screen pixels inside \`viewport\`, and discards pixels outside \`scissor\`.
 4. **Rasterizer & Barycentric Interpolation:** Walks across the triangles and spawns fragments—**never 1 pixel at a time, always in $2 \\times 2$ blocks called Pixel Quads**!
 
-#### Why GPUs Always Execute Pixel Shaders in $2 \\times 2$ Quads (Helper Lanes)
+#### Why GPUs Always Execute Pixel Shaders in 2×2 Quads (Helper Lanes)
 
 Even if a tiny 1-pixel sprite corner only touches **1 pixel** inside a $2 \\times 2$ tile, the hardware **still launches all 4 threads** (1 visible lane + 3 hidden **helper lanes** whose outputs are thrown away before blending):
 - **Why?** Because hardware texture mipmapping and screen-space derivative functions (\`ddx(v)\` / \`ddy(v)\`, or GLSL \`dFdx\` / \`dFdy\`) work by subtracting adjacent lanes inside the $2 \\times 2$ quad!
@@ -8292,7 +8292,7 @@ float4 PixelShader(float2 uv) {
 }
 \`\`\`
 
-#### Assignment 3: Retro 4-Shade Game Boy Quantizer & Ordered $2 \\times 2$ Dither
+#### Assignment 3: Retro 4-Shade Game Boy Quantizer & Ordered 2×2 Dither
 - **Objective:** Use VK2D's pixel-space \`uv\` coordinates directly to look up a $2 \\times 2$ Bayer threshold matrix (adding crisp retro dithering) and snap the sprite luminance into 4 classic emerald-green shades!
 - **Reference Solution:**
 \`\`\`hlsl
@@ -8544,7 +8544,7 @@ float4 PixelShader(float2 uv) {
 }
 \`\`\`
 
-#### Assignment 5: 9-Tap $3 \\times 3$ Pixel Blur Kernel
+#### Assignment 5: 9-Tap 3×3 Pixel Blur Kernel
 - **Objective:** Sample the 9 pixels around \`uv\` at distance \`userData.blurRadiusPx\` using normalized $3 \\times 3$ box/Gaussian weights ($1, 2, 1 \\;/\\; 2, 4, 2 \\;/\\; 1, 2, 1$ divided by $16$) and clamp safely inside \`push.texturePos\`.
 - **Reference Solution:**
 \`\`\`hlsl
