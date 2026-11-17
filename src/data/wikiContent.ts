@@ -41,7 +41,8 @@ export interface WikiSection {
     | "engine-math"
     | "input-response"
     | "status-resistance"
-    | "game-interface";
+    | "game-interface"
+    | "bastion";
 }
 
 export const WIKI_SECTIONS: WikiSection[] = [
@@ -6658,6 +6659,650 @@ flowchart TD
     ],
   },
   {
+    id: "splintered-ford-situations",
+    title: "43. The Splintered Ford, Dynamic Situations & Procedural Encampments",
+    category: "gameplay",
+    summary:
+      "Technical architectural breakdown of Mellangan's situational event engine: multi-phase state machines, multi-role actor tracking, candidate ford annular scans (BAND_LO=40 to BAND_HI=90), river span bridging, and procedural encampment synthesis.",
+    sourceFiles: [
+          "src/campaign/Situation.hpp",
+          "src/campaign/Situation.cpp",
+          "src/campaign/Ford.hpp",
+          "src/campaign/Ford.cpp",
+          "tools/make_situations.py",
+          "tools/make_camps.py"
+    ],
+    content: `### Emergent Encounters: From Static Quests to Systemic Situations
+
+Traditional role-playing games structure overworld interaction as rigid script trees: an NPC offers a static quest, monitors a counter variable, and triggers a scripted payout upon return. In contrast, Mellangan's campaign mechanics in \`src/campaign/Situation.cpp\` and \`src/campaign/Ford.cpp\` execute a continuous, living state machine called a **Situation**. A Situation couples procedural geography (e.g. river gorges, broken stone bridges, deadfall crossings) with autonomous faction actors, temporal deadlines, multi-role negotiation, and physical environmental repairs.
+
+The archetypal situation in Act 1 is **The Splintered Ford** (\`a1.ford\`), situated at the primary river crossing between the civil lowlands and the untamed frontiers. A Situation does not rely on scripted cutscenes: its participants are living groups in the \`Group\` table, its span is physical tile geography placed into the world via \`world::setWater\`, and its resolution permanently alters trade routes, NPC migration, and faction rep.
+
+---
+
+### The Situation State Machine & Actor Tracking
+
+Every situation operates through a formal six-phase state machine with strict transition guards defined in \`src/campaign/Situation.cpp\`:
+
+$\\text{Phase} \\in \\{\\text{Hidden}, \\text{Offered}, \\text{Active}, \\text{Resolved}, \\text{Abandoned}, \\text{Failed}\\}$
+
+\`\`\`cpp
+// src/campaign/Situation.cpp
+constexpr Move MOVES[int(Event::Count)] = {
+    {mask(P::Hidden), P::Offered},
+    {mask(P::Offered), P::Active},
+    {uint8_t(mask(P::Offered) | mask(P::Active)), P::Count},
+    {mask(P::Active), P::Resolved},
+    {uint8_t(mask(P::Offered) | mask(P::Active)), P::Abandoned},
+    {uint8_t(mask(P::Offered) | mask(P::Active)), P::Failed},
+};
+\`\`\`
+
+#### Lifecycle & Temporal Constraints
+
+- **Hidden to Offered:** When the hero approaches within scouting distance or reads a bulletin in town, the Situation activates into \`Offered\`. It records \`offered = day\`.
+- **Offered to Active:** Acceptance locks in the clock deadline: \`due = min(day + days, DAYS)\`. For the Splintered Ford, \`info.days = 4\`, giving the player four 24-minute campaign days before the situation times out.
+- **Clock Expiration:** During each tick in \`situation::tick()\`, the campaign clock is compared against \`due\`:
+  \`\`\`cpp
+  if (s.phase == P::Active && s.due >= 0 && today >= s.due)
+    step(s, Event::Fail, today, Cause::Expired);
+  \`\`\`
+- **Actor Death & Catastrophic Failure:** Unlike immortal quest givers in other engines, all participants in a Situation are mortal \`SitActor\` entities assigned to specific roles: \`Role::Occupier\`, \`Role::Claimant\`, or \`Role::Travellers\`. If an actor's entity group is annihilated or routed in wild combat before the situation resolves, the engine invokes \`lose()\`:
+  \`\`\`cpp
+  void lose(Situations &all, const Situation &s, SitActor &a) {
+    a.state = ActorState::Gone;
+    int k = roleSlot(s.def, a.role);
+    if (k < 0) return;
+    int u = info(s.def).role[k].unit;
+    SitUnit &row = all.unitAt(s.def, u);
+    if (settled(row.phase)) return;
+    row.phase = info(s.def).unit[u].lost, row.cause = Cause::ActorLost;
+    spdlog::info("situation: {} lost its {} actor (group {})", info(s.def).key, int(a.role), a.group);
+  }
+  \`\`\`
+
+---
+
+### The Four Sub-Units of The Splintered Ford
+
+The Splintered Ford is decomposed into four modular sub-goals (\`Unit\`), each tracking its own state and contribution to the overall campaign ledger:
+
+1. **Pass (\`Unit::Pass\`):** Securing safe physical traversal across the chasm. Can be accomplished through engineering repair (donating 10 timber and 4 cut stone to rebuild the bridge span), paying the occupier's extortionate toll (120 gold coins), or military extermination of the occupying brigands.
+2. **Claim (\`Unit::Claim\`):** Resolving the ancient territorial dispute over the crossing. The Grove Keepers claim sacred jurisdiction over the riverbanks, whereas the Freeblade Camp or Goblin Warband claims martial right of salvage. The player can negotiate a timber-cutting compromise, harvest sacred seeds, or broker a joint pact.
+3. **Strand (\`Unit::Strand\`):** Rescuing stranded pilgrims or merchants stranded on the far bank without supplies. The player provides survival rations: 4 produce lots and 3 restorative herbs.
+4. **Service (\`Unit::Service\`):** Re-establishing commercial courier dispatch and carriage escort across the border.
+
+#### Branch Outcomes & Rewards
+
+When all active units reach \`Phase::Resolved\`, the Situation resolves into one of four distinct cultural branches:
+
+| Branch Name | Cultural & Faction Meaning | Gold / Coin Loot | Campaign XP | World Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| \`Caravan\` | Commercial crossing fully reopened under merchant guild charter | 250 gold, 150 coin | +150 XP | Unlocks inter-nation road trade, caravans spawn |
+| \`GroveClosed\` | Sacred grove sealed against iron wagons; spirits placated | 300 gold, 180 coin | +150 XP | Awards 50 Root boons, ancient blessings granted |
+| \`Shared\` | Diplomatic compromise: toll revenue shared with grove keepers | 200 gold, 100 coin | +150 XP | Faction standing +60 with both Keepers and Freeblades |
+| \`Turned\` | Violent coup: occupiers slaughtered, ford fortified by hero | 0 gold, 0 coin | +150 XP | Installs autonomous player-aligned garrison |
+
+---
+
+### Procedural Candidate Search & Topographic Placement
+
+How does Mellangan locate the optimal site for the ford without hardcoding coordinates? In \`src/campaign/Ford.cpp\`, the engine executes an annular radial search around the player's starting settlement:
+
+$\\Delta x^2 + \\Delta y^2 \\in [R_{\\text{lo}}^2, R_{\\text{hi}}^2] = [40^2, 90^2] = [1600, 8100]$
+
+\`\`\`cpp
+// src/campaign/Ford.cpp
+constexpr int BAND_LO = 40, BAND_HI = 90, OUTER = 150;
+constexpr int BLOCK_W = 64, BLOCK_H = 32, STRIDE = 3;
+
+std::vector<Lead> leads(int ox, int oy) {
+  std::vector<Lead> out;
+  for (int by = -BAND_HI; by <= BAND_HI; by += BLOCK_H)
+    for (int bx = -BAND_HI; bx <= BAND_HI; bx += BLOCK_W)
+      for (int dy = by; dy < std::min(by + BLOCK_H, BAND_HI + 1); dy++)
+        for (int dx = bx; dy % STRIDE == 0 && dx < std::min(bx + BLOCK_W, BAND_HI + 1); dx++) {
+          int d = dx * dx + dy * dy, x = ox + dx, y = oy + dy, k = 1;
+          if (d < BAND_LO * BAND_LO || d > BAND_HI * BAND_HI) continue;
+          if (world::isRamp(x, y)) { /* check ramp leads */ }
+          if (world::isWater(x, y) || !world::isWater(x + 1, y)) continue;
+          while (k <= SPAN && world::isWater(x + k, y) && !world::isIce(x + k, y)) k++;
+          if (k - 1 >= 2 && k - 1 < SPAN && land(x + k, y))
+            out.push_back({d, x, y, k - 1, false});
+        }
+  sorted(out);
+  return out;
+}
+\`\`\`
+
+The algorithm partitions the world into $64 \\times 32$ block tiles, strides by 3 cells to avoid redundant checks, and scans for water channels where:
+
+$2 \\le k_{\\text{span}} < 11$
+
+If solid dry land exists on both sides of the water channel, the lead is stored. A breadth-first search (\`reach()\`) verifies that both banks actually connect to the wider continental road graph.
+
+---
+
+### Procedural Encampment Synthesis (\`spot()\` & \`pad()\`)
+
+Once the ford site is verified, the engine spawns encampments for both the **Occupier** and the **Claimant**. It invokes \`spot()\` with spatial constraints:
+
+\`\`\`cpp
+// src/campaign/Ford.cpp
+bool spot(uint32_t h, double cx, double cy, double ux, double uy, double lo, double hi,
+          double gx, double gy, double gap, double &x, double &y) {
+  double base = std::atan2(uy, ux);
+  for (int k = 0; k < 32; k++) {
+    uint32_t r = hash2(int(h), k);
+    double a = base + (double(r % 1000) / 1000 - 0.5) * 2.4;
+    double d = lo + (hi - lo) * double(r / 1000 % 1000) / 1000;
+    x = cx + std::cos(a) * d, y = cy + std::sin(a) * d;
+    if (apart(x, y, gx, gy) >= gap && fireAt(x, y))
+      return true;
+  }
+  return false;
+}
+\`\`\`
+
+- **Elevation Padding (\`pad()\`)**: Ensures the camp site is completely flat: all tiles within radius $r$ must match the center elevation with zero water or ramp tiles.
+- **Structure Clearance (\`bare()\`)**: Verifies no natural dungeon, ruin, or graveyard overlaps within 4 tiles.
+- **Faction Selection**: If the terrain is heavily forested according to biome bitmasks (\`wooded()\`), the occupier is cast as a \`Goblin Warband\`; otherwise, it casts a mercenary \`Freeblade Camp\`. The claimant is cast as \`Grove Keepers\` located 160 to 320 tiles away across the water barrier.
+
+---
+
+### World Geometry Construction: Bridges & Campfire Plates
+
+When the player donates construction materials or finishes the passage unit, the game physically bridges the terrain in real time:
+
+\`\`\`cpp
+// Adding physical FordSpan entity to the level
+level.add(std::make_shared<FordSpan>(st.x0, st.x1, st.ty, true));
+
+// Clearing water collision flags in world tilemap
+for (int x = st.x0; x <= st.x1; x++) {
+  world::setWater(x, st.ty, false);
+}
+\`\`\`
+
+Campfire interaction is handled through \`Plate\` triggers: when the player stands within 320 pixels of the campfire, a context prompt appears in the HUD. Pressing \`E\` initiates multi-choice parley dialogue directly through Mellangan's native SSO string dialogue engine.`,
+    mermaidCharts: [
+      {
+        title: "Situation State Machine & Unit Resolution Topology",
+        chart: `
+flowchart TD
+    classDef hid fill:#181524,stroke:#64748b,stroke-width:2px,color:#e2e8f0;
+    classDef act fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef win fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef fail fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+    classDef unit fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    H["Hidden: World Generation Seeded"]:::hid
+    O["Offered: Discovered in Scout Range"]:::act
+    A["Active: Clock Running (due = day + 4)"]:::act
+
+    U1["Unit: Pass (Bridge Repair OR Toll OR Slay)"]:::unit
+    U2["Unit: Claim (Keepers vs Freeblades Parley)"]:::unit
+    U3["Unit: Strand (Rations to Marooned Travellers)"]:::unit
+    U4["Unit: Service (Trade Courier Escort)"]:::unit
+
+    R["Resolved: Cultural Branch Choosen<br/>Caravan, GroveClosed, Shared, or Turned"]:::win
+    Ab["Abandoned: Player Ignored Timeout"]:::fail
+    F["Failed: Clock Expired OR SitActor Slain"]:::fail
+
+    H -->|"Proximity / Bulletin"| O
+    O -->|"Accept Quest"| A
+    A --> U1 & U2 & U3 & U4
+    U1 & U2 & U3 & U4 -->|"All Goals Settled"| R
+    A -->|"Clock >= due"| F
+    A -->|"Actor Dead (lose())"| F
+    O & A -->|"Manual Forfeit"| Ab
+`,
+      },
+      {
+        title: "Procedural Ford Annular Scanning & Camp Arbitration Pipeline",
+        chart: `
+flowchart TD
+    classDef scan fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef chk fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef ok fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef spawn fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    Init["Center: Player Settlement (ox, oy)"]:::scan
+    Annular["Annular Band: r in [40, 90] Tiles<br/>Partition 64x32 Blocks, Stride 3"]:::scan
+    WaterChk{"Water Channel Width<br/>2 <= span < 11?"}:::chk
+    ReachBFS{"BFS reach(): Do Both Banks<br/>Connect to Road Network?"}:::chk
+    SpotCamp["spot(): Find Flat Elevation (pad(r=1))<br/>Clear of Structures (bare(r=2))"]:::chk
+    AssignOcc["Assign Occupier (Goblin Warband / Freeblades)<br/>Assign Claimant (Grove Keepers across river)"]:::spawn
+    PlaceEnt["Instantiate FordSpan + FordMark + Campfire Plates"]:::ok
+
+    Init --> Annular --> WaterChk
+    WaterChk -->|"Valid Span"| ReachBFS
+    ReachBFS -->|"Connected"| SpotCamp
+    SpotCamp --> AssignOcc --> PlaceEnt
+`,
+      },
+    ],
+  },
+  {
+    id: "bastion-flow-defense-inquisition",
+    title: "44. Bastion Vector-Field Flow-Defense, The Synod Inquisition & Holy Caches",
+    category: "gameplay",
+    interactiveComponent: "bastion",
+    summary:
+      "Deep architectural dive into the Bastion flow field defense engine: 6x5 chamber ring topologies, 8-directional BFS wavefront routing from cardinal gates, edge collision deflection, autonomous watchtower ballistics, and Synod Inquisition den purges.",
+    sourceFiles: [
+          "src/campaign/Bastion.hpp",
+          "src/campaign/Bastion.cpp",
+          "src/campaign/Watchtower.hpp",
+          "src/campaign/Watchtower.cpp",
+          "src/campaign/CampaignSynod.cpp",
+          "src/campaign/Curio.cpp",
+          "src/campaign/Cache.cpp"
+    ],
+    content: `### Bastion Defense Architecture: Real-Time Vector Fields in C++20
+
+When large hordes of enemies assault fortified compounds, standard $A^{*}$ pathfinding becomes an exponential performance bottleneck: running individual path queries for 300 active foes generates unacceptable frame drops. In \`src/campaign/Bastion.cpp\`, Mellangan solves this with **Vector Field Flow Routing**. Instead of computing individual entity paths, the engine computes a single discrete 8-directional vector field across an $N \\times N$ ($64 \\times 64$) tile chamber room. Every enemy within the bastion's sphere of influence simply reads its local tile direction in $\\mathcal{O}(1)$ time.
+
+---
+
+### The Discrete Flow Field Generation Algorithm
+
+A Bastion field is initialized via \`bastion::raise(cx, cy)\`. It constructs a fortified room of dimensions $W = 6, H = 5$ tiles surrounded by a thick stone perimeter:
+
+$W = 6, \\quad H = 5, \\quad N = 64, \\quad \\text{CELL} = 16\\text{ pixels}$
+
+\`\`\`cpp
+// src/campaign/Bastion.cpp
+constexpr int DX[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+constexpr int DY[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+constexpr float R2 = 0.70710678f;
+constexpr float UX[8] = {1, R2, 0, -R2, -1, -R2, 0, R2};
+constexpr float UY[8] = {0, R2, 1, R2, 0, -R2, -1, -R2};
+
+void raise(int cx, int cy) {
+  Field &f = fields.emplace_back();
+  f.cx = cx, f.cy = cy, f.x0 = cx - N / 2, f.y0 = cy - N / 2;
+  f.west = float((cx - W) * CELL + 8), f.east = float((cx + W) * CELL + 8);
+  f.north = float((cy - H) * CELL + 13), f.south = float((cy + H) * CELL + 13);
+  f.gate = gate(cx, cy);
+  f.dir.fill(NONE);
+
+  uint16_t queue[N * N];
+  int head = 0, tail = 0;
+
+  // 1. Seed the Gate opening tiles as GOAL (8) and perimeter as WALL (9)
+  for (int ly = 0; ly < N; ly++)
+    for (int lx = 0; lx < N; lx++) {
+      int tx = f.x0 + lx, ty = f.y0 + ly;
+      if (!ring(cx, cy, tx, ty)) continue;
+      bool open = opening(cx, cy, tx, ty);
+      f.dir[size_t(ly * N + lx)] = open ? GOAL : WALL;
+      if (open) queue[tail++] = uint16_t(ly * N + lx);
+    }
+
+  // 2. 8-direction BFS expansion
+  while (head < tail) {
+    int c = queue[head++], cx0 = c % N, cy0 = c / N;
+    for (int k = 0; k < 8; k++) {
+      int nx = cx0 + DX[k], ny = cy0 + DY[k];
+      if (unsigned(nx) >= unsigned(N) || unsigned(ny) >= unsigned(N)) continue;
+      uint8_t &d = f.dir[size_t(ny * N + nx)];
+      if (d != NONE) continue;
+
+      // Diagonal corner-cutting check
+      if ((k & 1) && (f.dir[size_t(cy0 * N + nx)] == WALL || f.dir[size_t(ny * N + cx0)] == WALL))
+        continue;
+
+      d = uint8_t((k + 4) & 7); // Points backward to parent towards gate
+      queue[tail++] = uint16_t(ny * N + nx);
+    }
+  }
+}
+\`\`\`
+
+#### Corner-Cutting Invariant
+
+Notice the diagonal check: \`(k & 1) && (wall1 || wall2)\`. If an agent attempts to traverse diagonally between two adjacent wall tiles, the movement is pruned. This prevents enemies from clipping through 1-pixel corner joints during frantic high-speed movement.
+
+---
+
+### Dual-State Routing & Wall Collision Deflection
+
+Entities query the flow field inside \`bastion::route()\`:
+
+\`\`\`cpp
+// src/campaign/Bastion.cpp
+void route(double x, double y, double px, double py, float speed, double &xw, double &yw) {
+  for (const Field &f : fields) {
+    bool in = f.inside(x, y), hero = f.inside(px, py);
+    if (in == hero) continue; // If both inside or both outside, use direct line-of-sight
+    if ((px - x) * xw + (py - y) * yw <= 0) return;
+    uint8_t d = f.at(x, y);
+    if (d < 8)
+      xw = UX[d] * speed, yw = UY[d] * speed;
+    return;
+  }
+}
+\`\`\`
+
+- **State Equilibrium:** When both the player and the enemy are inside the bastion (or both outside), the flow field yields to standard direct steering.
+- **Threshold Crossing:** As soon as the hero retreats inside the bastion walls while foes remain outside, \`in != hero\` triggers. The foe's velocity vector is instantly hijacked by \`UX[d], UY[d] * speed\`, smoothly guiding hundreds of attacking monsters through the designated gate opening.
+- **Physical Collision Clamping (\`bastion::wall\`):** If an entity is forced against the perimeter wall, the engine computes signed distances to the 4 edges and deflects the entity along the tangent:
+
+$\\varepsilon = 9\\text{ px}, \\quad d_w = x - \\text{west}, \\quad d_e = \\text{east} - x, \\quad d_n = y - \\text{north}, \\quad d_s = \\text{south} - y$
+
+The smallest distance determines the collision normal, clamping the coordinate outside the wall while permitting free passage along the gate corridor (\`f.corridor()\`).
+
+---
+
+### Autonomous Watchtower Ballistics
+
+Bastions are anchored by autonomous \`Watchtower\` structures (\`src/campaign/Watchtower.cpp\`):
+
+\`\`\`cpp
+// src/campaign/Watchtower.hpp
+class Watchtower : public Entity {
+public:
+  static constexpr float RANGE = 190, RELOAD = 1.1f;
+  Watchtower(double x, double y) { this->x = x, this->y = y; }
+  void tick() override;
+  void renderLight(Screen &s) override;
+  float reload = 0.5f, t = 0;
+  int shots = 0;
+};
+\`\`\`
+
+Every 1.1 seconds, the watchtower sweeps within radius $R = 190$ pixels for the nearest hostile entity. It leads moving targets by projecting velocity over projectile flight time, launching heavy iron ballista bolts while casting dynamic circular light fields (\`renderLight\`) onto the engine's LightField buffer.
+
+---
+
+### The Synod Inquisition, Holy Chapels & Moral Judgment
+
+In \`src/campaign/CampaignSynod.cpp\`, bastion defense intertwines with the religious hegemony of **The Synod**. Synod Chapels serve as fortified sanctuary hubs where players can cleanse Afflictions, purchase consecrated wares, and receive official Inquisition mandates.
+
+#### Faction Purge Quotas
+
+For each Campaign Act, the Synod establishes strict eradication quotas against local monstrous populations:
+
+| Act | Target Faction | Quota | Den Type | Reward Gold |
+| :--- | :--- | :--- | :--- | :--- |
+| Act 1 | \`Faction::Mycel\` | 15 kills | Fungal Spore Ruin | 200 gold |
+| Act 2 | \`Faction::Bogspawn\` | 20 kills | Marsh Bog Den | 200 gold |
+| Act 3 | \`Faction::Glasskin\` | 25 kills | Obsidian Glass Shard | 200 gold |
+| Act 4 | \`Faction::Starborn\` | 30 kills | Crater Altar | 200 gold |
+| Act 5 | \`Faction::BarrowHost\` | 35 kills | Royal Crypt Barrow | 200 gold |
+
+#### The Judgment Dilemma: Vows vs Mercy
+
+When the player tracks down a target faction's ancestral den, they face a moral and mechanical crossroad via \`Campaign::judge(level, spare)\`:
+
+1. **Purge the Den (\`spare = false\`):** The player eradicates the den inhabitants. The soil is treated with slaked lime (\`limeAround()\`), spawning a permanent barrier of \`Stuff::Limed\` with life 
+  {
+    id: "vk2d-architecture",0^{4}$ seconds that repels undead and fungal rot. The player receives 150 purge gold and high Synod prestige.
+2. **Spare the Den (\`spare = true\`):** The player refuses the purge. The game triggers immediate excommunication:
+   \`\`\`cpp
+   rank::castOut(ranks, Faction::Synod);
+   level.scrutiny = std::max(level.scrutiny, Level::INQUISITION);
+   level.game.announce(lang.vowsBroken);
+   \`\`\`
+   Breaking vows spikes the player's Scrutiny level to maximum, spawning elite **Inquisition Pursuers** (\`SynodFoe\`) armed with silver censers and pyre torches, while awarding massive goodwill with the spared non-human faction.
+
+---
+
+### Curios & Reliquary Caches
+
+Across the countryside, players encounter hidden stone **Caches** (\`src/campaign/Cache.cpp\`) and mystical **Curios** (\`src/campaign/Curio.cpp\`). Appraising a curio reveals one of 12 supernatural archetypes:
+
+- \`Reveal\`: Illuminates all nearby dungeon stairs and hidden ore veins.
+- \`Mend\`: Restores 100% weapon durability and clears encumbrance fatigue.
+- \`Gild\`: Transmutes mundane iron scraps into pure gold coin.
+- \`Swarm\`: Summons a temporary vortex of defensive stinging hornets.
+- \`Curse\`: Afflicts the player with unpredictable status volatility in exchange for tripled magic find.
+- \`Thunder\`: Casts an instantaneous ring of chain lightning across the screen.
+
+Players can burn blasphemous curios at Synod pyres (\`curio::burn()\`) to gain +15 Pyre Pardon, reducing Inquisition scrutiny and restoring peace with church patrols.`,
+    mermaidCharts: [
+      {
+        title: "Bastion Flow Field Wavefront Propagation & Collision Resolution",
+        chart: `
+flowchart TD
+    classDef gate fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef bfs fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef steer fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef wall fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+
+    G["Gate Opening (GAP = 1, Width 3 tiles)<br/>Seeded into Queue at dist = 0, dir = GOAL (8)"]:::gate
+    BFS["8-Direction BFS Wavefront<br/>Prune Diagonal Corner-Cutting (k & 1 && wall)"]:::bfs
+    DirTable["Populate dir[N*N] with Inverted Unit Vectors<br/>UX[d], UY[d] pointing to predecessor"]:::bfs
+
+    Query["Enemy Tick: Query bastion::route(x, y, px, py)"]:::steer
+    StateChk{"Hero & Foe on Opposite Sides<br/>(inside != heroInside)?"}:::steer
+    FieldSteer["Sample Direction d = dir[tile]<br/>Set Velocity = (UX[d] * speed, UY[d] * speed)"]:::steer
+    DirectSteer["Direct Line-of-Sight Pursuit to Hero"]:::steer
+
+    WallCol["bastion::wall(): Check Perimeter Crossing<br/>If NOT in Corridor: Deflect along Edge Normal (eps = 9)"]:::wall
+
+    G --> BFS --> DirTable
+    DirTable --> Query --> StateChk
+    StateChk -->|"Yes"| FieldSteer --> WallCol
+    StateChk -->|"No"| DirectSteer --> WallCol
+`,
+      },
+      {
+        title: "Synod Inquisition Scrutiny, Holy Chapels & Judgment Branching",
+        chart: `
+flowchart TD
+    classDef synod fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef purge fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef break fill:#181524,stroke:#ef4444,stroke-width:2px,color:#e2e8f0;
+
+    Chapel["Synod Chapel: Cleansing Afflictions (150g)<br/>Inquisition Mandate Issued (CHARGES[act])"]:::synod
+    Den["Locate Den in Wilds via world::nearestStructure()"]:::synod
+    Choice{"Campaign::judge(level, spare)<br/>Choose Fate of the Den"}:::synod
+
+    PurgeDen["Purge Den: Slake Lime (Stuff::Limed, life = 10000s)<br/>+150 Purge Gold, +200 Charge Gold, Synod Pardon"]:::purge
+    SpareDen["Spare Den: rank::castOut(Faction::Synod)<br/>Scrutiny = INQUISITION, Synod Pursuers Spawn, Faction Trust Up"]:::break
+
+    Chapel --> Den --> Choice
+    Choice -->|"spare = false"| PurgeDen
+    Choice -->|"spare = true"| SpareDen
+`,
+      },
+    ],
+  },
+  {
+    id: "procedural-music-audio-engineering",
+    title: "29. Procedural Music Synthesis, 4-Track FM Tracker & Audio Engineering",
+    category: "core",
+    summary:
+      "Comprehensive breakdown of Mellangan's procedural soundtrack generator and 32-voice audio engine: deterministic seed synthesis, seamless loop tail-folding, physical waveguide koto/shakuhachi modeling, 9-bit DAC emulation, and real-time spatial mixing.",
+    sourceFiles: [
+          "tools/make_music.py",
+          "tools/make_audio.py",
+          "src/audio/Sound.hpp",
+          "src/audio/Sound.cpp",
+          "src/audio/FoeVoice.hpp",
+          "src/audio/FoeVoice.cpp"
+    ],
+    content: `### Procedural Audio Architecture: Zero-Asset Soundtrack Synthesis
+
+Where modern game titles distribute gigabytes of compressed MP3 or Vorbis audio tracks, Mellangan compiles its entire original musical soundtrack procedurally via \`tools/make_music.py\`. Every theme, chord progression, instrument timbre, and ambient soundscape is synthesized purely from mathematics using NumPy, SciPy, and bandlimited digital signal processing (DSP). Because all generators rely on deterministic pseudo-random seeds, the compilation pipeline produces bit-exact, identical WAV and OGG assets across all developer machines.
+
+---
+
+### Mathematical Tail-Folding & Seamless Looping
+
+Game audio must loop indefinitely without audible pops, clicks, or reverb cutoffs. Standard DAWs require manual fade-ins or cross-fades that muddy ambient reverberation. Mellangan solves this by **reverb tail convolution folding**:
+
+$y[t] = x[t] + x[t + T_{\\text{loop}}], \\quad t \\in [0, T_{\\text{loop}})$
+
+\`\`\`python
+# tools/make_music.py
+# Seamless loop convolution tail folding
+def loop_wrap(signal: np.ndarray, loop_samples: int) -> np.ndarray:
+    out = np.zeros(loop_samples, dtype=np.float32)
+    # Fold any reverberation tail extending past loop_samples back into the beginning
+    for i in range(0, len(signal), loop_samples):
+        chunk = signal[i:i + loop_samples]
+        out[:len(chunk)] += chunk
+    return out
+\`\`\`
+
+By performing an FFT-based impulse response convolution (\`scipy.signal.fftconvolve\`) and wrapping the tail modulo the exact bar duration, the reverberation of the final chord naturally rings out during the opening measure. The result is a mathematically seamless loop with zero phase discontinuity.
+
+---
+
+### Musical Theory: Yo & In Pentatonic Scales
+
+Mellangan's soundtrack blends Japanese traditional chamber instrumentation with European brass chorales and martial percussion. The melodic scales are strictly constructed around two historic Japanese pentatonic tunings:
+
+1. **The Yo Scale (D, E, G, A, B):** A bright, open five-tone scale without semitone intervals (
+  {
+    id: "vk2d-architecture",, 2, 4, 5, 6$). Evokes the natural beauty of peaceful sunlit countrysides and safe hearths (\`res/music/campaign.ogg\`, \`res/music/hearth.ogg\`).
+2. **The In Scale (D, Eb, G, A, Bb):** A dark, poignant five-tone scale characterized by half-step tension (
+  {
+    id: "vk2d-architecture",, \\flat 2, 4, 5, \\flat 6$). Evokes ancient dread, subterranean crypts, and life-or-death boss skirmishes (\`res/music/caves.ogg\`, \`res/music/boss.ogg\`).
+
+\`\`\`python
+# tools/make_music.py scale definitions
+YO = {
+    "D": [50, 57, 62, 64], # D3, A3, D4, E4
+    "B": [47, 57, 62, 64], # B2, A3, D4, E4
+    "G": [43, 57, 59, 62], # G2, A3, B3, D4
+    "A": [45, 57, 64, 67], # A2, A3, E4, G4
+}
+IN = {
+    "D": [50, 57, 62, 63], # D3, A3, D4, Eb4
+    "Bb": [46, 57, 62, 70], # Bb2, A3, D4, Bb4
+    "G": [43, 58, 62, 67], # G2, Bb3, D4, G4
+    "Eb": [51, 58, 62, 67], # Eb3, Bb3, D4, G4
+}
+\`\`\`
+
+---
+
+### Physical Instrument Modeling in Software
+
+Rather than playing static PCM samples, the synthesis engine models the physical acoustics of four primary instruments:
+
+#### 1. Plucked Koto Strings (Karplus-Strong Waveguide)
+
+The Japanese 13-string koto is modeled using a modified Karplus-Strong digital waveguide. An initial noise burst simulates the ivory plectrum pluck, circulated through a delay line of length $L = f_s / f_0$:
+
+$H(z) = \\frac{1 + z^{-1}}{2} \\cdot \\rho$
+
+A low-pass averaging filter simulates high-frequency string damping, while a fractional delay allpass filter provides pitch accuracy and slight string stiffness dispersion.
+
+#### 2. Shakuhachi End-Blown Flute (Turbulent Air Jet)
+
+The bamboo shakuhachi is synthesized by coupling a pink-noise turbulence generator (modeling breath blowing across the sharp horn edge) into a resonant second-order bandpass filter. Pitch modulation (\`meri-kari\` embouchure bending) and random breath velocity fluctuations simulate authentic breath vibrato.
+
+#### 3. Taiko & Shime Drums (2D Circular Membrane Modes)
+
+Large Japanese war drums are synthesized by calculating the vibration modes of a circular clamped membrane. Unlike strings whose harmonics are integer multiples ($f, 2f, 3f$), circular membrane overtones correspond to the non-integer roots of Bessel functions $J_n(\\alpha_{nm}) = 0$:
+
+$f_{01} = 1.000 f_0, \\quad f_{11} = 1.593 f_0, \\quad f_{21} = 2.135 f_0, \\quad f_{02} = 2.295 f_0$
+
+Summing exponentially decaying sinusoids at these Bessel ratios yields the unmistakable resonant hollow boom of a massive temple drum.
+
+#### 4. Handheld Console 9-Bit DAC Emulation (\`moor.ogg\`)
+
+For battle tracks in the marshland (\`moor.ogg\`), the audio pipeline routes trumpet, reed organ, and bass voices through a vintage handheld sound chip emulator:
+
+$\\hat{x}[n] = \\frac{\\lfloor 2^8 \\cdot x[n] + 0.5 \\rfloor}{2^8}, \\quad f_s = 15{,}768\\text{ Hz}$
+
+The signal is downsampled to 15,768 Hz and quantized to 9-bit resolution, adding distinct harmonic grit and vintage warmth.
+
+---
+
+### The 32-Voice Low-Latency Game Mixer (\`src/audio/Sound.cpp\`)
+
+In real-time gameplay, sound effects and musical stems are managed by a custom 32-voice stereo mixer (\`Sound.cpp\`):
+
+\`\`\`cpp
+// src/audio/Sound.hpp
+class Sound {
+public:
+  static constexpr int VOICES = 32;
+  static void play(int soundId, double x, double y, float volume = 1.0f);
+  static void tick(double heroX, double heroY);
+};
+\`\`\`
+
+#### Inverse-Square Spatial Attenuation
+
+When sounds are triggered at world coordinates $(x, y)$, the mixer computes spatial stereo panning and distance falloff relative to the player:
+
+$d = \\sqrt{(x - x_{\\text{hero}})^2 + (y - y_{\\text{hero}})^2}$
+
+$A(d) = \\frac{1}{1 + \\alpha d^2}, \\quad \\alpha = 0.00012$
+
+$\\text{Pan} = \\text{clamp}\\left(\\frac{x - x_{\\text{hero}}}{400.0}, -1.0, 1.0\\right)$
+
+The left and right channels are weighted according to the constant-power panning law:
+
+$L = \\cos\\left(\\frac{\\pi (\\text{Pan} + 1)}{4}\\right), \\quad R = \\sin\\left(\\frac{\\pi (\\text{Pan} + 1)}{4}\\right)$
+
+#### LRU Voice Stealing
+
+During dense engagements involving hundreds of arrows and explosions, sound triggers can easily exceed 32 concurrent voices. When capacity is reached, the mixer selects the voice with the lowest computed audible energy ($A(d) \\times \\text{volume}$) and shortest remaining decay, preempting it cleanly without clipping through a 2 ms cosine ramp-down.
+
+#### Procedural Monster Voices (\`src/audio/FoeVoice.cpp\`)
+
+Enemy roars, grunts, and shrieks are not recorded audio files. The engine synthesizes them at runtime in \`src/audio/FoeVoice.cpp\` using a parametric two-formant vocal tract filter excited by a sawtooth wave with randomized pitch jitter, producing unique guttural shrieks for every goblin and beast.`,
+    mermaidCharts: [
+      {
+        title: "Procedural Music Generation & Loop Tail-Wrapping Pipeline",
+        chart: `
+flowchart TD
+    classDef seed fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef synth fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef dsp fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Seed["Fixed Random Seeds (Deterministic Bit-Exact)"]:::seed
+    Score["Score Formulation: Yo & In Pentatonic Sequences<br/>Chorales, Basslines & Percussion Patterns"]:::seed
+
+    Koto["Karplus-Strong Waveguide (Koto Pluck)"]:::synth
+    Flute["Resonant Noise Jet (Shakuhachi Flute)"]:::synth
+    Taiko["Bessel Mode Summation (Taiko & Shime)"]:::synth
+    DAC["15768 Hz / 9-Bit Quantizer (Handheld Moor FX)"]:::synth
+
+    Mix["4-Track Stem Mixdown & Reverb Impulse Convolve"]:::dsp
+    Fold["loop_wrap(): Tail Modulo Folding<br/>Fold Reverb Tail into Beginning (y[t] = x[t] + x[t+T])"]:::dsp
+    Export["Lossless WAV & OGG Export (Zero Seam Loop)"]:::out
+
+    Seed --> Score
+    Score --> Koto & Flute & Taiko & DAC
+    Koto & Flute & Taiko & DAC --> Mix --> Fold --> Export
+`,
+      },
+      {
+        title: "Real-Time 32-Voice Low-Latency Spatial Audio Routing",
+        chart: `
+flowchart TD
+    classDef trig fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef mix fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Event["Sound::play(id, x, y, vol) Trigger"]:::trig
+    VoiceAlloc{"Available Mixer Voice<br/>in 32-Slot Ring?"}:::mix
+    LRU["LRU Preemption: Steal Lowest Energy Voice<br/>Apply 2ms Cosine Ramp-Down Fade"]:::mix
+
+    PanCalc["Spatial Processing:<br/>Distance Attenuation: 1 / (1 + 0.00012 * d^2)<br/>Constant-Power Stereo Panning Law"]:::mix
+    PitchJitter["Pitch Randomization (+/- 5%)<br/>Prevent Machine-Gun Repetition Fatigue"]:::mix
+
+    BufferOut["Direct Stereo Accumulation into Audio Device Stream"]:::out
+
+    Event --> VoiceAlloc
+    VoiceAlloc -->|"Slot Available"| PanCalc
+    VoiceAlloc -->|"All 32 Busy"| LRU --> PanCalc
+    PanCalc --> PitchJitter --> BufferOut
+`,
+      },
+    ],
+  },
+{
     id: "vk2d-architecture",
     title: "53. Vulkan2D Basic Architecture & Frame Lifecycle",
     category: "graphics",

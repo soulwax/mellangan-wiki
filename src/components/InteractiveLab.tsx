@@ -29,6 +29,7 @@ const labs: Record<LabName, ComponentType> = {
   "status-resistance": lazy(() => import("./StatusResistanceLab").then(m => ({ default: m.StatusResistanceLab }))),
   "input-response": lazy(() => import("./InputResponseLab").then(m => ({ default: m.InputResponseLab }))),
   "game-interface": lazy(() => import("./GameCommunityPortal").then(m => ({ default: m.GameCommunityPortal }))),
+  bastion: lazy(() => import("./BastionFlowLab").then(m => ({ default: m.BastionFlowLab }))),
 };
 
 export function InteractiveLab({ name }: { name: LabName }) {

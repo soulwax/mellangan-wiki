@@ -1,5 +1,5 @@
 import type { ElementType } from "react";
-import { Cpu, Layers, Compass, Swords, Terminal, Wrench, BookOpen, Sparkles, Calculator, FileCode2, Workflow, Flame } from "lucide-react";
+import { Cpu, Layers, Compass, Swords, Terminal, Wrench, BookOpen, Sparkles, Calculator, FileCode2, Workflow, Flame, Shield } from "lucide-react";
 
 interface NavTreeItem {
   id: string;
@@ -233,6 +233,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "math-strings-benchmarks",
         shortTitle: "BigInteger, BigFloat, SSO String & Benchmarks",
       },
+      {
+        id: "procedural-music-audio-engineering",
+        shortTitle: "Procedural Music, FM Tracker & Audio Mixer",
+      },
     ],
   },
   {
@@ -297,6 +301,14 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "mutations-afflictions",
         shortTitle: "Changelings, Mutations & Afflictions",
+      },
+      {
+        id: "splintered-ford-situations",
+        shortTitle: "The Splintered Ford & Dynamic Situations",
+      },
+      {
+        id: "bastion-flow-defense-inquisition",
+        shortTitle: "Bastion Flow Defense & Synod Inquisition",
       },
     ],
   },
@@ -493,6 +505,13 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
         title: "32-Voice Audio Mixer",
         subtitle: "Effect voices, music & ambience",
         icon: Terminal,
+      },
+      {
+        id: "bastion-flow-defense-inquisition",
+        title: "Bastion Flow Defense",
+        subtitle: "Vector field flow routing & Synod inquisition",
+        icon: Shield,
+        badge: "LAB",
       },
     ],
   },
