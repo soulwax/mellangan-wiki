@@ -52,6 +52,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "tutorial-testing-profiling",
         shortTitle: "Unit Tests, Visual QA & Prof.c",
       },
+      {
+        id: "doteshi-content-kit-lint",
+        shortTitle: "Doteshi Sprites, Content Kit & Clang Lint",
+      },
     ],
   },
   {
@@ -180,6 +184,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "reactive-ground",
         shortTitle: "Reactive Ground, Fire & Spores",
       },
+      {
+        id: "roads-wayfinding-landmarks",
+        shortTitle: "Roads, Wayfinding & 26 Curiosities",
+      },
     ],
   },
   {
@@ -220,6 +228,10 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "engine-mathematics",
         shortTitle: "Spielmathematik, Invarianten und Beweise",
+      },
+      {
+        id: "math-strings-benchmarks",
+        shortTitle: "BigInteger, BigFloat, SSO String & Benchmarks",
       },
     ],
   },
@@ -264,7 +276,19 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "classes-encounters",
-        shortTitle: "12 Hero Kits, 39 Foes & 20 Traits",
+        shortTitle: "12 Hero Kits, 119 Foes & 4 Nations",
+      },
+      {
+        id: "skill-web-dice-spells",
+        shortTitle: "Skill Web, Keystones & d20 Dice Spells",
+      },
+      {
+        id: "nations-realms-diplomacy",
+        shortTitle: "4 Nations, 6 Banners, Realms & Border Wars",
+      },
+      {
+        id: "economies-festivals-happenings",
+        shortTitle: "Economies, 10 Festivals, Happenings & 112 Feats",
       },
       {
         id: "campaign-settlements-delves",
