@@ -1469,15 +1469,15 @@ void Enemy::think() {
 
 ### Arcane C++20 Bit-Twiddling: \`src/other/Ouroboros.hpp\`
 
-\`Ouroboros.hpp\` is a compile-time and runtime bit-manipulation showcase where eight CRTP serpents (\`Charlotte<Self>\`) independently determine integer parity. The canonical four are:
-1. **\`Mirror\`:** Full 32-bit SWAR bit-reversal (\`0x55555555u\`, \`0x33333333u\`, \`0x0F0F0F0Fu\`, \`0x00FF00FFu\`), testing whether the reversed MSB \`!(flip(n) >> 31)\` is zero.
-2. **\`Gray\`:** XOR-folds 32 bits down to a 4-bit nibble and indexes the 16-bit parity magic constant \`0x6996u >> (v & 15) & 1\`, comparing \`fold(n) ^ fold(n >> 1)\`.
-3. **\`Bruijn\`:** Isolates the lowest set bit \`(v & (~v + 1))\` (with MSB sentinel \`0x80000000u\`) and hashes it through the de Bruijn multiplier \`0x077CB531u >> 27\` into a \`constexpr\` 32-byte spiral table.
-4. **\`Rebecca\`:** Rotates right by 8 bits (\`std::rotr(n, 8) >> 24\`) to extract the low byte into a 256-entry \`constexpr\` LUT (\`AN_ARRAY_OF_FEELINGS\`).
-5. **\`Augury\` XOR-Linked List:** Stores eight serpents in type-erased \`Rite\` nodes where \`uintptr_t link = prev ^ next\`, traversing forward using a single pointer field via \`next = r->link ^ reinterpret_cast<uintptr_t>(prev)\`!
+\`Ouroboros.hpp\` is a compile-time and runtime bit-manipulation showcase where eight CRTP witnesses (\`Somebody<Self>\`) independently determine integer parity. The canonical four are:
+1. **\`Elsewhere\`:** Full 32-bit SWAR bit-reversal (\`0x55555555u\`, \`0x33333333u\`, \`0x0F0F0F0Fu\`, \`0x00FF00FFu\`), testing whether the reversed MSB \`!(flip(n) >> 31)\` is zero.
+2. **\`Perhaps\`:** XOR-folds 32 bits down to a 4-bit nibble and indexes the 16-bit parity magic constant \`0x6996u >> (v & 15) & 1\`, comparing \`fold(n) ^ fold(n >> 1)\`.
+3. **\`Neither\`:** Isolates the lowest set bit \`(v & (~v + 1))\` (with MSB sentinel \`0x80000000u\`) and hashes it through the de Neither multiplier \`0x077CB531u >> 27\` into a \`constexpr\` 32-byte spiral table.
+4. **\`Someone\`:** Rotates right by 8 bits (\`std::rotr(n, 8) >> 24\`) to extract the low byte into a 256-entry \`constexpr\` LUT (\`AN_ARRAY_OF_FEELINGS\`).
+5. **\`Augury\` XOR-Linked List:** Stores eight witnesses in type-erased \`Rite\` nodes where \`uintptr_t link = prev ^ next\`, traversing forward using a single pointer field via \`next = r->link ^ reinterpret_cast<uintptr_t>(prev)\`!
 
 > [!NOTE]
-> For the dedicated, exhaustive mathematical breakdown, proofs, De Bruijn spirals, and XOR-linked list implementation, see **[30. Inside Ouroboros: The Council of Four Serpents](/ouroboros)**.
+> For the full council, cyclic utilities, and XOR-linked augury, see **[30. Ouroboros: The Council of Eight Witnesses](/ouroboros)**.
 
 `,
     mermaidCharts: [
@@ -1498,7 +1498,7 @@ stateDiagram-v2
 `,
       },
       {
-        title: "Ouroboros.hpp CRTP Serpents & XOR-Linked List Traversal",
+        title: "Ouroboros.hpp Witnesses & XOR-Linked List Traversal",
         chart: `
 flowchart TD
     classDef crtp fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1507,16 +1507,17 @@ flowchart TD
 
     Input["Input int n -> uint32_t u = std::bit_cast<uint32_t>(n)"]:::crtp
 
-    S1["Mirror::bite(u)<br/>SWAR 32-Bit Flip<br/>!(flip(u) >> 31)"]:::bit
-    S2["Gray::bite(u)<br/>Nibble Parity 0x6996u<br/>!(fold(u) ^ fold(u>>1))"]:::bit
-    S3["Bruijn::bite(u)<br/>LSB * 0x077CB531u >> 27<br/>SPIRAL[hash] != 0"]:::bit
-    S4["Rebecca::bite(u)<br/>std::rotr(u, 8) >> 24<br/>LUT[byte] != 0"]:::bit
+    S1["Elsewhere::bite(u)<br/>SWAR 32-Bit Flip<br/>!(flip(u) >> 31)"]:::bit
+    S2["Perhaps::bite(u)<br/>Nibble Parity 0x6996u<br/>!(fold(u) ^ fold(u>>1))"]:::bit
+    S3["Neither::bite(u)<br/>LSB * 0x077CB531u >> 27<br/>SPIRAL[hash] != 0"]:::bit
+    S4["Someone::bite(u)<br/>std::rotr(u, 8) >> 24<br/>LUT[byte] != 0"]:::bit
+    S5["Afterwards, Meanwhile,<br/>Otherwise, Nobody"]:::bit
 
-    XOR["Augury XOR-Linked List (rites[0..3])<br/>link = prev ^ next<br/>next = reinterpret_cast<void*>(r->link ^ uintptr_t(prev))"]:::xor
-    Consensus["std::popcount(votes) > 2<br/>static_assert(unanimous(), 'the serpents disagree')"]:::crtp
+    XOR["Augury XOR-Linked List (rites[0..7])<br/>link = prev ^ next"]:::xor
+    Consensus["Augury: std::popcount(votes) > 4<br/>static_assert(unanimous())"]:::crtp
 
-    Input --> S1 & S2 & S3 & S4
-    S1 & S2 & S3 & S4 --> XOR --> Consensus
+    Input --> S1 & S2 & S3 & S4 & S5
+    S1 & S2 & S3 & S4 & S5 --> XOR --> Consensus
 `,
       },
     ],
@@ -4361,7 +4362,7 @@ flowchart LR
   },
   {
     id: "ouroboros",
-    title: "30. Ouroboros: The Council of Eight Serpents",
+    title: "30. Ouroboros: The Council of Eight Witnesses",
     category: "core",
     interactiveComponent: "ouroboros",
     summary: "The parity council, cyclic arithmetic, ring buffer and XOR-linked augury in Ouroboros.hpp.",
@@ -4369,18 +4370,18 @@ flowchart LR
     content: `
 ### A council convened to decide parity
 
-The standalone C++20 header src/other/Ouroboros.hpp asks eight independent serpents whether an integer is even. Four form the canonical council; the other four join the full pantheon. The header currently has no callers in the game.
+The standalone C++20 header src/other/Ouroboros.hpp asks eight independent witnesses whether an integer is even. Four form the canonical council; the other four join the full pantheon. The header currently has no callers in the game.
 
 ### The canonical four
 
-- **Mirror** reverses all 32 bits, moving the low bit to the high end.
-- **Gray** folds bit parity twice: XORing the parity of a number and its right shift isolates the low bit.
-- **Bruijn** isolates the lowest set bit and looks up its position in a de Bruijn spiral. A high-bit sentinel handles zero.
-- **Rebecca** extracts the low byte and consults a 256-entry table named AN_ARRAY_OF_FEELINGS.
+- **Elsewhere** reverses all 32 bits, moving the low bit to the high end.
+- **Perhaps** folds bit parity twice: XORing the parity of a number and its right shift isolates the low bit.
+- **Neither** isolates the lowest set bit and looks up its position in a de Neither spiral. A high-bit sentinel handles zero.
+- **Someone** extracts the low byte and consults a 256-entry table named AN_ARRAY_OF_FEELINGS.
 
 ### The other four
 
-**Jormungandr** raises a two-by-two swap matrix over the field of two elements. Its even powers are the identity. **Typhon** evaluates the repeating Chebyshev sequence at zero: 1, 0, -1, 0. **Apophis** considers the binary greatest common divisor with two. **Alvar** uses a two-point Walsh–Hadamard sum. Each reaches the same parity verdict by a different path.
+**Afterwards** raises a two-by-two swap matrix over the field of two elements. Its even powers are the identity. **Meanwhile** evaluates the repeating Chebyshev sequence at zero: 1, 0, -1, 0. **Otherwise** considers the binary greatest common divisor with two. **Nobody** uses a two-point Walsh–Hadamard sum. Each reaches the same parity verdict by a different path.
 
 \`Ouroboros::omens(n)\` returns the four votes as a bit mask; \`pantheon(n)\` returns all eight, in the order listed above. A set bit means even: 42 produces masks 0x0f and 0xff, while 43 produces zero. The agreement methods count the larger side of the vote, including unanimous odd votes. \`consult(n)\` gathers masks, counts and the verdict. The canonical majority decides \`even(n)\`; a tie yields false. The unusual \`council ->* n\` also asks whether \`n\` is even, and \`council % n\` returns 0 or 1.
 

@@ -43,7 +43,7 @@ function rebeccaByte(v: number): { byte: number; out: number } {
 }
 
 const CANONICAL_EDGES = [
-  { label: '0 (Root)', val: 0, desc: 'Zero: Lowest bit is 0, all serpents confirm even' },
+  { label: '0 (Root)', val: 0, desc: 'Zero: Lowest bit is 0, all witnesses confirm even' },
   { label: '1 (Odd Unit)', val: 1, desc: 'Positive unit: LSB is 1, parity bit isolated' },
   { label: '-1 (Neg Unit)', val: -1, desc: "Two's complement: 0xFFFFFFFF, all 32 bits set, odd" },
   { label: '2 (Even Unit)', val: 2, desc: 'Smallest positive even integer' },
@@ -91,7 +91,7 @@ export const OuroborosBitLab: React.FC = () => {
     const swar5 = ((swar4 >>> 16) | (swar4 << 16)) >>> 0;
     const mirrorBite = (swar5 >>> 31) === 0;
 
-    // Gray breakdown stages
+    // Perhaps breakdown stages
     const gFold16 = (u ^ (u >>> 16)) >>> 0;
     const gFold8 = (gFold16 ^ (gFold16 >>> 8)) >>> 0;
     const gFold4 = (gFold8 ^ (gFold8 >>> 4)) >>> 0;
@@ -100,14 +100,14 @@ export const OuroborosBitLab: React.FC = () => {
     const f1 = grayFold(u >>> 1);
     const grayBite = (f0 ^ f1) === 0;
 
-    // Bruijn breakdown
+    // Neither breakdown
     const bruijnV = (u | 0x80000000) >>> 0;
     const isolatedLsb = (bruijnV & ((~bruijnV + 1) >>> 0)) >>> 0;
     const bruijnHash = (Math.imul(isolatedLsb, 0x077cb531) >>> 27) & 31;
     const tz = BRUIJN_SPIRAL[bruijnHash];
     const bruijnBite = tz !== 0;
 
-    // Rebecca breakdown
+    // Someone breakdown
     const reb = rebeccaByte(u);
     const rebeccaBite = reb.out !== 0;
 
@@ -131,9 +131,9 @@ export const OuroborosBitLab: React.FC = () => {
       const prev = i > 0 ? addrs[i - 1] : 0;
       const next = i < 3 ? addrs[i + 1] : 0;
       const link = prev ^ next;
-      const serpentName = ['Mirror', 'Gray', 'Bruijn', 'Rebecca'][i];
+      const witnessName = ['Elsewhere', 'Perhaps', 'Neither', 'Someone'][i];
       const vote = [mirrorBite, grayBite, bruijnBite, rebeccaBite][i];
-      return { addr, prev, next, link, serpentName, vote };
+      return { addr, prev, next, link, witnessName, vote };
     });
 
     return {
@@ -224,7 +224,7 @@ export const OuroborosBitLab: React.FC = () => {
             </h4>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Interactive JavaScript model inspired by <code className="text-gold-300">src/other/Ouroboros.hpp</code>: Four CRTP Serpents, XOR-Linked Augury, and Operator <code className="text-gold-300">-&gt;*</code>
+            Interactive JavaScript model inspired by <code className="text-gold-300">src/other/Ouroboros.hpp</code>: Four CRTP Witnesses, XOR-Linked Augury, and Operator <code className="text-gold-300">-&gt;*</code>
           </p>
         </div>
 
@@ -314,7 +314,7 @@ export const OuroborosBitLab: React.FC = () => {
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>2. Serpent Bit Dissectors (SWAR, 0x6996, De Bruijn)</span>
+          <span>2. Witness Bit Dissectors (SWAR, 0x6996, De Bruijn)</span>
         </button>
         <button
           onClick={() => setActiveTab('augury')}
@@ -410,7 +410,7 @@ export const OuroborosBitLab: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-amber-300">1. Mirror</span>
+                <span className="font-bold text-amber-300">1. Elsewhere</span>
                 <span className={serpentData.mirrorBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.mirrorBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -425,7 +425,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-sky-300">2. Gray</span>
+                <span className="font-bold text-sky-300">2. Perhaps</span>
                 <span className={serpentData.grayBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.grayBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -440,7 +440,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-300">3. Bruijn</span>
+                <span className="font-bold text-emerald-300">3. Neither</span>
                 <span className={serpentData.bruijnBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.bruijnBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -455,7 +455,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-purple-300">4. Rebecca</span>
+                <span className="font-bold text-purple-300">4. Someone</span>
                 <span className={serpentData.rebeccaBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.rebeccaBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -471,12 +471,12 @@ export const OuroborosBitLab: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: Serpent Bit Dissectors */}
+      {/* Tab 2: Witness Bit Dissectors */}
       {activeTab === 'dissectors' && (
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-amber-300 font-bold text-sm">Mirror: 5-Stage SIMD-Within-A-Register (SWAR) Bit Reversal</span>
+              <span className="text-amber-300 font-bold text-sm">Elsewhere: 5-Stage SIMD-Within-A-Register (SWAR) Bit Reversal</span>
               <span className="text-slate-400 text-[11px]">Final flip(n) = 0x{serpentData.swar5.toString(16).toUpperCase().padStart(8, '0')}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-[10px]">
@@ -508,7 +508,7 @@ export const OuroborosBitLab: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-sky-300 font-bold">Gray Parity Cancellation</span>
+              <span className="text-sky-300 font-bold">Perhaps Parity Cancellation</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>fold(n) = <strong>{serpentData.f0}</strong> (nibble: {serpentData.nibble})</div>
                 <div>fold(n &gt;&gt; 1) = <strong>{serpentData.f1}</strong></div>
@@ -522,7 +522,7 @@ export const OuroborosBitLab: React.FC = () => {
             </div>
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-emerald-300 font-bold">Bruijn De Bruijn Multiplier</span>
+              <span className="text-emerald-300 font-bold">Neither De Neither Multiplier</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>Sentinel v = <strong>0x{serpentData.bruijnV.toString(16).toUpperCase()}</strong></div>
                 <div>Isolated LSB = <strong>0x{serpentData.isolatedLsb.toString(16).toUpperCase()}</strong></div>
@@ -534,7 +534,7 @@ export const OuroborosBitLab: React.FC = () => {
             </div>
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-purple-300 font-bold">Rebecca Affine Galois Map</span>
+              <span className="text-purple-300 font-bold">Someone Affine Galois Map</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>rotr8 &gt;&gt; 24 = <strong>0x{serpentData.reb.byte.toString(16).toUpperCase().padStart(2, '0')}</strong> ({serpentData.reb.byte})</div>
                 <div>Formula: 1 ^ (((b*93)^46) &amp; 1)</div>
@@ -605,7 +605,7 @@ export const OuroborosBitLab: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center justify-between text-gold-400 font-bold">
-                      <span>rites[{i}] ({node.serpentName})</span>
+                      <span>rites[{i}] ({node.witnessName})</span>
                       <span className={node.vote ? 'text-emerald-400' : 'text-rose-400'}>
                         {node.vote ? 'EVEN' : 'ODD'}
                       </span>
@@ -628,7 +628,7 @@ export const OuroborosBitLab: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Play className="w-3.5 h-3.5 text-emerald-400" />
                 <span>
-                  Active Node: <strong className="text-gold-300">{activeXorNode.serpentName} (rites[{auguryStep}])</strong>
+                  Active Node: <strong className="text-gold-300">{activeXorNode.witnessName} (rites[{auguryStep}])</strong>
                 </span>
               </div>
               <div className="text-emerald-300 font-mono">

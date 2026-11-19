@@ -450,7 +450,7 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
       {
         id: "ouroboros",
         title: "How Ouroboros Works",
-        subtitle: "Bit twiddling & 8 serpents",
+        subtitle: "Bit twiddling & 8 witnesses",
         icon: Cpu,
         badge: "LAB",
       },
