@@ -18,8 +18,7 @@ interface ChapterNavigationProps {
 export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById, activeSection, activeHash, activeHeadings, selectChapter, scrollToAnchor }: ChapterNavigationProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    "getting-started": true, tutorials: true, "ai-concurrency": true,
-    rendering: true, vulkan2d: true, "world-terrain": true, "core-memory": true, "gameplay-ai": true,
+    "getting-started": true,
   });
   const activeGroup = NAV_TREE.find(group => group.items.some(item => item.id === activeSection.id));
   useEffect(() => {
@@ -43,13 +42,13 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
     <aside
       id="chapter-navigation"
       aria-label="Chapter navigation"
-      className={`wiki-sidebar fixed lg:sticky top-14 z-30 w-64 max-w-[85vw] shrink-0 h-[calc(100vh-3.5rem)] flex flex-col transition-transform duration-200 ${
+      className={`wiki-sidebar fixed lg:sticky top-14 z-30 w-60 max-w-[85vw] shrink-0 h-[calc(100vh-3.5rem)] flex flex-col transition-transform duration-200 ${
         isMobileMenuOpen
           ? "translate-x-0"
           : "-translate-x-full lg:translate-x-0"
       }`}
     >
-      <div className="wiki-sidebar-tools p-2.5 space-y-1.5">
+      <div className="wiki-sidebar-tools p-2 space-y-1">
         <div className="relative">
           <Search aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
@@ -99,7 +98,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         </div>
       </div>
 
-      <nav aria-label="Wiki chapters" className="flex-1 overflow-y-auto p-2 space-y-1">
+      <nav aria-label="Wiki chapters" className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
         {filteredTree.length === 0 && <p role="status" className="px-3 py-4 text-xs text-slate-400">No chapters match “{searchQuery}”. Try another term.</p>}
         {filteredTree.map((group) => {
           const Icon = group.icon;
@@ -123,7 +122,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
               <button
                 onClick={() => toggleGroup(group.key)}
                 aria-expanded={isOpen}
-                className={`w-full px-2 py-1.5 flex items-center justify-between gap-1.5 text-left transition-colors ${
+                className={`w-full px-2 py-1 flex items-center justify-between gap-1.5 text-left transition-colors ${
                   isVulkan2d
                     ? hasActiveChild
                       ? "bg-fuchsia-500/15 text-fuchsia-100"
@@ -160,7 +159,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
               </button>
 
               {isOpen && (
-                <div className="px-1 pb-1 pt-0.5 space-y-0.5 border-t border-dark-850">
+                <div className="px-1 pb-0.5 pt-0.5 space-y-0.5 border-t border-dark-850">
                   {group.items.map((item) => {
                     const sec = sectionById.get(item.id);
                     if (!sec) return null;
@@ -172,7 +171,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
                           aria-current={isActive ? "page" : undefined}
                           href={`/${item.id}`}
                           onClick={(e) => selectChapter(item.id, e)}
-                          className={`w-full text-left px-2 py-1 rounded-md text-[11.5px] leading-snug transition-all flex items-center justify-between gap-1.5 ${
+                          className={`w-full text-left px-2 py-0.5 rounded-md text-[11.5px] leading-snug transition-all flex items-center justify-between gap-1.5 ${
                             isActive
                               ? "bg-gold-500/15 text-gold-300 font-semibold border border-gold-500/40 shadow-sm"
                               : "text-slate-400 hover:text-slate-100 hover:bg-dark-850/60 border border-transparent"
@@ -239,7 +238,7 @@ export function ChapterNavigation({ isMobileMenuOpen, chapterCount, sectionById,
         })}
       </nav>
 
-      <div className="wiki-sidebar-foot p-2 text-[9.5px] font-mono text-slate-400">
+      <div className="wiki-sidebar-foot p-1.5 text-[9.5px] font-mono text-slate-400">
         <div className="flex items-center justify-between text-gold-400 font-semibold mb-0.5">
           <span className="flex items-center gap-1.5">
             <Terminal className="w-3 h-3" />
