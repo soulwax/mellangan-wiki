@@ -3159,6 +3159,50 @@ flowchart TD
     ],
   },
   {
+    id: "camera-viewport",
+    title: "Camera, Zoom & Window Fit",
+    category: "graphics",
+    summary: "How Camera interpolation and Screen sizing turn world coordinates into a stable viewport and native-resolution UI.",
+    sourceFiles: ["src/gfx/Camera.hpp", "src/gfx/Screen.hpp", "src/gfx/Screen.cpp"],
+    content: `
+### Following the player
+
+\`Camera\` keeps current and previous positions, lens values, shake and horizontal pan. \`follow()\` damps position and pan toward their targets, decays shake and advances a spring-like lens toward \`lensGoal\`. \`remember()\` saves the previous state for interpolation. During drawing, \`aim(screen, a)\` interpolates between previous and current positions, adds shake and sets integer world offsets. Call \`snap()\` when the camera should jump without interpolating across the gap.
+
+### Fitting a window
+
+\`Screen::fit()\` reads the window size in pixels. It extends the logical viewport horizontally or vertically to match the window shape, caps it at \`MAX_W\` and \`MAX_H\`, then applies the clamped zoom. \`Camera::focus()\` changes the lens goal within the supported zoom range. The viewport dimensions feed tile traversal and visibility tests, so changing zoom changes the area the world pass must cover.
+
+### Compositing and interface scale
+
+\`Screen::beginGui()\` switches to the screen target, sets a pixel-sized camera and draws the world target through the post shader. It centers the scaled world image and computes the UI unit \`u\` separately. The \`crisp\` option chooses an integer-friendly scale when the fit allows it. This keeps HUD placement tied to window pixels while the camera and zoom act on the world view.
+
+When adjusting these paths, inspect a wide and a tall window, zoom in and out, and check that the player remains centered, world edges cover the view and HUD text stays legible.
+`,
+  },
+  {
+    id: "visible-world-rendering",
+    title: "Visible Tiles, Props & Draw Order",
+    category: "graphics",
+    summary: "The per-frame path from visible floor tiles and terrain flags to props, queued entities and lighting.",
+    sourceFiles: ["src/level/LevelRender.cpp", "src/level/FloorPainter.cpp", "src/gfx/Screen.cpp"],
+    content: `
+### Only visit tiles near the camera
+
+\`eachVisibleTile()\` converts \`Screen\` offsets and viewport dimensions into tile coordinates using the 16-pixel tile size. \`Level::renderFloor()\` passes those coordinates to \`FloorPainter::tile()\`. Later passes can request extra tiles before and after the viewport so a large prop whose anchor sits just offscreen can still appear.
+
+### Gather the visible world
+
+\`Level::scatter()\` rebuilds the visible surface flags and solid-prop data, then gathers props near the camera. Water, ice, height, ramps and ropes contribute to each surface byte before road modifications. Site state, snow cover and weather sway affect the resulting props. A coordinate hash supplies stable flip and tone variation for wild props, so drawing the same place again produces the same appearance.
+
+### Submit in layers
+
+\`Level::render()\` starts with the floor, then draws ground effects and other world content. Visible entities are queued for the depth sort described in [64-Bit Radix Y-Sort & LightField](/radix-rendering). Lighting has its own target and is combined with the world by \`Screen::beginGui()\`. The [renderer overview](/renderer-in-context) shows the full frame path.
+
+When adding a prop or ground mark, check its anchor at all four viewport edges, its position relative to actors and its visibility after the camera moves away and back. Use a repeatable world seed for that comparison.
+`,
+  },
+  {
     id: "renderer-in-context",
     title: "20. Tutorial 8: How the Renderer Works in Context of Our Game",
     category: "contribute",

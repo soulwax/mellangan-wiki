@@ -140,6 +140,14 @@ export const NAV_TREE: NavTreeGroup[] = [
         shortTitle: "Renderer Architecture in Context",
       },
       {
+        id: "camera-viewport",
+        shortTitle: "Camera, Zoom & Window Fit",
+      },
+      {
+        id: "visible-world-rendering",
+        shortTitle: "Visible Tiles, Props & Draw Order",
+      },
+      {
         id: "radix-rendering",
         shortTitle: "64-Bit Radix Y-Sort & LightField",
       },
