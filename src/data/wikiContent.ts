@@ -2411,55 +2411,56 @@ Suppose we want to add a new Stormcaller weapon called **\`Tempest Chakram\`** t
 
 ##### Step 1: Add the \`Recipe\` Entry in \`src/item/weapon/Recipe.cpp\`
 Find \`RECIPES\` and add a row beside similar weapons. Its fields, in order, are:
-\`{ name, ownerClass, pitch, unitName, iconIndex, form, payloadMask, baseDamage, cooldown, reach, speed, count, tintColor, particleSprite }\`:
+\`{ name, ownerClass, pitch, unitName, iconIndex, form, payloadMask, baseDamage, cooldown, reach, speed, count, tintColor, particleSprite }\` (pick an unused \`iconIndex\` after the existing \`0..52\` slots in \`atlas::arsenal(r.icon)\`):
 
 \`\`\`cpp
 {"Tempest Chakram", "STORMCALLER", "A charged disc arcs out and chains lightning",
- "disc", 13, Form::Boomerang, pay::Chain | pay::Mark, 15, 1.9f, 175, 230, 1,
+ "disc", 53, Form::Boomerang, pay::Chain | pay::Mark, 15, 1.9f, 175, 230, 1,
  {0.55f, 0.85f, 1.0f, 1.0f}, atlas::pt::ArcaneStar}
 \`\`\`
 
 ##### Step 2: Check the five levels
-\`RecipeWeapon\` creates the level-up descriptions from your row. It checks whether the form covers an area to decide which level-three bonus to give:
+\`RecipeWeapon\` creates the level-up descriptions from your row (\`src/item/weapon/Recipe.cpp:173–195\`):
 * **Level 1:** Base weapon unlocked (\`r.pitch\`).
 * **Level 2:** \`+50% base damage\`.
 * **Level 3:** \`+1 disc\` (for projectile count forms) or \`+30% radius\` (for area forms).
-* **Level 4:** \`-20% cooldown\`.
-* **Level 5:** Evolution readiness. Level-up cards dynamically announce the required catalyst passive (such as \`"evolves with Conduit"\`), highlighted in gold when held.
+* **Level 4:** \`-25% cooldown\` (\`cooldown * 0.75f\`, or \`"Hardier, 25% faster attacks"\` for \`Form::Summon\`).
+* **Level 5:** \`+50% base damage\` AND (\`+1 unit\` or \`+30% radius\`), plus evolution readiness (cards announce the required catalyst passive, highlighted in gold when held).
 
 ##### Step 3: Add the evolution pair in \`src/item/Upgrade.cpp\`
-Find \`EVOLUTIONS\` and add the base weapon, required passive, and evolved weapon in that order:
+Find \`EVOLUTIONS\` and add \`{ baseWeapon, requiredPassive, evolvedDisplayName }\`:
 \`\`\`cpp
 {"Tempest Chakram", "Conduit", "Storm Maelstrom"},
 \`\`\`
-The startup content check verifies the names and the one-to-one pairing. Use the exact names already registered for the passive and evolved weapon.
+\`contentFaults()\` (\`src/meta/Content.cpp:71–77\`, run by \`--test\` and \`--content-report\`) verifies that \`e[0]\` and \`e[1]\` exist in \`Upgrade::all()\` and that \`e[0]\` is unique; \`e[2]\` is only the new evolved display name set by \`Upgrade::evolve()\`.
 
 ---
 
 #### Path B: Write a weapon class when a recipe is not enough
 
-##### Step 1: Reserve an Icon in \`src/Atlas.hpp\`
-Reserve an index in \`atlas::i::*\` for your weapon's 16x16 icon in the UI atlas.
+##### Step 1: Reserve an Icon in \`src/Atlas.hpp\` (or \`AtlasF.hpp\`)
+Use an existing helper such as \`atlas::arsenal(idx)\`, \`atlas::tile(atlas::t::Sword)\`, \`atlas::kit(atlas::kt::*)\`, or \`atlas::frontier(atlas::fr::*)\` (never edit \`src/Atlas.hpp\` without matching \`tools/atlas_layout.py\`).
 
 ##### Step 2: Subclass \`Upgrade\` in \`src/item/weapon/\`
-Implement your weapon class inheriting from \`Upgrade\`, overriding \`tick()\`, \`levelUp()\`, and \`evolve()\`:
+Inherit from \`Upgrade\`, passing \`(name, icon, desc[MAX_LEVEL], /*weapon=*/true)\` and overriding \`tick(Mob &)\` (\`Upgrade::evolve()\` is non-virtual):
 \`\`\`cpp
 class CustomBlade : public Upgrade {
 public:
-  CustomBlade() : Upgrade("Custom Blade", "Strikes nearby foes", atlas::i::Sword) {
-    weapon = true;
-  }
-  void tick() override;
+  CustomBlade()
+      : Upgrade("Custom Blade", atlas::tile(atlas::t::Sword),
+                {"Strikes nearby foes", "+50% damage", "+1 arc", "25% faster", "+50% damage, +1 arc"},
+                true) {}
+  void tick(Mob &p) override;
 };
 \`\`\`
 
-##### Step 3: Register in \`Upgrade::all()\` (\`src/item/Upgrade.cpp\`)
-Add your weapon instance to the master upgrade registry so the level-up drafting director can offer it during runs.
+##### Step 3: Register in \`Upgrade::all()\` & \`CASES[]\`
+Add your weapon to \`Upgrade::all()\` in \`src/item/Upgrade.cpp\` (and \`areaWeapons()\` if it is an area weapon). Declare any new test in \`src/test/Tests.hpp\` and register it in \`CASES[]\` in \`src/test/Test.cpp\`.
 
 ##### Step 4: Check damage with \`--weapon-lab\`
 Run the weapon lab after the weapon works in-game. It writes a CSV file that lets you compare damage across levels:
 \`\`\`sh
-./build/Release/Mellangan --weapon-lab weapon_audit.csv
+./build/bin/Release/MellanganApp.exe --weapon-lab weapon_audit.csv
 \`\`\`
 Read the damage-per-second results for stationary targets and the moving crowd. Check that each upgrade changes something useful and that the evolution does not jump far beyond nearby weapons.
 `,
@@ -2500,7 +2501,7 @@ sequenceDiagram
     Lvl->>Lvl: flush() -> reg.emplace<Owned>(id)
     loop Every 60Hz Tick while age < life
         Lvl->>Shot: shot->tick()
-        Shot->>Lvl: level->foes(hostile, x, y, r) [CSR Grid]
+        Shot->>Lvl: level->foes(caster, x, y, r) [CSR Grid]
         Shot->>Enemy: e.afflict(StatusKind) + e.strike(dmg)
     end
     Shot->>Shot: remove() (removed = true)
@@ -2534,38 +2535,28 @@ The monster and its biome are two separate changes. First give the monster an ID
 Saved Codex kill counts use \`int(EnemyKind)\` as array positions. Append a new kind after the existing ones, just before the enum's count marker. Reordering old kinds would change what an existing save means. \`Night::strongestUnlocked\` also relies on the ordering of classic monsters before \`Cyclops\`.
 
 ##### Step 2: Paint the 16×16 Silhouette & Verify the Atlas
-1. Add the procedural pixel-art generator for your creature's \`16×16\` cell in \`tools/make_expansion.py\` (using \`Canvas\` contour, cluster, and highlight primitives from \`tools/sprite_kit.py\`).
-2. Run \`python tools/make_assets.py --verify\` to rebuild \`res/atlas.png\` and verify deterministic RGBA/PNG hashes and 1px transparent gutters.
+1. Author new sprites in **Doteshi** (\`tools/source/doteshi/content/*.py\` + \`manifest.toml\`, baked via \`tools/doteshi_assets.py bake\`) or the band's Python generator, and add walk/attack motion rows in \`tools/make_motion_frames.py\` if needed.
+2. Rebuild \`res/atlas.png\` from \`tools/\` using \`uv run --with pillow python tools/make_assets.py --from-atlas\` (or \`uv run --with pillow==13.0.0 tools/make_assets.py --verify "<Kenney path>"\` for full dual-run verification).
 
-##### Step 3: Choose existing AI goals in \`Plans.cpp\`
-A \`Plan\` is a small list of actions the monster can try. Reuse goals such as approach, stalk, or melee before writing a new goal. Add a fallback or interrupt such as \`FALTER\` or \`HIDE\`:
-
-\`\`\`cpp
-const Approach DART_IN{42, {0.8, 1.1, 3, 0, 0, true}};
-const Melee STING{0.22f, 0.20f, 3.1, 1.3f};
-
-const Plan PLANS[] = {
-  {{&STALK, &DART_IN, &STING}, {&FALTER}},
-};
-\`\`\`
-
-\`Goal::tick()\` runs on worker threads. It may set an intent on its own enemy, such as \`e.wantsFire = true\`. Spawn the projectile later in \`Enemy::act()\` on the main thread. Changing shared level lists from a worker can race with other updates.
-
-##### Step 4: Register Stats in \`Roster.cpp\` & Biome \`foes\` Bitmask
-Add the \`EnemyType\` row (name, sprite, radius, speed, HP, contact damage, XP value, death effect style) and include \`1ULL << int(EnemyKind::MyMonster)\` in its home biome's \`foes\` mask.
+##### Step 3: Append Mandatory \`EnemyKind::Count\` Tables (\`static_assert\`-Guarded)
+Every new \`EnemyKind\` must be appended at the exact same index across **five** tables:
+1. **\`src/entity/enemy/Roster.cpp\`:** Append the \`EnemyType\` row \`{ tile, hp, speed, damage, radius, scale, xp, knockResist, blood, floats, unlockAt, art }\` AND the display name in \`NAMES[]\` inside \`Enemy::nameOf()\` (\`static_assert(std::size(NAMES) == int(EnemyKind::Count))\`).
+2. **\`src/entity/enemy/ai/Plans.cpp\`:** Append a \`Plan\` row to \`PLANS[]\` (\`static_assert(sizeof(PLANS) / sizeof(PLANS[0]) == int(EnemyKind::Count))\`). Reuse existing goals (\`Approach\`, \`Stalk\`, \`Melee\`, \`Leap\`, \`Guard\`, etc.) and interrupts (\`FALTER\`, \`HIDE\`). Remember \`Goal::tick()\` runs on worker threads: set intent flags like \`e.wantsFire = true\` and spawn entities later in \`Enemy::act()\` on the main thread.
+3. **\`src/audio/FoeVoice.cpp\`:** Append the voice family (\`beast\`, \`folk\`, \`hulk\`, \`wing\`, \`spirit\`, \`ooze\`) to \`FAMILY[]\` (\`static_assert(std::size(FAMILY) == size_t(EnemyKind::Count))\`).
+4. **\`src/entity/Faction.cpp\`:** Append the faction entry to \`MEMBERS[]\` (\`static_assert(ordered())\`).
+5. **Biome \`foes\` Mask (\`FoeMask\`):** Because \`EnemyKind::Count\` is 119 (> 64), \`Biome.hpp\` uses a 128-bit \`FoeMask\` (\`uint64_t bits[2]\`). Combine entries with \`foe(EnemyKind::MyMonster) | foe(...)\` (never shift \`1ULL << int(...)\`).
 
 ---
 
 #### Part 2: Step-by-Step Biome Creation (\`src/level/biome/\`)
 
-1. **Append \`BiomeId\`:** Add your new biome ID at the end of \`BiomeId\` in \`src/level/biome/Biome.hpp\` and increment \`BIOME_COUNT\`.
-2. **Define Climate Niche & Props:** Subclass \`Biome\` (or configure an \`ExpansionBiome\` entry in \`src/level/biome/ExpansionBiome.cpp\`) with:
-   - Ground tint and transition surface (\`transitionGround(int kind)\`).
-   - Three characteristic 16×16 props (trees, rocks, flora) with collision radii.
-   - Regional \`foes\` spawn bitmask and structure weights.
-   - A distinct **gameplay rule** (e.g., conductive storm water, fracturing salt crust, or healing grove breeze) rather than a mere palette swap.
-3. **Verify Reachability in \`WorldTest.cpp\` & \`BiomeTransitionTest.cpp\`:**
-   Run \`./build/bin/Debug/MellanganApp.exe --test\` to verify that the bounded multi-seed survey reaches all biomes and that \`world::groundBlend(x, y)\` produces smooth 3-biome barycentric transitions across every boundary!
+1. **Append \`BiomeId\`:** Add the new enumerator right before \`BIOME_COUNT\` in \`src/level/biome/Biome.hpp\` (\`BIOME_COUNT\` auto-increments; currently 30). Note that \`isExpansion(b)\`, \`isCoast(b)\`, and 32-bit land masks in \`Group.cpp\` (\`LAND = (1u << BIOME_COUNT) - 1\`) depend on enum ordering and the 32-bit ceiling.
+2. **Update All Mandatory \`BIOME_COUNT\` Tables:** Adding a biome requires one row in every \`BIOME_COUNT\`-indexed table:
+   - \`src/level/biome/Biome.cpp\` (\`BIOMES[]\`), \`src/level/FloorPainter.cpp\` (\`MATERIALS[]\`), \`src/level/Flavour.cpp\` (\`FLAVOURS[]\`, \`AIRS[]\`), \`src/level/Chart.cpp\` (\`TITLES[]\`).
+   - \`src/level/Level.cpp\` (\`BEDS[]\`, \`MOODS[]\`), \`src/level/BiomeReward.cpp\` (\`rewards[]\`), \`src/level/BiomeEvents.cpp\` (\`EVENTS[]\`, \`HAZARDS[]\`).
+   - \`src/level/world/Sites.cpp\` (\`LANDMARKS[]\`, \`MASONRY[]\`, \`SITES[]\`), \`src/level/world/Secrets.cpp\` (\`ROWS[]\`), \`src/level/Critters.hpp\` (\`ROWS[]\`), \`src/campaign/Oddity.cpp\` (\`DEFS[]\`).
+3. **Define Climate Niche & Gameplay Rule:** Subclass \`Biome\` (or configure \`ExpansionBiome.cpp\`) with ground tint, \`transitionGround()\`, props, \`FoeMask\`, structure weights, and a distinct gameplay rule.
+4. **Verify Reachability:** Run \`MellanganApp --test world,biome\` (then full \`--test\`) to verify all biomes are reachable and \`world::groundBlend(x, y)\` transitions smoothly across every boundary.
 `,
     mermaidCharts: [
       {
@@ -2599,10 +2590,10 @@ flowchart TD
     classDef step fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef verify fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
 
-    P1["1. Reserve 18x18 Cells in tools/atlas_layout.py<br/>Paint 16x16 Sprite in tools/make_expansion.py"]:::step
-    P2["2. Run python tools/make_assets.py --verify<br/>Byte-Identical Dual-Run RGBA & PNG Hash Check"]:::verify
+    P1["1. Reserve Cell in atlas_layout.py or Doteshi<br/>Author Sprite + Motion Frames"]:::step
+    P2["2. Run uv run --with pillow tools/make_assets.py --from-atlas<br/>(or --verify with Kenney path)"]:::verify
     P3["3. Append EnemyKind / BiomeId at Enum End<br/>Preserves Codex & Chart Save Compatibility"]:::step
-    P4["4. Wire Plans.cpp, Roster.cpp & Biome.cpp<br/>Verify Reachability in --test & --test-biome-view"]:::verify
+    P4["4. Wire Roster, Plans, FoeVoice, Faction & BIOME_COUNT Tables<br/>Verify in --test & --test-biome-view"]:::verify
 
     P1 --> P2 --> P3 --> P4
 `,
@@ -2669,7 +2660,7 @@ const HeroData CHRONO_DATA = {
 #### Step 2: Make the skill work for either side
 \`Hero::cast(Mob &p)\` accepts a \`Mob\` because both the player and a hostile Renegade can use a hero's skill. The caster is \`p\`; its enemies depend on \`p.hostile\`.
 - **Always use \`p.level->foes(p, ...)\` or \`p.hostile\`** when spawning projectiles or dealing area damage inside \`Hero::cast(Mob &p)\` and \`ability::*\` functions (\`src/entity/Ability.hpp\`).
-- Never hardcode \`p.level->player\` as the caster—\`testArtsBothSides()\` in \`src/test/ClassTest.cpp\` specifically tests every hero ability cast by both a \`Player\` and a hostile \`Enemy\`!
+- Never hardcode \`p.level->player\` as the caster: \`testArtsBothSides()\` in \`src/test/CombatTest.cpp:313\` specifically tests every hero ability cast by both a \`Player\` and a hostile \`Enemy\`.
 
 \`\`\`cpp
 void MyHero::cast(Mob &p) const {
@@ -2686,10 +2677,12 @@ void MyHero::cast(Mob &p) const {
 
 ---
 
-#### Step 3: Append to \`HEROES[]\` & Add Class Talents / Relics
-1. **Append Only:** Increment \`HERO_COUNT\` in \`src/hero/Hero.hpp\` and append your hero pointer at the **end** of \`HEROES[HERO_COUNT]\` in \`src/hero/Hero.cpp\` so saved \`Codex::start\` indices stay valid.
-2. **Add a Class Talent (\`src/item/talent/\`):** Subclass \`Upgrade\` with \`owner = "CHRONOMANCER"\` so \`LevelUpMenu\` only offers that talent when playing your hero.
-3. **Verify with \`--test\`:** Run \`MellanganApp --test\` to execute \`testClassKits()\` and \`testArtsBothSides()\`.
+#### Step 3: Append to \`HEROES[]\`, Standing, Skill Web & Class Kit Minimums
+1. **Append Only:** Increment \`HERO_COUNT\` (currently 12) in \`src/hero/Hero.hpp\` and append your hero pointer at the **end** of \`HEROES[HERO_COUNT]\` in \`src/hero/Hero.cpp\` so saved \`Codex::start\` indices stay valid.
+2. **Campaign Starting Standing (\`Standing.cpp\`):** Append a \`Calling { up, down }\` row to \`CLASSES[]\` in \`src/campaign/Standing.cpp:39–44\` (\`static_assert(std::size(CLASSES) == size_t(HERO_COUNT))\`) and update \`UP[]\` / \`DOWN[]\` in \`src/test/CampaignTest.cpp\`.
+3. **Class Kit Minimums (\`ClassTest.cpp\` & \`TreeTest.cpp\`):** \`testClassKits()\` asserts every hero has \`>= 2\` class \`RECIPES\`, \`>= 3\` class \`Skill\`s (\`HeroSkill\` provides 1, so add at least 2 more in \`src/item/skill/Skill.cpp\`), and \`>= 1\` non-skill, non-weapon class upgrade (kin passive in \`Upgrade.cpp\` or class talent in \`src/item/talent/\`). Every upgrade named in \`weapon\` or \`affinity[3]\` must exist in \`Upgrade::all()\` or \`contentFaults()\` fails. \`Tree::of(Player &)\` (\`src/item/tree/Tree.cpp\`) auto-lays out the 3-wedge Skill Web, verified by \`testSkillTrees()\` in \`TreeTest.cpp\`.
+4. **Boss Relics & Loot Uniques:** Put boss-chest relics in \`src/item/relic/\`, and mode-scoped equipment uniques (\`UniqueDef::Mode { Both, Survival, Campaign }\`) in \`src/item/loot/Unique.cpp\` (checked by \`uniqueFault()\` in \`Content.cpp\`).
+5. **Verify with \`--test\`:** Run \`MellanganApp --test class,tree,combat,content\` (then full \`--test\`) to execute \`testClassKits()\`, \`testSkillTrees()\`, and \`testArtsBothSides()\`.
 `,
     mermaidCharts: [
       {
@@ -2707,7 +2700,7 @@ flowchart TD
     RenegadeCaster["Renegade Mirror Foe (hostile = true)<br/>Renegade::tick() -> hero->cast(*this)"]:::mob
 
     FoeQuery["level->foes(caster, x, y, r)<br/>Filters by e.hostile != caster.hostile"]:::target
-    Verify["testArtsBothSides() (ClassTest.cpp)<br/>Asserts Symmetry for Player & Hostile Casts"]:::target
+    Verify["testArtsBothSides() (CombatTest.cpp)<br/>Asserts Symmetry for Player & Hostile Casts"]:::target
 
     HeroDef --> HeroSkill --> PlayerCaster
     HeroDef --> RenegadeCaster
@@ -2766,12 +2759,10 @@ Structures are divided into common settlements (\`Cottage\` .. \`Mine\`) and rar
 - \`bool (*ground)(const Structure *s, int lx, int ly, Sprite *out)\`: Overrides floor tiles (cobblestone, rune circles, grates).
 - \`bool (*prop)(const Structure *s, int lx, int ly, uint32_t roll, Prop *p)\`: Places pillars, altars, braziers, or walls with collision radii and heights.
 
-##### Step 3: Wire the Interactive Encounter in \`src/level/encounter/Landmarks.cpp\`
-The encounter code in \`src/level/encounter/Landmarks.cpp\` handles what happens at the site. Depending on the landmark, it can react to \`E\` or to proximity. Read a nearby encounter before adding one. It may show particles and then give a reward or start a fight.
-- Test your landmark immediately via CLI:
-\`\`\`cpp
-./build/bin/Debug/MellanganApp.exe --dev --landmark 8
-\`\`\`
+##### Step 3: Register Placement & Wire the Encounter (\`Encounter.cpp\`, \`Sites.cpp\`, \`Biome.hpp\`)
+1. **Placement Weights:** Add a weight slot in \`BiomeData::structureWeights[int(StructureKind::Count)]\` (\`src/level/biome/Biome.hpp:89\`) and update \`LANDMARKS[BIOME_COUNT]\` / \`LANDMARK_KINDS\` in \`src/level/world/Sites.cpp:19–22\` if it is a biome landmark.
+2. **Encounter Callbacks:** Implement \`enter\` (fires automatically when stepping into the structure footprint via \`world::structureAt\`) and \`ambient\` (ticked via \`world::structureIn\`) in \`src/level/encounter/Landmarks.cpp\`, declare them in \`src/level/encounter/Common.hpp\`, and append an \`EncounterDef { banner, enter, ambient }\` row to \`ENCOUNTERS[int(StructureKind::Count)]\` in \`src/level/Encounter.cpp:34–56\`. (Note: \`E\` interaction belongs to daily biome sites in \`Sites.cpp\`, not \`StructureKind\` \`ENCOUNTERS[]\`.)
+3. **Preview Immediately:** Run \`./build/bin/Release/MellanganApp.exe --dev --landmark 8\`.
 
 ---
 
@@ -2797,7 +2788,7 @@ struct BossDef {
 \`\`\`
 
 ##### Step 1: Compose the 3 Phase \`Cast\` Arrays in \`src/entity/enemy/Boss.cpp\`
-Each \`Cast\` entry specifies \`{ void (*fn)(Enemy &), float cooldown, float range, Color telegraphTone }\`. As the boss's HP drops below **66% (Phase 2)** and **33% (Phase 3)**, it automatically escalates to faster cooldowns and deadlier \`ability::*\` patterns (\`ability::thunder\`, \`ability::comet\`, \`ability::quake\`, \`ability::grasp\`, \`ability::miasma\`, \`ability::firering\`, \`ability::volley\`):
+Each \`Cast\` entry (\`src/entity/enemy/Enemy.hpp:138–142\`) specifies \`{ void (*fn)(Enemy &), float every, float range, Color tone }\`. As the boss's HP drops below **66% (Phase 2)** and **33% (Phase 3)**, it automatically escalates to faster cooldowns and deadlier \`ability::*\` patterns (\`ability::thunder\`, \`ability::comet\`, \`ability::quake\`, \`ability::grasp\`, \`ability::miasma\`, \`ability::firering\`, \`ability::volley\`):
 
 \`\`\`cpp
 const Cast MY_BOSS_P1[] = {
@@ -2811,8 +2802,8 @@ const Cast MY_BOSS_P3[] = {
     {[](Enemy &e) { ability::dance(e, 90, 12, GLASS); }, 5, 200, GLASS}};
 \`\`\`
 
-##### Step 2: Bind the Biome Mask \`lands\` & Minion Retinue
-Set \`lands = land(BiomeId::CrystalFields)\` (or a bitwise OR of multiple \`BiomeId\` bits) so \`bossFor(int biome)\` selects your boss when the night clock triggers a regional boss spawn in that biome!
+##### Step 2: Increment \`BOSS_COUNT\`, Append \`BOSS_DEFS[]\` & Bind \`lands\`
+Increment \`constexpr int BOSS_COUNT = 9;\` in \`src/entity/enemy/Boss.hpp:20\` and append your \`BossDef\` row to \`BOSS_DEFS[BOSS_COUNT]\` in \`src/entity/enemy/Boss.cpp:128–163\`. Set \`lands = land(BIOME_CRYSTAL)\` (using the unscoped \`BIOME_*\` enumerators from \`Biome.hpp\`, or bitwise OR of multiple \`land(...)\` calls) so \`bossFor(int biome)\` selects your boss in those biomes.
 `,
     mermaidCharts: [
       {
@@ -2823,10 +2814,10 @@ flowchart LR
     classDef def fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef enc fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Region["World::structureInRegion(rx, ry)<br/>Deterministic Seed Roll"]:::world
+    Region["world::structureIn(rx, ry, out)<br/>Deterministic Seed Roll"]:::world
     Footprint["StructureDef Callbacks (lx, ly)<br/>size() -> dirt() -> ground() -> prop()"]:::def
-    Ambient["Ambient Site Tick (Sites.cpp)<br/>encounter::smoke / runes / starlight"]:::enc
-    Interact["Player Approaches & Presses E<br/>Triggers Landmark Boon, Trial or Elite"]:::enc
+    Ambient["Ambient Tick (Encounter.cpp / Landmarks.cpp)<br/>encounter::smoke / runes / starlight"]:::enc
+    Interact["Hero Steps Into Footprint (world::structureAt)<br/>ENCOUNTERS[kind].enter() Fires Boon, Trial or Elite"]:::enc
 
     Region --> Footprint --> Ambient --> Interact
 `,
@@ -2867,11 +2858,11 @@ Artwork and shaders are separate tasks. The atlas is the large image containing 
 
 ---
 
-#### Part 1: Add a 16 × 16 sprite
+#### Part 1: Add a 16 × 16 sprite (Doteshi & \`make_assets.py\`)
 
-Use \`tools/atlas_layout.py\` to find the band and confirm an unused cell. Draw the sprite in the generator for that band under \`tools/\`, or update the source art that generator reads. Paint within 16 × 16 pixels. The surrounding one-pixel border keeps neighboring sprites from bleeding into it.
-
-Add a named index or sprite lookup in \`src/Atlas.hpp\` so C++ can find the new image. Run \`python tools/make_assets.py --verify\` with the source-sheet path required by that script. Inspect the generated atlas and the sprite in-game. The script also has a \`--from-atlas\` mode for reusing the existing base image; check its usage before choosing that mode.
+1. **Choose the right tool:** New sprites (nations, horrors, cultures, chiefs, living resources, living biomes, Kettlestaithe/Tidemarket, and \`under2\` caves) are authored with **Doteshi** (vendored in \`tools/doteshi/\`), placing recipes in \`tools/source/doteshi/content/*.py\` and slot bindings in \`tools/source/doteshi/manifest.toml\`. Legacy bands live in \`tools/sprite_kit.py\` generators, and enemy walk/attack motion frames are generated by \`tools/make_motion_frames.py\`.
+2. **Bake & verify:** Run \`python tools/doteshi_assets.py bake\` and \`check\` (verifying pixel hashes in \`tools/source/doteshi/doteshi.lock.json\`), then run \`uv run --with pillow python tools/make_assets.py --from-atlas\` from \`tools/\` (or \`uv run --with pillow==13.0.0 tools/make_assets.py --verify "<Kenney path>"\` for full dual-run verification). \`make_assets.py\` automatically runs \`validate_cpp_layout()\` to confirm \`src/Atlas.hpp\` matches \`tools/atlas_layout.py\`.
+3. **Wire C++ accessors:** Generated accessors land in \`src/AtlasF.hpp\`, \`src/AtlasB.hpp\` (biomes/sites/critters), or \`src/AtlasU.hpp\` (hamlet/under2); avoid hand-editing \`src/Atlas.hpp\` unless adding a legacy band coordinated with \`atlas_layout.py\`.
 ---
 
 #### Part 2: Authoring Slang Fragment Shaders (\`res/shaders/*.slang\`)
@@ -2880,11 +2871,11 @@ At build time, \`CMakeLists.txt\` compiles every \`res/shaders/*.slang\` file in
 \`slangc <file>.slang -target spirv -profile glsl_450 -entry PixelShader -stage fragment -o shaders/<file>.spv\`
 
 ##### Read the shader inputs (\`flash.slang\` and \`post.slang\`)
-A fragment shader calculates a pixel's final color. These shaders receive textures, a sampler, and small blocks of settings through Vulkan bindings. Keep the binding numbers and data layout in sync with the C++ renderer:
-- \`[[vk::push_constant]] Push push;\` — Contains \`cameraIndex\`, bindless \`textureIndex\`, \`texturePos\`, vertex \`colour\`, and \`model\` matrix.
+A fragment shader calculates a pixel's final color. These shaders receive textures, a sampler, and small blocks of settings through Vulkan bindings. Keep the binding numbers and data layout in sync with the C++ renderer, and load any new \`.spv\` in \`src/gfx/Screen.cpp\` via \`loadShader(path("res/shaders/<name>.spv"), sizeof(<UboStruct>))\`:
+- \`[[vk::push_constant]] Push push;\`: Contains \`cameraIndex\`, bindless \`textureIndex\`, \`texturePos\`, vertex \`colour\`, and \`model\` matrix.
 - \`[[vk::binding(1, 1)]] SamplerState sampler;\`
-- \`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\` — Bindless texture array indexing both \`res/atlas.png\`, the offscreen world target, and the offscreen additive light map (\`post.lightTexture\`).
-- \`[[vk::binding(3, 3)]] ConstantBuffer<T> ubo;\` — Custom uniform buffer (\`FlashData\` in \`flash.slang\` or \`PostData\` in \`post.slang\`).
+- \`[[vk::binding(2, 2)]] Texture2D<float4> textures[];\`: Bindless texture array indexing \`res/atlas.png\`, the offscreen world target, and the offscreen additive light map (\`post.lightTexture\`).
+- \`[[vk::binding(3, 3)]] ConstantBuffer<T> ubo;\`: Custom uniform buffer (\`FlashData\` in \`flash.slang\` or \`PostData\` in \`post.slang\`, which includes \`time\`, \`lightTexture\`, \`resolution\`, \`hurt\`, \`lowHealth\`, \`vignette\`, \`pause\`, \`shrine\`, \`scale\`, \`grain\`, \`glow\`, and \`glowTint\`).
 
 ##### How Sharp Pixel-Art Upscaling & ACES Lighting Work in \`post.slang\`
 Instead of blurry bilinear filtering or shimmering nearest-neighbor at non-integer window scales, \`albedoAt(float2 uv)\` computes sub-pixel anti-aliased texel edges scaled by \`post.scale\`:
@@ -2893,21 +2884,21 @@ float2 p = uv - 0.5;
 float2 i = floor(p);
 float2 f = saturate((p - i - 0.5) * post.scale + 0.5);
 \`\`\`
-The final \`PixelShader\` also applies the hurt effect, light map, bloom, tone mapping, vignette, and pause blur. When changing one effect, compare the image before and after at the same scene and scale. The light map multiplies \`lightAt(uv)\` by \`1.6\`; a light value of \`0.625\` therefore acts as neutral brightness.
+The final \`PixelShader\` also applies hurt chromatic aberration, light map, 8-tap bloom, ACES tone mapping, vignette, end-of-run glow, film grain, and pause blur. The light map multiplies \`lightAt(uv)\` by \`1.6\`; a light value of \`0.625\` therefore acts as neutral brightness.
 `,
     mermaidCharts: [
       {
-        title: "sprite_kit.py Procedural Canvas -> atlas_layout.py Gutter Verifier Pipeline",
+        title: "Doteshi & make_assets.py -> atlas_layout.py Verification Pipeline",
         chart: `
 flowchart LR
     classDef py fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef cell fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef check fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Kit["Canvas(16, 16) (sprite_kit.py)<br/>cluster / ellipse / material + Auto-Outline (63,38,49)"]:::py
-    Place["place_cell(atlas, band, idx, img)<br/>Pastes at (band.x + col*18 + 1, band.y + row*18 + 1)"]:::cell
-    Verify["python tools/make_assets.py --verify<br/>Checks 1px Transparent Gutter + Dual-Run SHA-256"]:::check
-    Header["src/Atlas.hpp<br/>constexpr Sprite Bound to GPU UV Quad"]:::check
+    Kit["Doteshi Recipes (tools/source/doteshi/)<br/>+ motion frames (make_motion_frames.py)"]:::py
+    Place["make_assets.py --from-atlas<br/>Places 16x16 Cells with 1px Transparent Gutters"]:::cell
+    Verify["doteshi.lock.json Hash Check +<br/>validate_cpp_layout() (Atlas.hpp)"]:::check
+    Header["res/atlas.png + AtlasF.hpp / AtlasB.hpp / AtlasU.hpp"]:::check
 
     Kit --> Place --> Verify --> Header
 `,
@@ -2922,8 +2913,8 @@ flowchart LR
 
     WorldTarget["Offscreen World Target<br/>Radix-Sorted Sprites + flash.slang"]:::pass
     LightTarget["Offscreen Light Map (post.lightTexture)<br/>Neutral 0.625 + Additive Screen::glow()"]:::pass
-    PostUBO["ConstantBuffer<PostData><br/>hurt, lowHealth, vignette, pause, shrine, scale"]:::ubo
-    PostShader["post.slang PixelShader(uv)<br/>Sharp Bilinear + Light*1.6 + 8-Tap Bloom + ACES"]:::out
+    PostUBO["ConstantBuffer<PostData><br/>time, lightTexture, resolution, hurt, scale, grain, glow"]:::ubo
+    PostShader["post.slang PixelShader(uv)<br/>Sharp Bilinear + Light*1.6 + 8-Tap Bloom + ACES + Grain"]:::out
 
     WorldTarget & LightTarget & PostUBO --> PostShader
 `,
@@ -4072,155 +4063,85 @@ This chapter contains four independent tasks. A **gear base** is the item before
 
 ### 1. Add a gear base (\`src/item/loot/ItemBase.cpp\`)
 
-\`build()\` makes weapon bases from the weapons registered in \`Upgrade::all()\`. If you added a recipe to \`RECIPES[]\`, check whether it already appears as a droppable base before adding more item data. For an offhand, armour piece, or charm, add a row to \`GEAR[]\` in \`ItemBase.cpp\`:
+\`build()\` makes weapon bases from the weapons registered in \`Upgrade::all()\`. For an offhand, armour piece, charm, or campaign-only weapon base, add a row to the internal \`struct Gear GEAR[]\` table in \`src/item/loot/ItemBase.cpp:22–91\`:
 
 \`\`\`cpp
-const ItemBase GEAR[] = {
-    {"Buckler", slot::Offhand, Atlas::RoundShield, 1, 10, 20, Stat::Armor, 1.0f, nullptr},
-    {"Kite Shield", slot::Offhand, Atlas::RoundShield, 6, 8, 55, Stat::Armor, 2.0f, nullptr},
-    {"Astral Aegis", slot::Offhand, Atlas::AegisShield, 14, 5, 135, Stat::ResistArcane, 18.0f, nullptr},
-    {"Starlight Signet", slot::Charm, Atlas::SignetRing, 10, 6, 95, Stat::CritChance, 4.0f, nullptr},
+// struct Gear { name, slots, icon, qlvl, weight, value, implicit, amount, campaignOnly, grants }
+const Gear GEAR[] = {
+    {"Buckler", slot::Offhand, atlas::tile(atlas::t::Shield), 1, 10, 20, Stat::Armour, 1.0f},
+    {"Starlight Signet", slot::Charm, atlas::kit(atlas::kt::Ring), 10, 6, 95, Stat::Crit, 4.0f, true},
 };
 \`\`\`
 
-- **Read the \`ItemBase\` fields in order:**
-  1. \`name\`: Display name shown as the base noun between prefix and suffix (e.g., \`"Celestial Astral Aegis of the Titan"\`).
-  2. \`slots\`: Bitmask from \`namespace slot\` (\`slot::Weapon = 1\`, \`slot::Offhand = 2\`, \`slot::Armour = 4\`, \`slot::Charm = 8\`).
-  3. \`icon\`: \`16 × 16\` \`Sprite\` coordinate from \`src/Atlas.hpp\`.
-  4. \`qlvl\`: Minimum monster/chest item level (\`ilvl >= qlvl\`) required before \`rollBase(rng, ilvl, mask)\` includes this base in the weighted pool.
-  5. \`weight\` & \`value\`: Relative drop weight and base gold value before rarity multipliers.
-  6. \`implicit\` & \`amount\`: Built-in implicit \`Stat\` and magnitude applied before any rolled affixes.
+- **Read the \`Gear\` / \`ItemBase\` fields in order:**
+  1. \`name\`: Display noun between prefix and suffix.
+  2. \`slots\`: Bitmask from \`namespace slot\` (\`Weapon = 1\`, \`Offhand = 2\`, \`Armour = 4\`, \`Charm = 8\`, \`AreaWeapon = 16\`, \`ShotWeapon = 32\`, \`Implant = 64\`, \`Any = Weapon | Offhand | Armour | Charm\`).
+  3. \`icon\`: \`16 × 16\` \`Sprite\` from \`atlas::tile(...)\`, \`atlas::kit(...)\`, \`atlas::town(...)\`, or \`atlasf::*\`.
+  4. \`qlvl\`, \`weight\`, \`value\`: Minimum item level checked by \`pickBase(ilvl, tier, rng, campaign)\` (\`src/item/loot/Loot.cpp:135\`), drop weight, and gold value.
+  5. \`implicit\` & \`amount\`: Built-in implicit \`Stat\` (\`Stat::Armour\`, \`Stat::Crit\`, etc.) and magnitude.
+  6. \`campaignOnly\` (\`bool\`, comes BEFORE \`grants\`!) & \`grants\` (\`const char *\`, optional granted attack name). If adding a unique in \`src/item/loot/Unique.cpp\`, set \`UniqueDef::Mode\` (\`Both\`, \`Survival\`, or \`Campaign\`) to match its base or \`uniqueFault()\` in \`Content.cpp\` will fail.
 
 ---
 
 ### 2. Add an affix that can be unequipped (\`Affix.hpp\`, \`Affix.cpp\`, \`Equip.cpp\`)
 
-An affix changes a stat while an item is equipped. Adding one touches three files. The key check is simple: equipping applies a positive change with \`applyItem(m, item, +1.0f)\`; unequipping applies the same change with \`-1.0f\`. After both operations, the original stat should be restored.
+An affix changes a stat while an item is equipped. Equipping calls \`applyItem(m, item, +1.0f)\`; unequipping calls \`-1.0f\`. After both operations, the original stat must be restored with zero drift.
 
 #### Step 2A: Append to \`enum class Stat\` (\`src/item/loot/Affix.hpp\`)
 
-Always append new enum constants at the end of \`enum class Stat\` so existing save files and item tests remain aligned:
+Always append new constants at the end of \`enum class Stat\` (currently 37 entries: \`None, Damage, Burn, Chill, Poison, Shock, Bleed, Projectiles, Area, Crit, Leech, Armour, Life, MagicFind, GoldFind, Speed, Haste, Regen, Reach, Wisdom, Thorns, ResistBurn, ResistChill, ResistPoison, Kindling, NightDamage, BossDamage, EliteDamage, Arms, Arts, Instincts, Block, ProjectileSpeed, Light, Bargain, Verdant, Hush\`):
 
 \`\`\`cpp
-enum class Stat : uint8_t {
-    None,
-    FlatDamage,
-    PercentDamage,
-    AttackSpeed,
-    CritChance,
-    CritMultiplier,
-    Area,
-    Projectiles,
-    Pierce,
-    CooldownReduction,
-    SkillLevels,
-    MaxLife,
-    LifeRegen,
-    LifeOnHit,
-    Armor,
-    Thorns,
-    Dodge,
-    ResistFire,
-    ResistCold,
-    ResistLightning,
-    ResistPoison,
-    ResistArcane,
-    ResistAll,
-    MoveSpeed,
-    PickupRadius,
-    MagicFind,
-    GoldFind,
-    XpGain,
-    BurnChance,
-    ChillChance,
-    PoisonChance,
-    BleedChance,
-    ShockChance,
-    BossDamage,
-    EliteDamage,
-    NightDamage,
-    Light,
+enum class Stat {
+    // ... existing 37 entries ending at Hush ...
     NovaMastery,
 };
 \`\`\`
 
-#### Step 2B: Add the 5-Tier \`AffixDef\` & Tooltip Formatter (\`src/item/loot/Affix.cpp\`)
+#### Step 2B: Respect the \`AFFIX_ORDINARY = 31\` / \`AFFIX_COUNT = 49\` Split (\`src/item/loot/Affix.cpp\`)
 
-Add a row to \`const AffixDef AFFIXES[]\` in \`src/item/loot/Affix.cpp\` and format its tooltip string in \`describe(Stat stat, float value)\`:
+\`AFFIXES[]\` holds **49** families: **31 ordinary affixes** (indices \`0..30\`, \`"damage"\` through \`"light"\`) followed by **18 faction kin affixes** (indices \`31..48\`, \`"feral"\` through \`"moonlit"\`). \`Item::addAffix()\` only rolls \`0 .. AFFIX_ORDINARY - 1\` (\`AFFIX_COUNT - (KIN_ROWS - 1)\`):
+- **Ordinary affixes MUST be inserted before \`"feral"\`** (not appended at the end, or \`"feral"\` leaks into ordinary drops and the new affix never rolls).
+- **Faction kin affixes** go at the end and must also update \`KIN_ROWS\` (\`Affix.hpp:70\`) and \`KIN_KEYS[]\` (\`Affix.cpp:147–150\`).
+- Field 5 of \`AffixDef\` is \`bool classOnly\` (not a bitmask):
 
 \`\`\`cpp
-{
-    "NovaMastery",
-    true,
-    slot::Weapon | slot::AreaWeapon | slot::Charm,
-    Stat::NovaMastery,
-    0xFFF,
-    5,
-    {
-        {"Resonant", 1, 6.0f, 10.0f},
-        {"Harmonic", 5, 11.0f, 16.0f},
-        {"Astral", 10, 17.0f, 23.0f},
-        {"Celestial", 15, 24.0f, 31.0f},
-        {"Supernova", 20, 32.0f, 40.0f},
-    }
-},
+{"nova_mastery", true, slot::Weapon | slot::AreaWeapon | slot::Charm, Stat::NovaMastery, false, 5,
+ {{"Resonant", 1, 6, 10}, {"Harmonic", 5, 11, 16}, {"Astral", 10, 17, 23},
+  {"Celestial", 15, 24, 31}, {"Supernova", 20, 32, 40}}},
 \`\`\`
 
-And inside \`describe(Stat stat, float value)\` (\`src/item/loot/Affix.cpp\`):
+Format its tooltip inside \`describe(Stat stat, float value)\` (\`src/item/loot/Affix.cpp:170–247\`) returning \`String\` via \`say(tr(...), value)\`:
 
 \`\`\`cpp
 case Stat::NovaMastery:
-    std::snprintf(buf, sizeof(buf), "+%d%% Area & Arcane Mastery", iv);
-    break;
+  return say(tr("+{:.0f}% Area & Damage"), value);
 \`\`\`
 
 #### Step 2C: Wire the Reversible Stat Delta in \`apply()\` (\`src/item/loot/Equip.cpp\`)
 
-Inside \`apply(Mob &m, Stat stat, float v)\` in \`src/item/loot/Equip.cpp\`, apply \`v\` purely additively so \`+v\` on \`Player::wear\` and \`-v\` on \`Player::shed\` cancel out with zero drift:
+Inside \`apply(Mob &m, Stat stat, float v)\` (\`src/item/loot/Equip.cpp:11–117\`), mutate \`m.*\` and \`ItemStats &b = m.kit()\` purely additively:
 
 \`\`\`cpp
 case Stat::NovaMastery:
-    p.stats().area += v * 0.005f;
-    p.stats().might += v * 0.005f;
-    break;
+  b.area += v * 0.005f;
+  m.might += v * 0.005f;
+  break;
 \`\`\`
 
 ---
 
 ### 3. Add a summoned ally (\`Ally.hpp\`, \`Ally.cpp\`, \`Recipe.cpp\`)
 
-An ally is a \`Mob\` managed by \`src/entity/Ally.cpp\`. It can attack directly when \`kit == nullptr\`, or use a recipe weapon when \`kit\` is set. For example, the Clockwork Drone uses an Arcane Staff. Check which path your new ally needs before filling out its definition.
+An ally is a \`Mob\` managed by \`src/entity/Ally.cpp\`. It attacks in melee when \`shot == nullptr\`, or fires a \`const Recipe *shot\` (for example, \`Drone\` points to \`&DRONE_BOLT\`).
 
 #### Step 3A: Append to \`enum class AllyKind\` (\`src/entity/Ally.hpp\`)
 
-Append your new companion kind immediately before \`Count\`:
+Append your companion right before \`Count\` (currently 10 kinds: \`Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy, Ghost, Quickened, Beguiled, Count\`):
 
 \`\`\`cpp
-enum class AllyKind : uint8_t {
-    Skeleton,
-    Wolf,
-    Wisp,
-    Turret,
-    Totem,
-    Golem,
-    Decoy,
-    Fairy,
-    Crow,
-    Imp,
-    Beetle,
-    Banner,
-    Ancestor,
-    Mirror,
-    Bear,
-    Hawk,
-    Spiderling,
-    BoneMage,
-    EmberHound,
-    FrostSprite,
-    Gargoyle,
-    VineTendril,
-    Drone,
-    Valkyrie,
+enum class AllyKind {
+    Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy, Ghost, Quickened, Beguiled,
     StarSentinel,
     Count
 };
@@ -4228,27 +4149,28 @@ enum class AllyKind : uint8_t {
 
 #### Step 3B: Add the \`AllyDef\` Row to \`ALLIES[]\` (\`src/entity/Ally.cpp\`)
 
-\`src/entity/Ally.cpp\` enforces \`static_assert(std::size(ALLIES) == static_cast<size_t>(AllyKind::Count))\`. Add your companion definition at the matching index:
+\`src/entity/Ally.cpp\` enforces \`static_assert(std::size(ALLIES) == size_t(AllyKind::Count))\`. Use a valid \`EnemyKind\` sprite source (such as \`EnemyKind::FrostWisp\`), a float \`Color {r, g, b, a}\`, and a \`const Recipe *shot\` (or \`nullptr\`):
 
 \`\`\`cpp
 const AllyDef ALLIES[] = {
-    {"Star Sentinel", "Astral Beacon", EnemyKind::Wisp, 26.0f, 82.0f, 0.75f,
-     70.0f, 18.0f, 1.05f, true, false, Color::rgb(0x88, 0xE0, 0xFF), "Arcane Staff"},
+    // ... existing 10 rows ...
+    {"Star Sentinel", "Astral Beacon", EnemyKind::FrostWisp, 26.0f, 82.0f, 0.75f,
+     70.0f, 18.0f, 1.05f, true, false, {0.53f, 0.88f, 1.0f, 1.0f}, &DRONE_BOLT},
 };
 \`\`\`
 
 - **How \`SummonForm\` Auto-Binds via \`AllyDef::recipe\`:**
-  When \`SummonForm::fire(const Context &c)\` (\`src/item/weapon/form/Summon.cpp\`) executes, it calls \`allyFor(c.r.name)\`, which scans \`ALLIES[]\` for \`a.recipe == c.r.name\`. By setting \`recipe = "Astral Beacon"\` in \`ALLIES[]\` and adding an \`"Astral Beacon"\` row with \`Form::Summon\` to \`RECIPES[]\` (\`src/item/weapon/Recipe.cpp\`), the weapon automatically spawns up to \`cap = c.count + 1 + (c.evolved ? 2 : 0)\` active \`Star Sentinel\` companions!
+  \`SummonForm::fire(const FormCast &c) const\` (\`src/item/weapon/form/Summon.cpp:8–24\`) calls \`allyFor(c.r.name)\`, matching \`a.recipe == c.r.name\`, and spawns up to \`int cap = c.count + int(c.p.bonus().allyCap)\` active companions (leashed at \`Ally::LEASH = 170\` px).
 
 ---
 
-### 4. Add a weapon form when existing forms do not fit (\`src/item/weapon/form/\`, \`FormRegistry.cpp\`)
+### 4. Add a weapon form when existing forms do not fit (\`src/item/weapon/form/\`)
 
 If a weapon needs a brand-new geometric attack pattern beyond the 16 built-in \`Form\` types:
-1. Append the new identifier to \`enum class Form : uint8_t\` in \`src/item/weapon/Recipe.hpp\`.
-2. Create \`src/item/weapon/form/MyForm.cpp\` implementing \`class MyForm : public FormBehavior\` with \`void fire(const Context &c) const override\`.
-3. Use \`c.aimDir(ox, oy)\` to resolve target direction, \`c.payload(damageScale)\` to snapshot the \`HitPayload\` (including evolved status effects and hero luck/edge), and \`landHit(payload, enemy, fromX, fromY, by)\` (\`src/item/weapon/form/FormCommon.hpp\`) to apply damage, status procs, and floating combat numbers.
-4. Register the singleton in \`formFor(Form f)\` inside \`src/item/weapon/form/FormBehavior.cpp\`.
+1. Append the identifier to \`enum class Form\` in \`src/item/weapon/Recipe.hpp:15–32\`.
+2. Implement a \`FormBehavior\` subclass (\`src/item/weapon/form/FormBehavior.hpp:32–48\`) overriding all four pure virtuals: \`fire(const FormCast &c)\`, \`life(const RecipeShot &s)\`, \`tick(RecipeShot &s, Mob &p, float speed)\`, and \`render(RecipeShot &s, Screen &screen)\`.
+3. Use \`FormCast\` members (\`dx, dy, base, targets, shot(...)\`) and \`landHit(unsigned payload, Mob &e, double xd, double yd, float dmg, float knock, Upgrade *source, Mob *wielder)\` declared in \`src/item/weapon/Recipe.hpp:41–42\`.
+4. Register the singleton in \`FormBehavior::of(Form form)\` inside \`src/item/weapon/form/FormBehavior.cpp:10–32\` and update its \`static_assert(int(Form::...) == ...)\` on line 8.
 `,
     mermaidCharts: [
       {
@@ -4260,9 +4182,9 @@ flowchart LR
     classDef verify fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
 
     S1["1. Affix.hpp<br/>Append Stat::NovaMastery<br/>to enum class Stat"]:::step
-    S2["2. Affix.cpp<br/>Add 5-Tier AffixDef to AFFIXES[]<br/>+ Format in describe(Stat, float)"]:::code
+    S2["2. Affix.cpp<br/>Insert before 'feral' (AFFIX_ORDINARY)<br/>+ Format in describe() with say(tr())"]:::code
     S3["3. Equip.cpp<br/>Apply reversible +v / -v delta<br/>in apply(Mob &m, Stat, float v)"]:::code
-    S4["4. Verify in Sandbox & Tests<br/>MellanganApp.exe --dev --give 16 --loot<br/>MellanganApp.exe --test"]:::verify
+    S4["4. Verify in Sandbox & Tests<br/>MellanganApp --dev --give 16 --loot<br/>MellanganApp --test item"]:::verify
 
     S1 --> S2 --> S3 --> S4
 `,
@@ -4275,9 +4197,9 @@ flowchart TD
     classDef weapon fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef runtime fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
 
-    Kind["1. Ally.hpp & Ally.cpp<br/>Append AllyKind::StarSentinel before Count<br/>Add AllyDef row (recipe = 'Astral Beacon', kit = 'Arcane Staff')"]:::ally
-    Recipe["2. Recipe.cpp<br/>Add 'Astral Beacon' row with Form::Summon<br/>SummonForm::fire() matches allyFor(c.r.name)"]:::weapon
-    Spawn["3. Runtime Execution (Ally::onAdded & Ally::tick)<br/>Grants kit weapon ('Arcane Staff'), orbits Player,<br/>leashes at 150px, and fires kit or melee bites"]:::runtime
+    Kind["1. Ally.hpp & Ally.cpp<br/>Append AllyKind::StarSentinel before Count<br/>Add AllyDef row (recipe = 'Astral Beacon', shot = &DRONE_BOLT)"]:::ally
+    Recipe["2. Recipe.cpp<br/>Add 'Astral Beacon' row with Form::Summon<br/>SummonForm::fire(FormCast) matches allyFor(c.r.name)"]:::weapon
+    Spawn["3. Runtime Execution (Ally::tick)<br/>Orbits Player, leashes at Ally::LEASH (170 px),<br/>and fires const Recipe *shot or melee attacks"]:::runtime
 
     Kind --> Recipe --> Spawn
 `,
@@ -4301,76 +4223,54 @@ flowchart TD
           "src/test/AllyTest.cpp"
     ],
     content: `
-### Choose a trait, bounty, or test
+### Choose a trait, biome event, bounty, or test
 
-These are three separate contributions. A **trait** changes an elite monster's behavior. A **bounty** gives the player a contract objective. A **headless test** checks a rule without opening the game window. Start with the part that matches your change; you do not need to implement all three.
+These are four independent contributions. A **trait** modifies elite/champion monster behavior. A **biome event** schedules periodic regional boons or hazards. A **bounty** adds a night contract objective. A **headless test** verifies a rule without opening a window.
 
 ### 1. Add an elite or champion trait (\`src/entity/Trait.hpp\`, \`src/entity/Trait.cpp\`)
 
-Elite monsters can have one or two traits; champions can have two or three. \`Traits::bits\` stores which traits a monster has. Each trait uses one bit of that 32-bit number. Add a new trait in three steps:
+Elite monsters carry one or two traits; champions carry two or three, packed in \`uint32_t Traits::bits\` (up to 31 traits).
 
-#### Step 1A: Append to \`enum class Trait\` (\`src/entity/Trait.hpp\`)
+#### Step 1A: Append to \`enum class Trait\` (\`src/entity/Trait.hpp:10–32\`)
 
-Append the new trait identifier before \`Count\` (up to 31 traits fit in \`uint32_t bits\`):
+Append the new trait right before \`Count\` (currently 20 traits: \`Hasted, Vampiric, Warded, Splitting, Volatile, Frosted, Thorned, Regenerating, Blinking, Phasing, Brooding, Gravitic, Cursed, Silencing, FireEnchanted, ColdEnchanted, StormEnchanted, StoneSkin, Multishot, AuraBearer, Count\`):
 
 \`\`\`cpp
-enum class Trait : uint8_t {
-    Hasted,
-    Armored,
-    Regenerating,
-    Vampiric,
-    Thorns,
-    Molten,
-    Frozen,
-    Plagued,
-    Stormcaller,
-    Splitting,
-    Shielded,
-    Berserk,
-    Blinker,
-    Avenger,
-    Executioner,
-    Juggernaut,
-    Dampening,
-    Vortex,
-    Hexer,
-    Undying,
+enum class Trait {
+    // ... existing 20 entries ending at AuraBearer ...
     Mirrored,
     Count
 };
 \`\`\`
 
-#### Step 1B: Register Name & Aura Tint in \`TRAITS[]\` (\`src/entity/Trait.cpp\`)
+#### Step 1B: Register Name & Aura Tint in \`TRAITS[]\` (\`src/entity/Trait.cpp:13–23\`)
 
-Add the display name and pixel aura color to \`const TraitInfo TRAITS[int(Trait::Count)]\` in \`src/entity/Trait.cpp\`:
+Add a lowercase display name and float \`Color {r, g, b, a}\` entry to \`const TraitDef TRAITS[int(Trait::Count)]\`:
 
 \`\`\`cpp
-const TraitInfo TRAITS[static_cast<int>(Trait::Count)] = {
-    {"Hasted", Color::rgb(0xFF, 0xE0, 0x55)},
-    {"Armored", Color::rgb(0x9A, 0xA8, 0xB8)},
-    {"Mirrored", Color::rgb(0x90, 0xF0, 0xFF)},
+const TraitDef TRAITS[int(Trait::Count)] = {
+    {"hasted", {1.0f, 0.88f, 0.33f, 1.0f}},
+    // ...
+    {"mirrored", {0.56f, 0.94f, 1.0f, 1.0f}},
 };
 \`\`\`
 
-#### Step 1C: Hook into the 5 \`Traits\` Lifecycle Methods (\`src/entity/Trait.cpp\`)
+#### Step 1C: Hook into the 5 \`Traits\` Lifecycle Methods (\`src/entity/Trait.cpp:55–160\`)
 
-Every \`Mob\` automatically invokes \`traits\` at five points in its lifecycle:
-1. **\`Traits::incoming(Mob &self, float damage)\`:** Modifies incoming damage before HP subtraction (e.g., \`Armored\` scales by \`0.6f\`, \`Dampening\` scales by \`0.45f\` when attacker is \`> 56 px\` away, \`Shielded\` absorbs one hit while \`cooldown <= 0\`).
-2. **\`Traits::landed(Mob &self, float dealt)\`:** Fires when the monster lands a hit on the player (e.g., \`Vampiric\` heals, \`Frozen\` chills, \`Plagued\` poisons, \`Hexer\` applies \`applyWeaken(3.0f)\`).
-3. **\`Traits::tick(Mob &self)\`:** Per-frame behavior (e.g., \`Regenerating\`, \`Stormcaller\` lightning strikes, \`Blinker\` teleports, \`Vortex\` player pull).
-4. **\`Traits::died(Mob &self, float damage)\`:** Death triggers (e.g., \`Undying\` revives once at \`35% HP\`, \`Molten\` explodes, \`Splitting\` spawns 2 mini-clones, \`Avenger\` buffs nearby allies).
-5. **\`Traits::render(const Mob &self, Sprites &s, double bob)\`:** Renders ground rings or floating badges under the monster.
+1. **\`Traits::incoming(Mob &self, float damage)\`:** Modifies incoming damage before HP subtraction (e.g., \`StoneSkin\` scales by \`0.65f\`, \`Warded\` absorbs while \`ward > 0\` at \`0.25f\`, \`Phasing\` reduces damage to \`0.1f\` while \`veiled()\`, \`Thorned\` reflects).
+2. **\`Traits::landed(Mob &self, float dealt)\`:** Fires on hit (e.g., \`Vampiric\` heals, \`Frosted\` chills, \`Cursed\` calls \`afflict(StatusKind::Weaken, ...)\`).
+3. **\`Traits::tick(Mob &self)\`:** Per-frame behavior (\`Regenerating\`, \`Blinking\`, \`Gravitic\` pull, \`AuraBearer\`, \`Brooding\`).
+4. **\`Traits::died(Mob &self, float damage)\`:** Death triggers (\`Volatile\` explosion, \`Splitting\` clones).
+5. **\`Traits::render(Screen &s, const Mob &self, float radius, float age) const\`:** Draws trait rings and visual tells.
 
 \`\`\`cpp
 float Traits::incoming(Mob &self, float damage) {
-    if (has(Trait::Mirrored) && self.level) {
-        if (auto *p = self.level->player()) {
-            double dx = p->x - self.x;
-            double dy = p->y - self.y;
-            if (dx * dx + dy * dy > 64.0 * 64.0) {
-                p->hurt(1, self.x, self.y, 2.0);
-                return damage * 0.70f;
-            }
+    if (has(Trait::Mirrored) && self.level && self.level->player) {
+        Player *p = self.level->player;
+        double dx = p->x - self.x, dy = p->y - self.y;
+        if (dx * dx + dy * dy > 64.0 * 64.0) {
+            p->hurt(1.0f);
+            return damage * 0.70f;
         }
     }
     return damage;
@@ -4379,65 +4279,50 @@ float Traits::incoming(Mob &self, float damage) {
 
 ---
 
-### 2. Add a bounty objective (\`src/level/Bounty.cpp\`)
+### 2. Schedule a regional biome event or hazard (\`src/level/BiomeEvents.cpp\`)
 
-Shrine and night contract bounties are implemented in \`src/level/Bounty.cpp\`. Each bounty tracks \`kind\`, \`arg\`, \`goal\`, \`baseline\`, and \`reward\` (\`0 = Chest\`, \`1 = Gold\`, \`2 = Shrine Boon\`):
-
-\`\`\`cpp
-enum Kind : uint8_t {
-    SlayCount,
-    SlayFoe,
-    SurviveSec,
-    ReachCombo,
-    GatherGold,
-    StayMoving,
-    HoldGround,
-    SlayElites,
-    KINDS
-};
-\`\`\`
-
-To add a new bounty kind (such as \`SlayElites\`):
-1. Append \`SlayElites\` before \`KINDS\` in \`src/level/Bounty.cpp\`.
-2. Initialize \`b.goal\` and \`b.baseline\` inside \`Bounty::roll(Random &rng, const Level &level, int night)\`:
-
-\`\`\`cpp
-case SlayElites:
-    b.goal = 3 + night;
-    b.baseline = level.eliteKills();
-    break;
-\`\`\`
-
-3. Format the HUD objective banner in \`Bounty::text()\` and return live progress in \`Bounty::progress(const Level &level)\`:
-
-\`\`\`cpp
-case SlayElites:
-    return level.eliteKills() - baseline;
-\`\`\`
+\`BiomeEvents.cpp\` holds two \`BIOME_COUNT\`-indexed (30-entry) tables: \`EVENTS[BIOME_COUNT]\` (lines 35–113) and \`HAZARDS[BIOME_COUNT]\` (lines 115–164, used for the 7 boon-only biomes that alternate boon and hazard across even/odd epochs). To add or tune an event, edit the biome's row in \`EVENTS[]\` or \`HAZARDS[]\`, keep \`every\` aligned (\`48 s\` core, \`28 s\` expansion/coast), and implement its effect inside \`BiomeEvents::tick()\` and \`render()\`.
 
 ---
 
-### 3. Write a repeatable test without a game window (\`src/test/AllyTest.cpp\`, \`src/test/LootTest.cpp\`)
+### 3. Add a bounty objective (\`src/level/Bounty.hpp\`, \`src/level/Bounty.cpp\`)
 
-Every contribution should include a fast, deterministic unit test in \`src/test/\` using the headless \`Field\` fixture (\`src/test/TestFixtures.hpp\`). \`Field\` initializes a complete \`Level\` and \`Player\` in memory without creating a Vulkan window or audio device, executing 180 simulation ticks (3.0 seconds of game time) in under **2 milliseconds**:
+\`struct Bounty\` (\`Bounty.hpp:7–14\`) tracks \`int kind, arg, goal; bool done;\` with \`static void roll(Bounty *out, int n);\`. Its unnamed enum in \`Bounty.cpp:14\` defines \`SLAY, KINDLE, ENTER, WALK, SURVIVE, STREAK, SLAY_ALPHA, CATCH_THIEF, KINDS\`.
+To add a new bounty kind:
+1. Append the enumerator before \`KINDS\` in \`src/level/Bounty.cpp:14\`.
+2. Initialize \`kind\`, \`arg\`, and \`goal\` inside \`Bounty::roll()\`.
+3. Add a localization key in \`src/gui/Lang.hpp\` / \`Lang.cpp\` and format it in \`Bounty::text()\`.
+4. Read progress from \`Level\` fields (\`l.slain[]\`, \`l.litBiomes\`, \`l.entered\`, \`l.chart.discovered\`, \`l.time\`, \`l.bestStreak\`) in \`Bounty::progress(const Level &l)\`.
+
+---
+
+### 4. Write a headless deterministic test (\`src/test/AllyTest.cpp\`, \`src/test/ItemTest.cpp\`)
+
+Every test file begins with \`#undef NDEBUG\` before \`#include <cassert>\` so \`assert()\` stays active in Release builds too. Local fixtures like \`struct Field\` in \`src/test/AllyTest.cpp:17–47\` step a headless \`Level\` without Vulkan or audio:
 
 \`\`\`cpp
+#undef NDEBUG
+#include <cassert>
+
 void testStarSentinelCompanion() {
     Field f;
-    auto *ally = f.level.spawnAlly(AllyKind::StarSentinel, f.player->x + 16.0, f.player->y);
+    Ally *ally = summon(f.level, AllyKind::StarSentinel, f.p.x + 16.0, f.p.y, 12.0f, 10.0f);
     assert(ally != nullptr);
-    auto *foe = f.spawn(EnemyKind::Zombie, f.player->x + 48.0, f.player->y);
-    int before = foe->hp;
-    f.step(180);
-    assert(foe->removed || foe->hp < before);
+    Enemy *rat = f.foe(EnemyKind::Rat, 48.0, 0.0);
+    entt::entity id = rat->id;
+    float before = rat->hp;
+    f.run(180);
+    Enemy *after = f.level.get<Enemy>(id);
+    assert(!after || after->hp < before);
 }
 \`\`\`
 
-Run the entire assertion suite in Debug mode before committing:
+Declare the function in \`src/test/Tests.hpp\`, register a row in \`const Case CASES[]\` inside \`src/test/Test.cpp\`, and run it via \`--test <name>\` (then the full \`--test\` gate):
 
 \`\`\`bash
-cmake --build build --config Debug --parallel
-./build/bin/Debug/MellanganApp.exe --test
+cmake --build build --config Release --target Mellangan
+./build/bin/Release/MellanganApp.exe --test ally
+./build/bin/Release/MellanganApp.exe --test
 \`\`\`
 `,
     mermaidCharts: [
@@ -4448,26 +4333,26 @@ flowchart LR
     classDef hook fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
     classDef fn fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Spawn["Traits::roll(rng, count)<br/>Assigns 1..3 bitmask traits<br/>Sets tint & HP/Speed scale"]:::hook
-    Tick["Traits::tick(self)<br/>Regen, Stormcaller bolt,<br/>Blinker warp, Vortex pull"]:::fn
-    In["Traits::incoming(self, dmg)<br/>Shielded absorb, Armored 0.6x,<br/>Dampening 0.45x, Berserk"]:::fn
-    Land["Traits::landed(self, dealt)<br/>Vampiric heal, Frozen chill,<br/>Plagued poison, Hexer weaken"]:::fn
-    Died["Traits::died(self, dmg)<br/>Undying 35% revive, Molten blast,<br/>Splitting clones, Avenger buff"]:::fn
+    Spawn["Traits::add(Trait)<br/>Sets bitmask bits (up to 31)<br/>Sets aura tint & scaling"]:::hook
+    Tick["Traits::tick(self)<br/>Regenerating, Blinking,<br/>Gravitic pull, AuraBearer"]:::fn
+    In["Traits::incoming(self, dmg)<br/>StoneSkin 0.65x, Warded 0.25x,<br/>Phasing 0.1x, Thorned reflect"]:::fn
+    Land["Traits::landed(self, dealt)<br/>Vampiric heal, Frosted chill,<br/>Cursed weaken"]:::fn
+    Died["Traits::died(self, dmg)<br/>Volatile blast,<br/>Splitting clones"]:::fn
 
     Spawn --> Tick --> In --> Land --> Died
 `,
       },
       {
-        title: "Headless Field Unit Test & Debug Verification Pipeline",
+        title: "Headless Field Unit Test & CASES[] Registration Pipeline",
         chart: `
 flowchart LR
     classDef test fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef gate fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    F1["Construct Headless Field f<br/>(Zero GPU/Audio Init)"]:::test
-    F2["Configure Scenario<br/>f.player->grant(...) / f.spawn(...)<br/>f.level.spawnAlly(...)"]:::test
-    F3["Step Deterministic Simulation<br/>f.step(180) (60 Hz fixed dt)"]:::test
-    F4["Verify C++ assert() Invariants<br/>./build/bin/Debug/MellanganApp.exe --test"]:::gate
+    F1["Construct Headless Field f<br/>(#undef NDEBUG + <cassert>)"]:::test
+    F2["Configure Scenario<br/>f.foe(EnemyKind::Rat, dx, dy)<br/>summon(f.level, AllyKind::...)"]:::test
+    F3["Step Deterministic Simulation<br/>f.run(180) + Re-fetch by entt::entity"]:::test
+    F4["Register in Tests.hpp & CASES[]<br/>MellanganApp --test <name> / --test"]:::gate
 
     F1 --> F2 --> F3 --> F4
 `,
