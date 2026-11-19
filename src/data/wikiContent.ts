@@ -4736,7 +4736,7 @@ $$\\|\\mathbf q-\\mathbf r\\|=\\tau\\|\\mathbf v\\|\\le0.42\\,\\mathrm{s}\\,\\|\
 $$0\\le\\min\\left(0.7,\\frac{R}{\\max(20,s)}\\right)\\le0.7,$$
 $$0\\le\\tau=0.6\\min\\left(0.7,\\frac{R}{\\max(20,s)}\\right)\\le0.6\\cdot0.7=0.42.$$
 
-Außerdem ist $\\mathbf q-\\mathbf r=\\tau\\mathbf v$. Weil $\\tau\\ge0$, liefert die Homogenität der euklidischen Norm $\\|\\tau\\mathbf v\\|=\\tau\\|\\mathbf v\\|$. Einsetzen der ersten Schranke beweist die zweite. $\\square$
+Außerdem ist $\\mathbf q-\\mathbf r=\\tau\\mathbf v$. Weil $\\tau\\ge0$, liefert die Homogenität der euklidischen Norm $\\|\\tau\\mathbf v\\|=\\tau\\|\\mathbf v\\|$. Einsetzen der ersten Schranke beweist die zweite. ∎
 
 Die Aussage begrenzt den **Zusatz zum aktuellen Zielvektor**, nicht die Entfernung des Gegners zum Ziel oder seine spätere Bewegung.
 
@@ -4775,7 +4775,7 @@ D&=n(0.5P_r)+\\rho P_r\\\\
  &=P_rT_r.
 \\end{aligned}$$
 
-Die Aufteilung auf Simulationsschritte ändert diese Summe nicht. $\\square$
+Die Aufteilung auf Simulationsschritte ändert diese Summe nicht. ∎
 
 Im Programm können die Toleranz von $10^{-6}$ Sekunden, Gleitkommarundung, Tod während eines Schadensaufrufs und die weiter unten genannten Obergrenzen die exakte Gleichheit verändern.
 
@@ -4853,7 +4853,7 @@ Formal sei $c_i$ die Anzahl in Zelle $i$, mit $s_0=0$ und $s_{i+1}=s_i+c_i$. Dan
 
 $$s_C=\\sum_{i=0}^{C-1}c_i=N$$
 
-folgt, dass die lückenlose Folge von Bereichen genau $[0,N)$ bedeckt. $\\square$
+folgt, dass die lückenlose Folge von Bereichen genau $[0,N)$ bedeckt. ∎
 
 Der Aufbau des Index benötigt $O(N+C)$ Arbeit für $N$ Gegner und $C$ Zellen sowie Speicher für die Felder.
 
@@ -4888,7 +4888,7 @@ Der gepackte Schlüssel enthält die Ebene ab Bit 56, die geordnete Tiefe in den
 
 Der erste Durchlauf ordnet den niedrigsten Block. Der zweite ist stabil: Innerhalb gleicher Werte von Bit 36–47 bleibt die Ordnung des ersten Blocks erhalten. Dasselbe Argument gilt für den dritten Block. So ordnen die drei Durchläufe zusammen alle 36 Bits von 24 bis 59.
 
-Die Bits 24–55 enthalten die gesamte Tiefenkodierung. Unter der Schranke $0\\le\\text{Ebene}\\le15$ enthalten die Bits 56–59 den gesamten Ebenenwert. Da die Ebenenbits höher liegen, bestimmen sie zuerst die Ordnung, danach die Tiefenbits. Die unteren 24 Indexbits werden nicht verglichen; bei Gleichheit der sortierten Bits bewahrt die Stabilität die Einfügereihenfolge. $\\square$
+Die Bits 24–55 enthalten die gesamte Tiefenkodierung. Unter der Schranke $0\\le\\text{Ebene}\\le15$ enthalten die Bits 56–59 den gesamten Ebenenwert. Da die Ebenenbits höher liegen, bestimmen sie zuerst die Ordnung, danach die Tiefenbits. Die unteren 24 Indexbits werden nicht verglichen; bei Gleichheit der sortierten Bits bewahrt die Stabilität die Einfügereihenfolge. ∎
 
 Größere Ebenenwerte könnten falsch einsortiert werden. NaN besitzt keine numerische Tiefenordnung. Die beiden numerisch gleichen Nullen haben verschiedene Schlüssel und fallen deshalb nicht unter die Aussage zur stabilen Gleichheit.
 
@@ -4900,7 +4900,7 @@ Größere Ebenenwerte könnten falsch einsortiert werden. NaN besitzt keine nume
 
 *Beweis.* Jede Toröffnung wird als Quelle mit Abstand null eingereiht. Werden alle Knoten mit Abstand $d$ verarbeitet, gelangt jeder noch unentdeckte Nachbar mit Abstand $d+1$ ans Ende der Warteschlange. Wegen der FIFO-Reihenfolge kann kein Knoten mit Abstand $d+1$ vor einem Knoten mit Abstand $d$ verarbeitet werden.
 
-Induktiv werden daher zuerst alle erreichbaren Knoten mit Abstand null, dann eins, dann zwei und so weiter entdeckt. Bei der ersten Entdeckung einer Zelle ist ein kürzerer Weg ausgeschlossen: Er hätte eine Vorgängerzelle mit kleinerem Abstand gehabt, die bereits verarbeitet worden wäre. Die gespeicherte Richtung zeigt auf diese Vorgängerzelle. Wiederholt man sie, sinkt der Abstand in jedem Schritt um eins, bis eine Toröffnung erreicht ist. $\\square$
+Induktiv werden daher zuerst alle erreichbaren Knoten mit Abstand null, dann eins, dann zwei und so weiter entdeckt. Bei der ersten Entdeckung einer Zelle ist ein kürzerer Weg ausgeschlossen: Er hätte eine Vorgängerzelle mit kleinerem Abstand gehabt, die bereits verarbeitet worden wäre. Die gespeicherte Richtung zeigt auf diese Vorgängerzelle. Wiederholt man sie, sinkt der Abstand in jedem Schritt um eins, bis eine Toröffnung erreicht ist. ∎
 
 Das Ergebnis minimiert die **Anzahl der Rasterschritte**, nicht die genaue euklidische Weglänge. Ein diagonaler und ein gerader Schritt zählen jeweils als eine Kante, obwohl sie geometrisch unterschiedlich lang sind. Ein diagonaler Zellschritt ist $16\\sqrt{2}$ px lang, ein gerader dagegen 16 px. Ein Verfahren mit gewichteten Kanten würde eine andere Frage nach dem kürzesten Weg beantworten.
 
@@ -5029,7 +5029,7 @@ Alle diese Gewichte sind nichtnegativ und summieren sich auf eins.
 
 $$[(1-S_x)+S_x][(1-S_y)+S_y]=1.$$
 
-Ein solches gewichtetes Mittel normierter Eckvektoren ist wieder nichtnegativ und normiert. Die erneute Auswahl der drei größten Anteile erfüllt somit die Voraussetzungen des ersten Schritts. $\\square$
+Ein solches gewichtetes Mittel normierter Eckvektoren ist wieder nichtnegativ und normiert. Die erneute Auswahl der drei größten Anteile erfüllt somit die Voraussetzungen des ersten Schritts. ∎
 
 Die Auswahl ist eine diskrete Operation. Aus der Normierung folgt keine Stetigkeit der **gekürzten** Gewichte, wenn das Biom auf Rang drei wechselt.
 
@@ -5054,7 +5054,7 @@ F_i&=(1-\\alpha_i)F_{i-1}+\\alpha_i c_i\\\\
    &=\\frac{\\sum_{j\\le i}w_jc_j}{\\sum_{j\\le i}w_j}.
 \\end{aligned}$$
 
-Damit gilt die Behauptung auch für Schicht $i$. Bei normierten Endgewichten ist $\\sum_jw_j=1$, also lautet die endgültige Farbe $\\sum_jw_jc_j$. Dies beschreibt die Alphagewichte vor Einfärbung, Texturdetails und späterer Beleuchtung. $\\square$
+Damit gilt die Behauptung auch für Schicht $i$. Bei normierten Endgewichten ist $\\sum_jw_j=1$, also lautet die endgültige Farbe $\\sum_jw_jc_j$. Dies beschreibt die Alphagewichte vor Einfärbung, Texturdetails und späterer Beleuchtung. ∎
 
 #### Senkrechte Schichtung im Untergrund (\`Under.cpp\`)
 
@@ -5161,7 +5161,7 @@ Beim ersten und zweiten Ableiten nach $x$ fallen alle Terme mit $f'$ und $f''$ a
 
 $$f'(0)=f'(1)=f''(0)=f''(1)=0.$$
 
-Übrig bleiben die entsprechenden Ableitungen der gemeinsamen affinen Kantendaten; die zweite reine $x$-Ableitung ist dort null. Da die Randfunktion $G(y)$ auf beiden Seiten dieselbe ist, stimmen auch ihre $y$-Ableitungen überein. Dasselbe gilt für gemischte Ableitungen, wenn man die übereinstimmenden Ausdrücke nach $y$ ableitet. Die waagerechten Gitterkanten folgen durch Vertauschen von $x$ und $y$. $\\square$
+Übrig bleiben die entsprechenden Ableitungen der gemeinsamen affinen Kantendaten; die zweite reine $x$-Ableitung ist dort null. Da die Randfunktion $G(y)$ auf beiden Seiten dieselbe ist, stimmen auch ihre $y$-Ableitungen überein. Dasselbe gilt für gemischte Ableitungen, wenn man die übereinstimmenden Ausdrücke nach $y$ ableitet. Die waagerechten Gitterkanten folgen durch Vertauschen von $x$ und $y$. ∎
 
 Endliche Gleitkommapräzision garantiert keine bitgenaue Ableitungsstetigkeit.
 
@@ -5251,7 +5251,7 @@ Feuer breitet sich jeden zehnten Materieschritt aus, also ungefähr einmal pro S
 
 *Beweis.* Sei $B_n$ die Menge der Kacheln, die beim Beginn dieses Durchlaufs brennen. Die Suche prüft nur gespeicherte Zustände aus diesem Anfangsbild. Sie kann für eine Kachel außerhalb von $B_n$ eine Änderung vormerken, schreibt diese aber erst nach dem vollständigen Durchlauf. Eine neu vorgemerkte Kachel ist somit während derselben Suche keine Quelle.
 
-Jede neu entzündete Kachel muss direkt an eine Quelle aus $B_n$ grenzen. Entlang eines durchgehenden, eine Kachel breiten Brennstoffstreifens kann die Front daher pro Durchlauf höchstens einen Zellschritt, also 16 Weltpixel, vorrücken. Erst im folgenden Durchlauf darf die neue Kachel selbst eine weitere entzünden. $\\square$
+Jede neu entzündete Kachel muss direkt an eine Quelle aus $B_n$ grenzen. Entlang eines durchgehenden, eine Kachel breiten Brennstoffstreifens kann die Front daher pro Durchlauf höchstens einen Zellschritt, also 16 Weltpixel, vorrücken. Erst im folgenden Durchlauf darf die neue Kachel selbst eine weitere entzünden. ∎
 
 Die Entzündung von Öl ist ein eigener, sofortiger Ausbruch auf acht Nachbarn und folgt dieser Schranke nicht. Fehlender Brennstoff, Ablauf und konkurrierende Zustände können die gewöhnliche Front verlangsamen oder anhalten.
 
@@ -5291,7 +5291,7 @@ dieselbe Abbildung, die auch \`passageNear()\` verwendet. \`Level::landed\` spei
 
 *Beweis der ersten Aussage.* Nach der Ankunft gilt $L=1$: entweder durch den Standardwert der neuen Ebene oder durch die Zuweisung in \`through()\`. Fall 2, der einzige selbsttätige Wechsel, verlangt dagegen $L=0$. Nur Fall 1 setzt das Bit auf null, und sein Auslöser ist $u\\notin\\Pi_\\ell$. Eine Prüfung außerhalb der Durchgangskacheln muss also dazwischenliegen.
 
-*Beweis der zweiten Aussage.* Hat ein Tastenweg im laufenden Schritt bereits gewechselt, sieht \`step()\` die neue Ebene mit $L=1$. Die drei Fälle schließen einander aus; \`step()\` kann \`through()\` höchstens einmal aufrufen. $\\square$
+*Beweis der zweiten Aussage.* Hat ein Tastenweg im laufenden Schritt bereits gewechselt, sieht \`step()\` die neue Ebene mit $L=1$. Die drei Fälle schließen einander aus; \`step()\` kann \`through()\` höchstens einmal aufrufen. ∎
 
 **Folgerung (Mindestweg für eine Rückkehr).** Die Ankunft setzt den Helden auf $(16w_x+8,\\ 16w_y+12)$. Dann ist $u=(w_x,w_y)$, denn $\\lfloor(16w_y+8)/16\\rfloor=w_y$. Liegt am Zielort selbst ein Durchgang, wie bei einem Höhlenmund und seinem Tageslicht unten oder bei beiden Enden einer Treppe, muss der Held zuerst die Kachel verlassen. Waagerecht trennen ihn $8$ Pixel von jedem Rand. Senkrecht liegt $y-4=16w_y+8$ ebenfalls $8$ Pixel von beiden Rändern entfernt. Eine Rückkehr verlangt also mindestens $8$ Pixel Weg hinaus und einen Schritt zurück. Die Marke wirkt wie eine Hysterese der Breite einer halben Kachel. Dieselbe Überlegung zeigt, dass ein geladener Spielstand auf einem Höhlenmund keinen Wechsel auslöst.
 
@@ -5328,7 +5328,7 @@ Die umgekehrte Dreiecksungleichung kombiniert beide Grenzen:
 $$\\|m_a-m_b\\|\\ge\\|s-m_a\\|-\\|m_b-s\\|
 \\ge12-3\\sqrt2.$$
 
-Der Notfallzweig ohne Abstandsprüfung setzt nur den ersten Mund einer Zelle. $\\square$
+Der Notfallzweig ohne Abstandsprüfung setzt nur den ersten Mund einer Zelle. ∎
 
 Vor der Änderung galt die Schranke $12$; die Verschiebung kostet also höchstens $3\\sqrt2\\approx4{,}24$ Kacheln Abstand. Für Münder verschiedener Zellen machte schon die alte Regel keine Aussage. *Beobachtung, kein Beweis.* Mit derselben Saat sind nun $63$ von $718$ Mündern Bögen ($8{,}8\\,\\%$). Unter den übrigen $655$ fallen $337$ auf Gruben und $318$ auf Baue. Unter der Annahme eines fairen Paritätsbits erwartet man $327{,}5$ Gruben mit Standardabweichung $\\sqrt{655}/2\\approx12{,}8$. Die Abweichung beträgt also etwa $0{,}74$ Standardabweichungen.
 
@@ -5344,7 +5344,7 @@ $\\mathcal F\\cap\\{4f,\\,4f+1\\}=\\{4f+k:\\ k<\\mathrm{found}(f)\\}.$
 
 $$k=\\mathrm{found}(f),\\qquad r=4f+k.$$
 
-Nach Induktionsannahme sind $4f,\\dots,4f+k-1$ bereits vorhanden und $4f+k$ ist das kleinste fehlende Fragment dieses Gründers. Das Einfügen verlängert also sein Präfix um genau eins; die Präfixe aller anderen Gründer bleiben gleich. $\\square$
+Nach Induktionsannahme sind $4f,\\dots,4f+k-1$ bereits vorhanden und $4f+k$ ist das kleinste fehlende Fragment dieses Gründers. Das Einfügen verlängert also sein Präfix um genau eins; die Präfixe aller anderen Gründer bleiben gleich. ∎
 
 Daraus folgt: Die Reihenfolge der Fragmente bleibt erhalten, gleich ob der Held eine Tafel oder eine Gruft liest. Die Meldung, dass ein Grab erwacht, erscheint für jeden Gründer genau einmal, nämlich beim Übergang von $\\mathrm{found}=1$ zu $2$. Kein Gründer erhält mehr als $M$ Fragmente. *Grenze.* \`Campaign::load()\` nimmt jede Zeile \`fragment r\` mit $0\\le r<64$ an; ein von Hand bearbeiteter Spielstand liegt außerhalb der Voraussetzung.
 
@@ -5356,11 +5356,11 @@ Hier ist $\\mathbf c_f$ der Mittelpunkt des Sitzes von Gründer $f$ in Weltpixel
 
 *Beweis der Zuordnung.* Der lineare Durchlauf ersetzt den bisherigen Sieger nur bei einem echt kleineren Abstand $d<\\text{near}$. Bei gleichen Abständen bleibt daher der zuerst betrachtete, kleinere Index Sieger.
 
-*Beweis der Schranke.* Beim Lesen in der Tiefe speichert \`read()\` den Zellschlüssel $(c_x,c_y)$ in \`epitaphs\`. Danach liefert \`readable()\` für denselben Schlüssel $-1$. Der Schlüssel wird auch als Zeile \`epitaph cx cy\` gespeichert. Somit trägt jede Gruft höchstens einmal bei. Nach Satz 9 kann Gründer $f$ insgesamt höchstens $M$ Fragmente erhalten. Summiert über $F$ Gründer ergibt das höchstens $MF\\le2\\cdot8=16$, unabhängig von der Zahl der Hallen. $\\square$
+*Beweis der Schranke.* Beim Lesen in der Tiefe speichert \`read()\` den Zellschlüssel $(c_x,c_y)$ in \`epitaphs\`. Danach liefert \`readable()\` für denselben Schlüssel $-1$. Der Schlüssel wird auch als Zeile \`epitaph cx cy\` gespeichert. Somit trägt jede Gruft höchstens einmal bei. Nach Satz 9 kann Gründer $f$ insgesamt höchstens $M$ Fragmente erhalten. Summiert über $F$ Gründer ergibt das höchstens $MF\\le2\\cdot8=16$, unabhängig von der Zahl der Hallen. ∎
 
 **Lemma (Unabhängigkeit von der Ebene).** \`Campaign::history()\` liefert dieselben Gründer, gleich auf welcher Ebene sie zum ersten Mal ausgewertet wird.
 
-*Beweis.* \`chronicle::write()\` liest Bauwerke über \`world::structureIn()\`; diese Abfrage hängt von der aktiven Ebene ab. \`history()\` ruft das Schreiben innerhalb eines \`world::Surfaced\` auf. Dieses Objekt aktiviert vor der Abfrage die Oberfläche und stellt beim Verlassen die vorige Ebene wieder her. Die Abfrage sieht daher unabhängig vom Ausgangsort dieselbe Oberflächenebene. $\\square$
+*Beweis.* \`chronicle::write()\` liest Bauwerke über \`world::structureIn()\`; diese Abfrage hängt von der aktiven Ebene ab. \`history()\` ruft das Schreiben innerhalb eines \`world::Surfaced\` auf. Dieses Objekt aktiviert vor der Abfrage die Oberfläche und stellt beim Verlassen die vorige Ebene wieder her. Die Abfrage sieht daher unabhängig vom Ausgangsort dieselbe Oberflächenebene. ∎
 
 Vor dieser Fassung hätte eine erste Auswertung unter der Erde keine Bauwerke gefunden. Eine leere Chronik wäre dann durch das Merkbit \`chronicled\` für die ganze Sitzung festgeschrieben worden.
 
@@ -5390,7 +5390,7 @@ $$\\begin{aligned}
  &=|A\\cap M|\\,|B\\cap M|.
 \\end{aligned}$$
 
-Für $M=\\{x\\}$ liegt $x$ wegen $A\\cap B=\\emptyset$ höchstens auf einer Seite; ein Faktor ist null. Aus $M\\subseteq M'$ folgen $T_M\\subseteq T_{M'}$ und $P_M\\subseteq P_{M'}$, also auch die behauptete Monotonie. $\\square$
+Für $M=\\{x\\}$ liegt $x$ wegen $A\\cap B=\\emptyset$ höchstens auf einer Seite; ein Faktor ist null. Aus $M\\subseteq M'$ folgen $T_M\\subseteq T_{M'}$ und $P_M\\subseteq P_{M'}$, also auch die behauptete Monotonie. ∎
 
 Beispiel: Ein Hale-Held mit fünf Leiden und dem Werkstoff Stein besitzt insgesamt sechs Auslöser. Mit sechs Werkstoffen der Ausrüstung als Wirkungen erreicht er $6\\cdot6=36$ Synergien. Für alle $256$ braucht er sämtliche $32$ Merkmale.
 
@@ -5408,7 +5408,7 @@ $P=\\frac{90\\cdot4\\,294\\,968}{2^{32}}=\\frac{386\\,547\\,120}{4\\,294\\,967\\
 
 $$2^{32}=1000\\cdot4\\,294\\,967+296.$$
 
-Die Reste $0,\\dots,295$ besitzen deshalb je $4\\,294\\,968$ Urbilder; alle anderen besitzen je $4\\,294\\,967$. Das Ereignis \`Rest < 90\` umfasst die 90 Reste $0,\\dots,89$, die sämtlich zur ersten Gruppe gehören. Seine Anzahl günstiger Hashwerte ist somit $90\\cdot4\\,294\\,968$. Division durch $2^{32}$ ergibt die Formel. $\\square$
+Die Reste $0,\\dots,295$ besitzen deshalb je $4\\,294\\,968$ Urbilder; alle anderen besitzen je $4\\,294\\,967$. Das Ereignis \`Rest < 90\` umfasst die 90 Reste $0,\\dots,89$, die sämtlich zur ersten Gruppe gehören. Seine Anzahl günstiger Hashwerte ist somit $90\\cdot4\\,294\\,968$. Division durch $2^{32}$ ergibt die Formel. ∎
 
 Die Abweichung von $0.09$ beträgt weniger als $2\\cdot10^{-9}$. **Nur wenn aufeinanderfolgende Prüfungen außerdem unabhängig sind**, ist die Zahl der Prüfungen bis zur ersten Fehde geometrisch verteilt. Dann gilt
 
