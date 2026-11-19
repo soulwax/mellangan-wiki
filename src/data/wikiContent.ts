@@ -119,7 +119,7 @@ For example, starting with an empty accumulator, a 25 ms frame runs one approxim
    Full analog gamepad integration provides variable-velocity stick steering with circular deadzones and debounced menu navigation. All on-screen button prompts and tutorial hints dynamically switch between keyboard glyphs and controller buttons based on the most recently used input device.
 
 6. **C-Backed Owning \`String\` & Arbitrary Precision Math (\`src/String.hpp\`, \`src/Math.hpp\`):**
-   Gameplay-owned strings use a compact \`String\` class with 15-byte inline SSO (\`char local[16]\`, \`realloc\`/\`free\` heap fallback), zero STL header bloat, and custom \`fmt::formatter<String>\` + \`std::hash<String>\` integrations. Alongside it, \`src/Math.hpp\` and \`src/Math.cpp\` provide arbitrary-precision \`BigInteger\` (base-$10^9$ limbs) and \`BigFloat\` (\`DEFAULT_SCALE = 34\`, half-to-even rounding) with deleted implicit floating-point constructors and a CSV benchmark harness (\`--math-benchmark\` + \`tools/benchmark_math.py\`).
+   Gameplay-owned strings use a compact \`String\` class with 15-byte inline SSO (\`char local[16]\`, \`realloc\`/\`free\` heap fallback), \`std::string\` / \`std::string_view\` adapters, and custom \`fmt::formatter<String>\` + \`std::hash<String>\` integrations. Alongside it, \`src/Math.hpp\` and \`src/Math.cpp\` provide arbitrary-precision \`BigInteger\` (base-$10^9$ limbs) and \`BigFloat\` (\`DEFAULT_SCALE = 34\`, half-to-even rounding) reserved for future large-number use and exercised by \`MathTest\` and \`--math-benchmark\`.
 
 \`\`\`c
 static Uint64 started[PROF_COUNT];
@@ -914,26 +914,18 @@ By wrapping C++ member functions in static function thunks (\`pass<&Enemy::think
 In a multi-threaded game engine, sharing a single global random number generator across threads causes massive cache line bouncing and ruins reproducibility.
 
 #### 1. Per-Entity Xorshift PRNG (\`Enemy::roll\`)
-Each monster instance maintains a private 32-bit Xorshift PRNG state (\`uint32_t seed\`):
-
-\`\`\`cpp
-uint32_t Enemy::roll() {
-  seed ^= seed << 13;
-  seed ^= seed >> 17;
-  seed ^= seed << 5;
-  return seed;
-}
-\`\`\`
+Each monster instance maintains a private 32-bit Xorshift PRNG state (\`uint32_t seed\`), exposed via \`float Enemy::roll()\` (\`src/entity/enemy/Enemy.hpp:247\`) returning a unit float in $[0, 1)$.
 
 Because each enemy mutates only its own internal seed, zero cross-thread cache bouncing occurs. Replaying a battle from identical starting seeds produces identical AI decisions.
 
 #### 2. Deferred Side Effects (\`Enemy::act\`)
 Worker threads are strictly prohibited from mutating global engine state (such as adding new entities to \`Level::entities\` or spawning loot drops).
 
-Instead, worker threads set deferred intent flags:
-- \`e.wantsFire = true;\`
-- \`e.wantsLeader = true;\`
-- \`e.spawnSpike = true;\`
+Instead, worker threads set deferred intent flags (\`src/entity/enemy/Enemy.hpp:168–171\`):
+- \`e.rallies\`
+- \`e.pounced\`
+- \`e.wantsLeader\`
+- \`e.wantsFire\`
 
 After the 4-barrier worker passes conclude, the main game thread executes a quick serial commit phase (\`Enemy::act()\`). The main thread inspects these flags, instantiates new projectiles in the slab pool, and adds dropped loot into the CSR grid safely, ensuring absolute memory integrity.
 `,
@@ -1034,7 +1026,7 @@ To intuitively understand how Compressed Sparse Row spatial partitioning works, 
 
 [ Mellangan's CSR Prefix-Sum Approach: The Continuous Conveyor ]
 1. Histogram Pass:
-   Workers count how many letters are addressed to each district (Districts 0 to 4095).
+   Workers count how many letters are addressed to each district (Districts 0 to 2303).
 2. Ledger Offset Pass (Prefix Sum):
    The manager computes running totals on a single ledger sheet.
    District 0 begins at slot 0. District 1 begins at slot (count of District 0).
@@ -1056,7 +1048,7 @@ $$\\text{Slice}(c) = \\big[ \\text{cellStart}[c],\\; \\text{cellStart}[c + 1] \\
 
 The active spatial domain is centered directly on the player, forming a toroidal-clamped uniform grid of dimension $\\text{GRID} \\times \\text{GRID}$ where each cell has a fixed physical extent of $\\text{CELL} \\times \\text{CELL}$ pixels:
 
-$$\\text{GRID} = 64, \\quad \\text{CELL} = 32\\text{ px}, \\quad \\text{Total Span} = 64 \\times 32 = 2048\\text{ px} \\times 2048\\text{ px}$$
+$$\\text{GRID} = 48, \\quad \\text{CELL} = 28\\text{ px}, \\quad \\text{Total Span} = 48 \\times 28 = 1344\\text{ px} \\times 1344\\text{ px}$$
 
 The origin of the grid shifts smoothly with the player's world position:
 
@@ -1240,23 +1232,24 @@ void Level::collide(double &x, double &y, float radius) const {
 3. **Singularity Protection:** If the entity is located precisely at the tile center ($d < 10^{-4}$), dividing by zero is avoided by pushing the entity directly downward: $(x_c, y_c + \\text{min})$.
 4. **Natural Corner Sliding:** Because obstacles are modeled with rounded circle physics rather than sharp Axis-Aligned Bounding Boxes (AABB), moving characters slide naturally around wall corners and doorways without getting snagged on single-pixel vertices.
 
-#### Bit-Packed Viewport Matrix (\`surfaces[]\`)
+#### Bit-Packed Viewport Matrix (\`surfaces[]\`) & Underground Rock/Flow (\`LevelSpace.cpp\`)
 
-During rendering, the screen viewport plus a 3-tile border (\`SOLID_W \\times SOLID_H\`) caches terrain properties into a compact array of single-byte flags \`uint8_t surfaces[SOLID_W * SOLID_H]\`:
+During rendering, the screen viewport plus a 4-tile border (\`SOLID_W = Screen::MAX_W / 16 + 8 = 48\`, \`SOLID_H = Screen::MAX_H / 16 + 8 = 30\`, \`Level.hpp:464–465\`) caches terrain properties into \`uint8_t surfaces[SOLID_W * SOLID_H]\`:
 
 \`\`\`
-+---------------+---------------+---------------+
-| Bits 7..5     | Bit 4         | Bits 3..2     | Bits 1..0     |
-| Unused/Spare  | Ramp / Stairs | Elevation Tier| Surface State |
-| (3 bits)      | (1 bit)       | (2 bits: 0..3)| (2 bits)      |
-+---------------+---------------+---------------+
++-------------+--------+---------------+----------------+---------------+
+| Bits 7..6   | Bit 5  | Bit 4         | Bits 3..2      | Bits 1..0     |
+| Unused      | Roped  | Ramp / Stairs | Elevation Tier | Surface State |
+| (2 bits)    | (1 bit)| (1 bit)       | (2 bits: 0..3) | (2 bits)      |
++-------------+--------+---------------+----------------+---------------+
 \`\`\`
 
 - **Bits \`[1..0]\` (\`f & 3\`):** Surface type: \`0\` = Dry ground, \`1\` = Liquid water, \`2\` = Frozen ice.
 - **Bits \`[3..2]\` (\`(f >> 2) & 3\`):** Elevation plateau tier ($0$ to $3$).
-- **Bit \`[4]\` (\`f & 16\`):** Ramp status: \`1\` = Walkable stair/ramp allowing elevation transition; \`0\` = Solid vertical cliff wall.
+- **Bit \`[4]\` (\`f & 16\`):** Ramp status: \`1\` = Walkable stair/ramp; \`0\` = Vertical cliff wall.
+- **Bit \`[5]\` (\`f & 32\`):** \`world::roped(x, y) << 5\` (\`LevelRender.cpp:85\`). In Deep-layer caves, unroped cliffs (\`!(ahead & 32)\`) return \`0.0f\` climb speed instead of \`0.35f\` (\`LevelSpace.cpp:263\`).
 
-By packing all environmental terrain data into 1 byte per tile, an entire viewport grid of $128 \\times 72$ tiles requires only $9{,}216$ bytes (approx 9 KB). This entire collision and rendering surface fits completely inside the CPU's primary L1 Data Cache (typically 32 KB to 48 KB per core), allowing physics routines to run with zero memory bus latency.
+At 1 byte per tile, \`48 × 30\` occupies only **1,440 bytes** inside L1 cache. Underground, \`Level::collide()\` runs a second circle-vs-AABB pass against \`rockAt()\`, and \`Level::quarry()\` rebuilds a \`ROCK_SPAN = 128\` rock grid plus a 4-way BFS \`flow[]\` steering field every \`0.25 s\` (\`flowAt()\`, \`slide()\`, \`steer()\` in \`LevelSpace.cpp:100–222\`).
 `,
     mermaidCharts: [
       {
@@ -1592,7 +1585,7 @@ Mellangan does not assign biomes by hardcoding coordinates. Instead, every world
 The world comprises **30 distinct biomes** (\`src/level/biome/Biome.hpp\`), including deep oceans, temperate continents, and the coastal shelf:
 
 \`\`\`
-Meadow, Forest, Blossom, Autumn, Heath, Barrow, Blossom,
+Meadow, Forest, Blossom, Autumn, Heath, Barrow, Starfall,
 Mire, Jungle, Savanna, Fungal, Taiga, Flood Plains, Moon,
 Ruins, Amber, Hollow, Snow, Crystal, Desert, Badlands,
 Salt, Glass, Storm, Ashlands, Ember, Tropic Sea, Cold Sea,
@@ -1843,7 +1836,7 @@ flowchart LR
     category: "world",
     interactiveComponent: "weather",
     summary:
-      "Continuous diurnal illumination, weather fronts (Rain, Snow, Storm, Sand), lightning arcs, and persistent snow/mud footprints.",
+      "Diurnal illumination ramps, eight weather fronts (Clear, Clouds, Rain, Storm, Snow, Fog, Dust, Ash), lightning arcs, and 384-slot snow/rain footprints.",
     sourceFiles: [
           "src/level/Sky.hpp",
           "src/level/Sky.cpp",
@@ -1864,32 +1857,21 @@ flowchart LR
 - **Wind Foliage Sway (\`sky.sway(x, y, time)\`):** Multi-segment props outside structures oscillate with phase-coherent wind waves scaled by storm intensity.
 
 #### 2. Persistent Footprints & Thunder Strikes
-- **\`Footprints.cpp\` Circular Ringbuffer:** Moving entities leave oriented footprint decals in snow, mud, sand, and shallow water. Each footprint is stamped into a contiguous 256-slot ringbuffer:
+- **\`Footprints.cpp\` Circular Ringbuffer:** Moving entities leave footprints on snow (\`sky.snowy\`) or wet rain ground (\`sky.laid == Front::Rain && sky.cover > 0.35f\`), stored in a contiguous **384-slot** ringbuffer (\`std::array<Print, 384>\`):
 \`\`\`cpp
-struct Footprint {
-    float x, y, angle;
-    float age, maxAge;
-    bool isRight;
+struct Print {
+    float x, y, age;
+    bool snow;
 };
 \`\`\`
-Footprints fade linearly over time. Wet weather fronts (rainstorms, blizzards) apply an accelerated erosion multiplier:
-$$\\text{decayRate} = \\text{baseRate} \\times \\text{weatherDecayMultiplier}$$
+Rain footprints fade linearly over a fixed \`9 s\` window (\`1 - pr.age / 9\`); snow footprints do not time-decay (\`fade = 1\`) and persist until \`sky.snowy(tx, ty)\` becomes false.
 - **\`Thunder.cpp\`:** Storm fronts periodically charge localized lightning strikes, rendering jagged procedural \`Arc\` bolts, illuminating the entire offscreen lightmap with an HDR flash, and triggering delayed acoustic thunder rolls.
 
-#### 3. Nocturnal Omens (\`Night.cpp\`)
-At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **Omen** (\`OMENS[omen]\`) that alters nocturnal rules and awards a permanent score handicap multiplier, culminating in Blood Moon surges and the final Dawn survival threshold.
+#### 3. Nocturnal Omens & Diurnal Illumination (\`Night.cpp\`)
+At the start of 85% of runs (\`rng.chance(0.85f)\`), \`Level\` rolls a global **Omen** (\`OMENS[omen]\`) that alters nocturnal rules and awards a permanent score handicap multiplier. Rather than a 24-hour trigonometric clock, \`src/level/Night.cpp:32–57\` alternates \`dayLength\` and \`nightLength\` phases: \`Night::daylight()\` ramps smoothly down over \`20 s\` at dusk and back up quadratically (\`d * d\`) over \`150 s\` approaching dawn.
 
-#### 4. The 24-Hour Diurnal Illumination Equation
-The celestial solar/lunar arc is evaluated as a continuous trigonometric angle:
-$$\\theta(t) = \\frac{t - 6}{24} \\times 2\\pi$$
-Ambient light is smoothly interpolated across four distinct chromatic keyframes:
-- **Dawn (05:00 to 08:00):** Warm rose and peach hues ($65\\%$ ambient luminance) with elongated westward ground shadows.
-- **Daylight (08:00 to 17:00):** Clear emerald and azure sunlight ($100\\%$ ambient luminance) with compact vertical shadows.
-- **Dusk (17:00 to 20:00):** Fiery amber and deep crimson tones ($60\\%$ ambient luminance) with eastward shadows.
-- **Night (20:00 to 05:00):** Nocturnal indigo ($25\\%$ ambient baseline), revealing player lantern cones and dynamic lightfield casters.
-
-#### 5. Campaign Weather Combat & Movement Effects (\`Weather.cpp\`)
-In Campaign mode on the surface, active weather fronts (\`WEATHERS[FRONTS]\` in \`src/level/sky/Weather.cpp\`) scale hero movement (\`pace\`), reduce foe detection (\`sight\`), and temper elemental burn, chill, and poison damage when \`sky.amount >= 0.3f\` (named directly above the minimap HUD). Gear resistance cancels the movement penalty via \`ward = clamp(p.status.resist[d.ward] / 0.5f, 0, 1)\`:
+#### 4. Eight Weather Fronts (\`Fronts.hpp\`) & Campaign Weather Effects (\`Weather.cpp\`)
+\`src/level/sky/Fronts.hpp\` defines **8** fronts: \`Clear\`, \`Clouds\`, \`Rain\`, \`Storm\`, \`Snow\`, \`Fog\`, \`Dust\`, and \`Ash\`. In Campaign mode on the surface, the six active fronts (\`WEATHERS[FRONTS]\` in \`src/level/sky/Weather.cpp\`) scale hero movement (\`pace\`), reduce foe detection (\`sight\`), and temper elemental burn, chill, and poison damage when \`sky.amount >= 0.3f\` (named directly above the minimap HUD). Gear resistance cancels the movement penalty via \`ward = clamp(p.status.resist[d.ward] / 0.5f, 0, 1)\`:
 
 | Front | Hero Pace | Foe Sight | Burn / Chill / Poison Temper | Cancelling Gear Ward |
 | :--- | :--- | :--- | :--- | :--- |
@@ -2222,12 +2204,13 @@ There are 32 pre-created effect streams. An effect has a shared minimum gap betw
 
 The selection uses start time, not sound category or priority. Music and ambient beds have separate streams and do not occupy the 32 effect slots. An empty input queue is SDL's reported queue state, not a guarantee about every sample already buffered downstream.
 
-#### Music, weather and gain
+#### Music, weather, biome beds & culture audio
 
-- Six Ogg tracks (night, campaign, menu, caves, boss and hearth) are decoded at initialization. \`Game::score()\` chooses a track based on mode and location, and \`Sound::tick()\` fades out before changing the stream format and track, then fades in. The current track is refilled while music is not hushed.
-- Rain, wind and five place beds (forest, marsh, frost, surf and cave) use separate looping streams. \`Sound::ambience()\` sets weather targets, while \`Sound::places()\` sets place targets from clamped weights; rain and wind peaks are 0.20 and 0.14. Each tick moves the current gain 2% toward its target. Once a silent target fades below 0.002, the stream queue is cleared.
-- \`Sound::mix()\` sets the device master gain and the music stream gain. Effects use the effect gain when played; the next ambience target uses the ambience gain. Mute sets the device gain to zero and restores the stored master gain when toggled back.
-- Some callers gate sound by visibility, such as \`Enemy::voice()\`. \`Sound::play()\` itself has no listener position or distance attenuation parameter.
+- **12 Lazy-Decoded Ogg Tracks (\`TRACKS = 12\`):** \`night\`, \`campaign\`, \`menu\`, \`caves\`, \`boss\`, \`hearth\`, \`zoktor\`, plus **5 day music moods** (\`fen\`, \`dune\`, \`drift\`, \`tide\`, \`vigil\`). \`loadMusic()\` verifies existence via \`pak::exists()\` and decodes only the initial track; \`Sound::pump()\` decodes the wanted track asynchronously via \`std::async\` on demand and unloads unused tracks.
+- **Mood Hold, Zoktor & Festivals:** In Campaign daylight, \`Level::mood()\` selects the dominant mood from \`GroundBlend\`, and \`Game::conduct()\` holds calm mood changes for \`MOOD_HOLD = 20 s\` (frozen while fighting). Talking to Zoktor immediately plays \`Sound::ZOKTOR\`, and standing inside an active culture festival swaps calm music to match the rite's mood via \`Sound::feast()\`.
+- **11 Biome Beds & 10 Culture Camp Beds:** Rain, wind, **11 place beds** (\`forest\`, \`marsh\`, \`frost\`, \`surf\`, \`cave\`, plus \`meadow\`, \`desert\`, \`ember\`, \`barrow\`, \`moon\`, \`storm\`, scaled at night via \`AFTER_DARK[]\`), and **10 culture camp beds** (\`Sound::folk()\`, peak \`0.07f\`) run on separate looping streams. Camps also trigger daily greet cues (\`Sound::greet\`) and festival rite cues (\`Sound::rite\`, \`CAMP_GAP = 30 s\`).
+- **Deterministic Pitch Jitter:** \`Sound::play()\` draws pitch variation from its own \`thread_local Rng jitter{0x5EED50D5ull}\` so audio playback timing never touches the simulation's deterministic \`rng\`.
+- \`Sound::mix()\` sets the device master gain and music stream gain. Mute sets device gain to zero and restores master gain when toggled back. \`Sound::play()\` has no listener position or distance attenuation parameter (callers such as \`FoeVoice.cpp\` compute linear falloff \`1 - dist / 420\` before calling \`play()\`).
 
 #### One-shot clip playback
 
@@ -2257,9 +2240,9 @@ flowchart TD
     Play["Sound::play(volume, pitchJitter, pitch)"]:::sfx
     Gate["Per-effect gap<br/>now - last < gap * 1000 -> Ignore"]:::sfx
     Scan["Scan voices[0..31]<br/>Find Queued == 0 OR Min(voiceStarted[i])"]:::mix
-    Ratio["SDL_SetAudioStreamFrequencyRatio<br/>pitch * (1 + rng(-jitter, +jitter))"]:::mix
-    Beds["Weather Beds (rain, wind)<br/>b.gain += (b.want - b.gain) * 0.02f"]:::mix
-    Vorbis["Music tracks<br/>menu, night, campaign, caves, boss, hearth"]:::mix
+    Ratio["SDL_SetAudioStreamFrequencyRatio<br/>pitch * (1 + jitterRng(-jitter, +jitter))"]:::mix
+    Beds["Weather + 11 Biome + 10 Culture Beds<br/>b.gain += (b.want - b.gain) * 0.02f"]:::mix
+    Vorbis["12 Lazy Async Ogg Tracks<br/>6 core + zoktor + 5 day moods"]:::mix
     Device["SDL_AudioDeviceID<br/>Hardware Output"]:::out
 
     Play --> Gate --> Scan --> Ratio --> Device
@@ -2313,7 +2296,7 @@ Mellangan requires:
 - **LunarG Vulkan SDK:** Provides the Vulkan headers/loader and **\`slangc\`**, which compiles \`res/shaders/*.slang\` into SPIR-V (\`.spv\`) at build time. On Windows, \`CMakeLists.txt\` automatically detects \`C:/VulkanSDK/*\` even if \`VULKAN_SDK\` is not set in your environment.
 - **Python 3, Pillow & \`uv\`:** Used by \`tools/make_assets.py\` and \`tools/doteshi_assets.py\` to bake the deterministic atlas and verify pixel hashes in \`tools/source/doteshi/doteshi.lock.json\`.
 - **Clang Tooling (\`clang-format\` & \`clang-tidy\`):** Orchestrated by \`tools/lint.py --changed\` (or \`cmake --build build --target lint\`) with \`.clang-format\`, \`.clang-tidy\`, and \`.clangd\`.
-- **Content Verification:** Pass \`--content-report\` or run \`--test\` to validate all \`KINDS[]\` data tables (\`resource\`, \`fact\`, \`person\`, \`exchange\`) and mode consistency. Note that camera zoom via the mouse wheel is restricted to \`--dev\` mode (normal play uses the wheel strictly for scrolling the campaign journal).
+- **Content Verification & Packaging:** Pass \`--content-report\` (writes Markdown tables, key ledger, and German glossary audit to \`build/content/\`) or run \`--test\` to validate all six \`KINDS[]\` tables (\`resource\`, \`fact\` \`qf.*\`, \`person\`, \`exchange\` \`x.*\`, \`formula\` \`f.*\`, \`piece\` \`p.*\`) and mode consistency. Release builds bundle \`res/\` into an encrypted \`data.pak\` via \`MellanganApp --pack <dir>\`. Camera zoom via the mouse wheel is restricted to \`--dev\` mode.
 
 \`\`\`bash
 git clone --recurse-submodules https://github.com/soulwax/Mellangan.git
@@ -2322,7 +2305,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --config Debug --parallel
 \`\`\`
 
-#### Step 2: The Golden House Rules (\`NOTES.md\`)
+#### Step 2: The Golden House Rules (\`extern/notes/NOTES.md\`)
 Every pull request or task packet must obey five non-negotiable conventions:
 1. **Pragmatic "C with Classes":** Use plain structs, fixed arrays, and direct loops where they fit; use classes for clear ownership and virtual extension points (\`SpriteObject\`, \`Entity\`, \`Mob\`, \`Upgrade\`, \`Goal\`, \`Biome\`).
 2. **Submodule Boundaries:** Only \`extern/Vulkan2D\` and \`extern/wiki\` may be modified when needed. Treat \`extern/entt\`, \`extern/spdlog\`, and \`extern/stb\` as strictly read-only.
@@ -2989,23 +2972,29 @@ Start with \`--test\` for code behavior. Use a visual view when pixels or layout
    * **macOS (Apple Silicon):** Native arm64 Clang build with validation layers.
    All three environments execute \`--test\` headlessly without requiring a physical GPU.
 
-#### Writing a Deterministic Unit Test (\`src/test/\`)
+#### Writing & Filtering Deterministic Unit Tests (\`src/test/Test.cpp\`)
+
+All **233** test cases are registered as rows of \`CASES[]\` in \`src/test/Test.cpp\` (declared in \`src/test/Tests.hpp\`), using standard \`<cassert>\` (\`#undef NDEBUG\` at the top of \`Test.cpp\`):
+- \`MellanganApp --test\`: Runs the entire suite and prints \`ALL TESTS PASSED\`.
+- \`MellanganApp --test <filter>\`: Runs only tests matching a comma-separated case-insensitive substring filter.
+- \`MellanganApp --test-list\`: Prints every registered test name.
+- \`MellanganApp --test-times\`: Profiles per-test durations and prints the top-15 slowest cases.
 
 \`\`\`cpp
-#include "test/Test.hpp"
+#include "test/Tests.hpp"
+#include <cassert>
 #include "level/Level.hpp"
 #include "entity/enemy/Enemy.hpp"
 
 void testCrowdPush() {
   Level level;
   level.seed(1337);
-  // Spawn two overlapping enemies and verify soft-body relaxation
   Enemy *a = level.spawn<Enemy>(EnemyKind::Wolf, 100, 100);
   Enemy *b = level.spawn<Enemy>(EnemyKind::Wolf, 101, 100);
   level.buildGrid();
   level.push();
   level.settle();
-  test_assert(a->x != b->x, "Mobs must push apart deterministically");
+  assert(a->x != b->x);
 }
 \`\`\`
 `,
@@ -3018,9 +3007,9 @@ flowchart LR
     classDef sim fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef pass fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Run["MellanganApp --test<br/>runTests() (#undef NDEBUG)"]:::init
+    Run["MellanganApp --test [filter]<br/>runTests() (#undef NDEBUG)"]:::init
     PoolTest["testPoolAllocAndFree() &<br/>testPoolConcurrency() (8 Threads)"]:::sim
-    SimSuites["27 Deterministic Gameplay Suites<br/>Arsenal, Biomes, Classes, Combat, Traits"]:::sim
+    SimSuites["233 CASES[] Deterministic Tests<br/>--test-list | --test-times"]:::sim
     Shutdown["pool_shutdown()<br/>Reclaims All 64 KB Slabs Cleanly"]:::pass
 
     Run --> PoolTest --> SimSuites --> Shutdown
@@ -3075,16 +3064,16 @@ Mellangan constructs an infinite, seamless 2D world with multi-tier cliffs, ramp
 Because auto-tiling and morphological filtering query neighboring tiles \`(x + dx, y + dy)\` repeatedly, recomputing FBM noise per neighbor would be too slow. Instead, \`Biomes.cpp\` and \`Sites.cpp\` maintain three zero-allocation, direct-mapped spatial caches invalidated by \`noise_epoch\`:
 1. **\`TileMemo tiles[128 * 64]\`:** Indexed by \`(x & 127) | (y & 63) << 7\`. Packs 8 terrain properties into a single \`uint32_t bits\` word via \`MemoField { has, shift, mask }\`:
    - \`slot::biome\` (5 bits), \`slot::raw\` (5 bits), \`slot::dirt\` (1 bit), \`slot::rawDirt\` (1 bit), \`slot::rawWater\` (1 bit), \`slot::water\` (1 bit), \`slot::level\` (2 bits), \`slot::rawLevel\` (2 bits), plus \`float shade\` and \`float clump\`.
-2. **\`BlendNode blendMemo[64 * 64]\`:** Indexed on a 2-tile coarse lattice \`(x / 2 & 63) | (y / 2 & 63) << 6\`, caching the 3-biome \`GroundBlend\` weights.
-3. **\`Slot cache[256]\` (\`Sites.cpp\`):** Indexed by \`(rx & 15) | (ry & 15) << 4\`, caching the rolled \`Structure\` per \`20×20\` tile region (\`REGION = 20\`).
+2. **\`fieldMemo[64 * 64]\` & \`blendMemo[64 * 64]\` (\`Biomes.cpp\`):** Indexed on a 2-tile coarse lattice \`(x / 2 & 63) | (y / 2 & 63) << 6\`, caching \`fieldNode\` (5×5 tent kernel) and \`blendNode\` (domain-warped 14×14 adaptive \`Reaches\` widths \`WIDE = 12.0f .. NARROW = 3.5f\`).
+3. **\`Slot cache[4096]\` (\`Sites.cpp\`):** Indexed by \`(rx & 63) | (ry & 63) << 6\`, caching rolled \`Structure\` and \`BiomeSite\` records per region.
 
 ---
 
-#### Stage 2: 3×3 Majority-Vote Biome Smoothing & 5×5 Separable Kernel Blending (\`Biomes.cpp\`)
+#### Stage 2: 3×3 Majority-Vote Biome Smoothing & Adaptive Domain-Warped Blending (\`Biomes.cpp\`)
 1. **Speckle Elimination (\`biomeAt(x, y)\`):**
    \`rawBiome(x, y)\` evaluates climate fields (\`biomeForLocation\`). Then \`biomeAt(x, y)\` tallies a **3×3 Moore-neighborhood majority vote** (\`votes[BIOME_COUNT]\`, breaking ties in favor of the center tile \`own\`) so isolated 1-tile biome islands never occur.
-2. **Coarse 5×5 Separable Tent Kernel (\`blendNode\`):**
-   At every even lattice coordinate \`(x0, y0)\`, \`blendNode\` samples a 5×5 grid of even tiles (\`ix, iy in -2..2\`, step 2) weighted by \`K[5] = {1, 2, 3, 2, 1}\` (\`K[ix + 2] * K[iy + 2]\`). \`compactBlend\` keeps the **top 3 biomes** and normalizes their weights to sum to \`1.0\`.
+2. **Two-Level Blending (\`fieldNode\` & \`blendNode\`):**
+   \`fieldNode\` evaluates the 5×5 tent kernel \`K[5] = {1, 2, 3, 2, 1}\`, while \`blendNode\` applies domain warping (\`WARP = 7.0f\`) over a \`14×14\` (\`SIDE = 14\`) grid using per-biome-pair adaptive \`Reaches\` widths (\`WIDE = 12.0f\` down to \`NARROW = 3.5f\`) and compacts to the **top 3 biomes** normalized to \`1.0\`.
 3. **Hermite Bilinear Interpolation (\`groundBlend(x, y)\`):**
    For any tile \`(x, y)\`, fractional offsets \`fx, fy\` inside the \`2×2\` cell are smoothstepped via \`fx = fx * fx * (3 - 2 * fx)\` and bilinearly interpolated across the 4 surrounding \`blendNode\` corners.
 
@@ -3196,15 +3185,15 @@ flowchart TD
 ### How the Renderer Works in Context of Our Game
 
 Mellangan's rendering architecture (\`Screen\`, \`LevelRender\`, \`LightField\`, and \`Vulkan2D\`) is purpose-built around a **dual-resolution multi-pass frame graph**:
-1. The **World & Lighting Passes** render into compact, pixel-art-resolution offscreen targets (\`vw × vh\`, dynamically sized between \`480×270\` and \`640×360\` inside \`640×360\` GPU textures \`Screen::world\` and \`Screen::light\`).
-2. The **Composite & GUI Pass** upscales and composites \`world × light\` onto the window swapchain via \`res/shaders/post.slang\`, and then renders the HUD, bitmap typography, and menus directly at **native window pixel resolution** using an integer-snapped UI unit \`u\`.
+1. The **World & Lighting Passes** render into offscreen targets (\`Screen::world\` and \`Screen::light\`), allocated at \`ceil(MAX_W * FARTHEST) × ceil(MAX_H * FARTHEST)\` (**\`3414×1920\`**) so camera zoom (\`--dev\`) fits cleanly without reallocating textures.
+2. The **Composite & GUI Pass** upscales and composites \`world × light\` onto the window swapchain via \`res/shaders/post.slang\`, and then renders the HUD, bitmap typography, and menus directly at **native window pixel resolution** using an integer-snapped UI unit \`u\` (with optional \`crisp\` integer-snap scaling in \`Screen::beginGui\`).
 
 ---
 
-#### 1. The 7 GPU Textures & Pre-Baked White Silhouette (\`Screen::load\`)
+#### 1. The 9 GPU Textures & Pre-Baked White Silhouette (\`Screen::load\`)
 
-At startup, \`Screen::load(base)\` (\`src/gfx/Screen.cpp\`) initializes 7 \`VK2DTexture\` handles and 1 SPIR-V post-process shader:
-- **4 Asset Texture Sheets:** \`atlas\` (\`res/atlas.png\`), \`particles\` (\`res/particles.png\`, \`8×8\` cells), \`weather\` (\`res/weather.png\`), and \`font\` (\`res/font.png\`, \`8×16\` ASCII glyph grid).
+At startup, \`Screen::load(base)\` (\`src/gfx/Screen.cpp\`) initializes **9 \`VK2DTexture\` handles** and 1 SPIR-V post-process shader:
+- **6 Asset Texture Sheets:** \`atlas\` (\`res/atlas.png\`), \`alternate\` (\`res/alt_atlas.png\`), \`achievements\` (\`res/achievements.png\`), \`particles\` (\`res/particles.png\`, \`8×8\` cells), \`weather\` (\`res/weather.png\`), and \`font\` (\`res/font.png\`, \`8×16\` ASCII glyph grid).
 - **1 CPU-Generated White Silhouette Texture (\`silhouette\` via \`Screen::loadSilhouette\`):**
   Instead of switching GPU pipelines or binding a constant buffer every time one of 500 enemies flashes white on hit, \`Screen::loadSilhouette\` loads \`res/atlas.png\` into CPU memory at startup and bitwise-ORs every 32-bit RGBA texel with \`0x00FFFFFFu\`:
 \`\`\`cpp
@@ -3213,7 +3202,7 @@ for (int i = 0; i < iw * ih; i++)
   texel[i] |= 0x00FFFFFFu;
 \`\`\`
   This preserves the exact alpha channel of every sprite in the atlas while setting RGB to pure white! During \`Screen::flash\`, the renderer draws the normal sprite from \`atlas\` and immediately draws the identical UV rectangle from \`silhouette\` with vertex alpha \`prev.a * std::min(amount, 1.0f)\`.
-- **2 Offscreen Render Targets (\`MAX_W = 640, MAX_H = 360\`):** \`world\` and \`light\`.
+- **2 Offscreen Render Targets (\`3414×1920\`, \`FARTHEST\`-scaled):** \`world\` and \`light\`.
 
 ---
 
@@ -3237,7 +3226,7 @@ In \`Game::render()\`, Pass 1 constructs the offscreen light map inside \`Screen
    - Populate \`surfaces[SOLID_W * SOLID_H]\` with bit-packed water (\`1\`), ice (\`2\`), elevation \`heightAt << 2\`, and \`isRamp << 4\`, and set \`waterInView\`.
    - Query \`world::propAt(x, y, p)\`, swap prop sprites to frosted variants where \`sky.snowAt(x, y)\` is true, compute wind sway \`sky.sway(p.x, p.y, time)\` for multi-part trees, and record solid prop collision radii into \`solids[]\`.
 3. **Additive Glows & Shadow Casters (\`Screen::glow\` & \`LightField::add\`):**
-   The player's torch, kindled shrines, projectiles, particles, and luminous props stamp radial \`atlas::Light\` sprites into \`Screen::light\` (decrementing \`lightBudget\`) and register up to \`LightField::MAX = 16\` shadow-casting point lights (\`x, y, reach, strength\`).
+   The player's torch, kindled shrines, projectiles, particles, and luminous props stamp radial \`atlas::Light\` sprites into \`Screen::light\` (decrementing \`lightBudget\`) and register up to \`LightField::MAX = 8\` shadow-casting point lights (\`x, y, reach, strength\`).
 
 ---
 
@@ -3309,7 +3298,7 @@ flowchart TD
     subgraph Pass_1_Light ["Pass 1: Screen::light Offscreen Target (PROF_LIGHT)"]
         BeginL["Screen::beginLight(ambient)<br/>Clear BLEND -> Switch to VK2D_BLEND_MODE_ADD (lightBudget = 240)"]:::light
         Scatter["Level::scatter(s)<br/>Build surfaces[] & solids[] + Collect Visible Props + Frost & Wind Sway"]:::light
-        Glows["Player, Night, Sky, Entities, Particles & Props<br/>Screen::glow() + LightField::add() (Up to 16 Shadow Casters)"]:::light
+        Glows["Player, Night, Sky, Entities, Particles & Props<br/>Screen::glow() + LightField::add() (Up to 8 Shadow Casters)"]:::light
         BeginL --> Scatter --> Glows
     end
 
@@ -3490,8 +3479,11 @@ The ordinary \`Saves::write()\` wrapper discards that return value. These steps 
 
 \`Saves::record()\` keeps up to six recent world records, moving the recorded world to the front, accumulating its run count, best time and dawn flag. Evicting the oldest record also calls \`erase()\` on its chart and sibling backup and temporary files.
 
-#### Achievements and Codex unlocks (\`src/meta/Feats.cpp\`)
-The \`FEATS\` table currently contains 64 achievements. Its predicates cover lifetime milestones, survival runs, classes, campaign acts, rescues, delves, founders and campaign endings. The Codex displays their names and hints across pages. Achievement flags are stored in a 64-bit field, and a compile-time assertion limits the table to 64 entries.
+#### Achievements, Campaign Codex Pages & Per-Campaign Lore (\`Feats.cpp\`, \`CodexMenu.cpp\`, \`Lore.cpp\`)
+The \`FEATS\` table contains **112 achievements** (\`FEAT_COUNT = 112\`, \`static_assert(... <= 128)\`), stored across two 64-bit fields (\`Codex::feats\` and \`Codex::feats2\`) alongside \`uint64_t wielded\` for tracking unveiled unique weapons (\`codex.txt\` \`version 2\`). In Campaign mode, \`CodexMenu\` appends four dedicated campaign pages: **Founders**, **Rune Words**, **Sagas** (30 chapters across 10 cultures), and **Factions** (earned standing, body regard, disposition band, and next unlocked service gate). Separately, \`src/campaign/Lore.cpp\` maintains a per-campaign \`lore::Book\` across 8 tables (\`Resource\`, \`Formula\`, \`Creature\`, \`Person\`, \`Faction\`, \`Place\`, \`Law\`, \`Dish\`) tracking \`SEEN\`, \`HANDLED\`, and \`KNOWN\` flags plus up to 3 pinned entries, saved as \`lore\` and \`pin\` lines in campaign saves.
+
+#### Encrypted Release Archive (\`data.pak\`, \`src/meta/Pak.cpp\`)
+Release packages bundle \`res/\` into a single encrypted \`data.pak\` archive built via \`MellanganApp --pack <dir>\` (\`MLPK\` v1 32-byte header, veiled phrase + build-time \`Salt.inc\` + stamp stretched across 16,384 ChaCha20 rounds, encrypted sorted index, per-file nonces, and 64-bit FNV integrity checksum). Startup mounts \`data.pak\` transparently via \`pak::mount()\`, falling back to loose \`res/\` files when no pack is present.
 
 #### Run Balancing Telemetry (\`runs.csv\` & \`tools/run_report.py\`)
 When run recording is permitted, the game reads \`runs.csv\`, replaces its header, adds a telemetry row and writes the resulting file through \`Saves::write()\`:
@@ -3524,7 +3516,7 @@ The five schemes define colors for warnings, damage, healing, comparison indicat
 \`PaletteTest.cpp\` models each alternative under a corresponding simulated vision matrix and compares selected color distances against the standard scheme. It tests item rarity separation, hurt versus heal, and warning versus a sample grass color. These checks help catch regressions in those comparisons; they do not establish readability for every scene, display or player.
 
 #### Controls and rebinding
-The controls menu saves 18 keyboard bindings and nine gamepad bindings in \`keys.txt\`. See **Input, Controls & Rebinding** for the fixed controls, conflict handling, analog stick behavior and prompt substitutions.
+The controls menu saves **23 keyboard bindings** and **10 gamepad bindings** in \`keys.txt\` (\`KEYS 2\` header). See **Input, Live Campaign Panels, Quickbar & Choice Badge** for defaults, live panel navigation, fixed controls, analog stick behavior and prompt substitutions.
 
 `,
     mermaidCharts: [
@@ -3684,11 +3676,11 @@ flowchart TD
   },
   {
     id: "goal-steering-catalog",
-    title: "24. The 16 AI Goal Primitives, Gait Kinematics & 39-Monster Plan Table",
+    title: "24. The 19 AI Goal Primitives, Gait Kinematics & 119-Monster Plan Table",
     category: "simulation",
     interactiveComponent: "goalai",
     summary:
-      "Complete mathematical breakdown of all 16 Goal subclasses in src/entity/enemy/ai/, Gait wave/weave modulation, V-formation pack following, and subterranean burrow state machines.",
+      "Complete mathematical breakdown of all 19 Goal subclasses in src/entity/enemy/ai/ (including Guard, Totem, Leap), Gait wave/weave modulation, V-formation pack following, and all 119 monster plans.",
     sourceFiles: [
           "src/entity/enemy/ai/Plans.cpp",
           "src/entity/enemy/ai/Approach.cpp",
@@ -3772,7 +3764,7 @@ On every tick until \`stop > 0 && s.dist < stop && e.cooldown <= 0\`, \`Approach
 ### 3. Preemptive Interrupt Goals (\`Falter\` & \`Hide\`)
 
 - **\`Falter(below = 0.3f)\` (\`ai/Falter.cpp\`):**
-  Attached to \`interrupts[0]\` on 19 monster plans. \`urgent()\` returns \`true\` once per enemy lifetime (\`!e.faltered\`) when \`e.hp < e.maxHp * 0.3f && s.dist < 160\`. \`start()\` sets \`e.faltered = true\`, and \`tick()\` backs away at \`-0.9x\` speed with a lateral sine weave for \`1.1s\`.
+  Attached to \`interrupts[0]\` on **62** monster plans (out of **119** entries in \`PLANS[]\` across **19** \`Goal\` subclasses, including \`Guard\`, \`Totem\`, and \`Leap\`). \`urgent()\` returns \`true\` once per enemy lifetime (\`!e.faltered\`) when \`e.hp < e.maxHp * 0.3f && s.dist < 160\`. \`start()\` sets \`e.faltered = true\`, and \`tick()\` backs away at \`-0.9x\` speed with a lateral sine weave for \`1.1s\`.
 - **\`Hide(range = 240)\` (\`ai/Hide.cpp\`):**
   Attached to \`EnemyKind::Ghost\`. Whenever \`e.aware && s.seen && s.dist < 240\`, \`Hide\` preempts \`OOZE\`, sets \`conceals() = true\`, and retreats at \`-0.6x\` speed until the player looks away (\`!s.seen\`) or distance exceeds \`240 * 1.3 = 312 px\`.
 
@@ -3859,13 +3851,13 @@ flowchart TD
     ],
     content: `### Item bases, Campaign pool, and Faction Exotics
 
-Equipment is built from a base in \`ItemBase.cpp\`. The three quality tiers are **Worn**, **Fine** and **Masterwork**; their quality-level offsets are 0, 18 and 36. Base eligibility and weighting depend on item level and game mode: **25 D&D-inspired Campaign bases** (\`ItemBase.campaignOnly = true\`, across weapons, shields, arcane implements, armour, and charms) and **15 named campaign relics** (\`UniqueDef::Mode::Campaign\`) stay strictly inside Campaign pools, while Survival-only uniques remain isolated in Survival. \`gamble(base, rng, campaign)\` and startup \`contentFaults()\` enforce this split automatically.
+Equipment is built from a base in \`ItemBase.cpp\`. The three quality tiers are **Worn**, **Fine** and **Masterwork**; their quality-level offsets are 0, 18 and 36. Base eligibility and weighting depend on item level and game mode: **26 Campaign-only bases** (\`ItemBase.campaignOnly = true\`, across weapons, shields, arcane implements, armour, charms, and \`Wayfarer Boots\`) and **17 named campaign relics** (\`UniqueDef::Mode::Campaign\`) stay strictly inside Campaign pools, while Survival-only uniques remain isolated in Survival. \`gamble(base, rng, campaign)\` and startup \`contentFaults()\` enforce this split automatically.
 
 Beyond standard drops, **16 Faction Exotic bases** (\`goods::EXOTICS[16]\` in \`src/item/loot/Goods.cpp\`) are crafted by their parent factions starting at reach 12 to 20 (including \`Ledger_Buckler\`, \`Barkweave\`, \`Crown_Tabard\`, \`Anvil_Shield\`, \`Wellkeeper's_Gourd\`, and \`Silverleaf_Cloak\`), and stocked alongside faction kin affixes (\`goods::mark\`). Unique weapons display their granted attack veiled as mystical runes until a hero equips the item once, permanently revealing its attack profile in tooltips thereafter.
 
 ### Affixes and rarity
 
-The affix registry contains **31 families: 14 prefixes and 17 suffixes**. Families do not all have the same number of tiers: for example, projectile count has three tiers and skills have two. Eligible affixes depend on the item and its level. Rare items request more affixes than magic items, but the generator can finish with fewer when it cannot find enough eligible choices.
+The affix registry (\`Affix.cpp\`) contains **49 families** (\`AFFIX_COUNT = 49\`): **31 ordinary families** (14 prefixes and 17 suffixes, \`AFFIX_ORDINARY = 31\`) plus **18 faction kin affixes** (11 prefixes and 7 suffixes). Families do not all have the same number of tiers: for example, projectile count has three tiers and skills have two. Eligible affixes depend on the item and its level. Rare items request more affixes than magic items, but the generator can finish with fewer when it cannot find enough eligible choices.
 
 Rarity is rolled in order: unique, rare, magic, then superior or normal. Each of the first three checks draws a new random number. If their respective thresholds are U, R and M, the initial probabilities are U, (1 − U)R and (1 − U)(1 − R)M. Of the remaining outcomes, one eighth is superior and seven eighths normal. Magic find uses diminishing returns for the unique and rare thresholds, while the magic threshold uses magic find directly. The explorer below shows these initial outcomes.
 
@@ -3915,13 +3907,13 @@ The inventory has **six equipment slots**: weapon, offhand, armour, two charms a
 
 ### Putting on and removing gear
 
-An item must fit the hero and its target slot. If the first charm slot is occupied and the second is empty, another charm goes into the second slot. Equipping into an occupied slot swaps the old item into the selected bag position. Implant changes have additional restrictions: the player must not be a changeling and must be in a safe zone; equipping an implant also increases suspicion. Removing equipment through the unequip action requires room in the bag.
+An item must fit the hero and its target slot. If the first charm slot is occupied and the second is empty, another charm goes into the second slot. Equipping into an occupied slot swaps the old item into the selected bag position. Implant changes (\`Player::implantable()\` in \`PlayerGear.cpp:44–47\`) require not being a changeling and either being in a safe zone or holding \`rune::KindredFlesh\` or \`boons::Kinship\`; equipping an implant also increases suspicion. Removing equipment through the unequip action requires room in the bag, and dropping an item beside a faction campfire gifts it to that camp. In Campaign mode, the **Pack** tab of the live docked panel pairs gear and the 32-slot bag with a filterable materials ledger and 4-slot quickbar.
 
 \`applyItem\` applies the base implicit, affixes and curse with a positive sign on equip and a negative sign on removal. Maximum-health changes also adjust current health: an increase adds health, while a decrease clamps current health to the new maximum. Items that grant an upgrade add levels up to the appropriate item tier; the player records the levels added by that item so removal can subtract them.
 
 ### Effects in combat
 
-Equipment stats feed into damage and on-hit effects in \`Enemy::hurt\`. Non-periodic hits can receive critical and other damage modifiers; eligible hits can also trigger effects such as burn, chill, poison, bleed, leech and shock. These effects depend on the attack source and the corresponding player stats, so an item description alone does not guarantee that every hit will trigger one.
+Equipment stats feed into damage and on-hit effects in \`Enemy::hurt\`. Non-periodic hits can receive critical and other damage modifiers; eligible hits can also trigger effects such as burn, chill, poison, bleed, leech and shock. Thorns retaliation is suppressed while weapons are stowed (\`!level->rules.holdFire\`, \`Enemy.cpp:434–435\`) so a stowed pacifist never kills by being bitten.
 
 ### Ground labels
 
@@ -3942,69 +3934,61 @@ Equipment stats feed into damage and on-hit effects in \`Enemy::hurt\`. Non-peri
   },
   {
     id: "biome-events-chart-hud",
-    title: "27. 26 Regional Biome Events, Paged RLE Fog-of-War Chart & HUD Ray-Clipped Edge Pointers",
+    title: "27. 30 Biome Events, Living Biomes, RLE Fog-of-War Chart & HUD Edge Pointers",
     category: "world",
     interactiveComponent: "gearevents",
     summary:
-      "Deterministic stateless Murmur3 scheduling for 26 regional BiomeEvents, sparse 32x32 paged fog-of-war Chart with horizontal scanline RLE coalescing, and asymmetric viewport ray-clipping in Hud::edge().",
+      "Deterministic Murmur3 scheduling for 30 biomes (plus 7 alternating hazard slots), living biome decals/sites/secrets/critters, sparse 32x32 paged RLE Chart, and HUD ray-clipping.",
     sourceFiles: [
           "src/level/BiomeEvents.hpp",
           "src/level/BiomeEvents.cpp",
           "src/level/Chart.hpp",
           "src/level/Chart.cpp",
+          "src/level/world/Sites.cpp",
+          "src/level/world/Secrets.cpp",
+          "src/level/Critters.cpp",
           "src/gui/Hud.cpp"
     ],
     content: `
-### 1. Deterministic Stateless \`BiomeEvents\` across All 26 Biomes (\`src/level/BiomeEvents.cpp\`)
+### 1. Deterministic Stateless \`BiomeEvents\` across All 30 Biomes (\`src/level/BiomeEvents.cpp\`)
 
-Every one of the 26 biomes (\`BIOME_COUNT = 26\`) has a signature periodic environmental event defined in \`EVENTS[BIOME_COUNT]\` (\`src/level/BiomeEvents.cpp\`). Rather than storing active event timers per chunk on the heap, \`BiomeEvents::schedule(seed, biome, epoch, rx, ry)\` computes each \`20 × 20\`-tile region's event window **purely as a stateless function of \`(seed, biome, epoch, rx, ry)\`** via a 32-bit Murmur3-style avalanche mixer \`mix(x)\`:
+All 30 biomes (\`BIOME_COUNT = 30\`: 16 core \`BIOME_MEADOW..BIOME_TAIGA\`, 10 expansion \`BIOME_SALT..BIOME_STARFALL\`, and 4 coastal \`BIOME_TROPIC_SEA..BIOME_COLD_BEACH\`) have a periodic event in \`EVENTS[BIOME_COUNT]\`, sized identically to \`BiomeEvents::handled[BIOME_COUNT]\`.
 
-\`\`\`cpp
-uint32_t mix(uint32_t x) {
-    x ^= x >> 16;
-    x *= 0x7FEB352Du;
-    x ^= x >> 15;
-    x *= 0x846CA68Bu;
-    x ^= x >> 16;
-    return x;
-}
-\`\`\`
-
-#### Regional Event Cadence, Warning Phase & Sanctuary Suppression
-- **Region Grid (\`20 × 20\` tiles = \`320 × 320 px\`):** The player's current region is \`rx = floor(player.x / 16) / 20\`, \`ry = floor(player.y / 16) / 20\`.
-- **Epoch Cadence (\`def.every\`):**
-  - **Core Biomes (\`0..15\`, \`Grassland\` through \`Void\`):** \`every = 48.0s\` per epoch.
-  - **Sub-Biomes (\`16..25\`, \`Oasis\` through \`Caldera\`):** \`every = 28.0s\` per epoch (faster micro-biome cadence).
-- **Deterministic Window within Epoch:**
-  - \`begins = epoch * def.every + 8.0f + float(h % uint32_t(def.every - 17.0f))\`
-  - \`ends = begins + 5.0f\` (\`5.0s\` active duration)
-  - **\`3.0s\` Telegraph Warning (\`t >= begins - 3 && t < begins\`):** Draws a pulsing telegraph ring and displays a directional banner:
-    - Beneficial boons (\`good = true\`, e.g. \`FAIRY RING\`, \`OASIS BLOOM\`, \`SPRING THAW\`, \`GOLD RUSH\`, \`STARFALL\`): **\`"<NAME> - STEP INSIDE"\`**
-    - Environmental hazards (\`good = false\`, e.g. \`SANDSTORM\`, \`BLIZZARD\`, \`LAVA BOMB\`, \`SPORE CLOUD\`, \`VOID RIFT\`, \`LOCUST SWARM\`): **\`"<NAME> - MOVE TO SAFETY"\`**
-- **Shrine Sanctuary Suppression:** Standing within **2 tiles** of any \`Tile::Shrine\` sets \`sanctuary = true\`, immediately suppressing regional biome events so shrine kindling and prayers are never interrupted by unavoidable environmental hazards.
+- **Region Grid (\`20 × 20\` tiles = \`320 × 320 px\`):** \`BiomeEvents::schedule(seed, biome, epoch, rx, ry)\` uses a stateless Murmur3 avalanche mixer \`mix(x)\`.
+- **Epoch Cadence (\`def.every\`):** Core biomes (\`0..15\`) use \`every = 48.0 s\`; expansion and coast biomes (\`16..29\`) use \`every = 28.0 s\`.
+- **Alternating Hazard Slots (\`HAZARDS[BIOME_COUNT]\`):** Seven previously boon-only biomes (Meadow, Forest, Blossom, Crystal, Fungal, Moon, Storm) now carry a paired hazard in \`HAZARDS[]\` (\`THE HIVE IS DISTURBED\`, \`A WIDOWMAKER FALLS\`, \`HAY FEVER\`, \`A CRYSTAL SINGS FLAT\`, \`THE CAPS BURST\`, \`A MOON-SHADOW PASSES\`, \`LIGHTNING WALKS THE STEPPE\`). \`epochAt()\` and \`startOf()\` alternate boon (even epochs) and hazard (odd epochs) across \`b.every + h.every\`.
+- **Shrine Sanctuary Suppression:** Standing within 2 tiles of any \`Tile::Shrine\` sets \`sanctuary = true\`, suppressing regional events.
 
 ---
 
-### 2. Sparse Paged Fog-of-War \`Chart\` & Scanline RLE Coalescing (\`src/level/Chart.hpp\`, \`src/level/Chart.cpp\`)
+### 2. Living Biomes: Decals, Usable Sites, Secrets & Critters (\`O11.5\` to \`O11.7\`)
 
-Because the world is infinite (\`int32_t\` tile coordinates), the exploration map (\`M\` / \`Tab\` overlay and top-right minimap) cannot allocate a dense 2D array. \`Chart\` implements a **sparse 2-level paged grid** with a 1-entry MRU page cache and **horizontal scanline Run-Length Encoding (RLE)** during rendering:
+Every surface biome populates its own small-scale world details via \`src/AtlasB.hpp\`:
+- **Ground Decals (\`Ground.cpp\`):** Two decorative decals per biome (\`DECALS[BIOME_COUNT][2]\`, drawn in \`FloorPainter.cpp\`), skipping roads, dirt, ramps, structures, sites, and ice.
+- **Usable Biome Structures (\`Sites.cpp\`):** 30 per-biome structures (\`SITES[BIOME_COUNT]\`, such as the meadow maypole, woodcutter's block, eel trap, windmill, and tide pole) placed via \`rollSite()\` and usable once per day with \`E\` (\`sites::use()\`) for materials, gold, healing, XP, or chart unveil, switching to their spent alt sprite until the next day.
+- **Hidden Biome Secrets (\`Secrets.cpp\`):** One hidden secret per \`CELL = 48\`-tile stretch, telegraphed by an unnatural arrangement of biome decals across 10 pattern shapes (\`Line\`, \`Ring\`, \`Spiral\`, \`Grid\`, \`Arrow\`, \`Star\`, \`Cross\`, \`Heart\`, \`Gap\`, \`Lone\`). Standing on the key tile and pressing \`E\` digs up the one-time reward (saved as \`secret <key>\`).
+- **Critters (\`Critters.cpp\`):** Stateless, draw-only small creatures (\`GRID = 6\`, max \`3\` on screen) with per-biome rows, day/night schedules, and six behavior verbs (\`Flee\`, \`Vanish\`, \`Dart\`, \`Bob\`, \`PlayDead\`, \`Sit\`) that never affect combat.
+
+---
+
+### 3. Sparse Paged Fog-of-War \`Chart\` & Scanline RLE Coalescing (\`src/level/Chart.hpp\`, \`src/level/Chart.cpp\`)
+
+Because the world is infinite (\`int32_t\` tile coordinates), the exploration map (\`M\` overlay and top-right minimap) implements a **sparse 2-level paged grid** with a 1-entry MRU page cache and **horizontal scanline Run-Length Encoding (RLE)**:
 
 1. **Spatial Granularity & Memory Layout:**
    - **Chart Cell (\`CELL = 4\` tiles = \`64 × 64 px\`):** Each byte in a page represents a \`4 × 4\`-tile square.
    - **Page (\`PAGE = 32\` cells = \`128 × 128\` tiles = \`1024 B\`):** \`std::unordered_map<uint64_t, std::unique_ptr<Page>> pages\` maps a 64-bit \`key(px, py)\` to a 1 KB \`std::array<uint8_t, 1024>\`.
-   - **1-Entry MRU Cache (\`lastKey\`, \`lastPage\`):** Consecutive \`slot(cx, cy, create)\` lookups within the same \`32 × 32\`-cell page bypass the hash table in $O(1)$ time.
-   - **Bitwise Cell Encoding:**
+   - **Bitwise Cell Encoding (\`Chart.hpp:25\`):**
      - \`0x00\`: Unexplored fog-of-war.
-     - \`bits 0..6\`: \`(BiomeId + 1)\` (\`1..26\`), indexing \`BIOME_TINTS[26]\`.
-     - \`bit 7 (\`NOW = 0x80\`)\`: Currently inside the player's live vision radius (rendered at full brightness \`alpha = 235\` vs. \`175\` for previously explored memory).
-2. **Horizontal Scanline RLE Coalescing (\`Chart::draw\`):**
-   Rather than submitting $N \\times N$ individual quad draw calls for the minimap or full-screen map, \`Chart::draw\` scans each row \`cy\` and packs \`key = cellByte * 2 + isBorderCell\`. Consecutive cells along \`cx\` with identical \`key\` are merged into a single \`s.rect(x0 + (from - cx0) * step, ry, (cx - from) * step, step, col)\` call—cutting GPU vertex submissions by **80%–92%**!
-3. **Binary Persistence (\`chart-<code>.bin\`):**
-   \`Chart::save\` and \`Chart::load\` serialize explored pages with \`DISTANCE_MAGIC = 0x3543414Du\` (\`"MAC5"\`), stripping the transient \`NOW (0x80)\` bit on write (\`b & ~NOW\`) so reloaded worlds restore historical fog-of-war cleanly.
+     - \`bits 0..5 (\`BIOME = 0x3F\`)\`: \`(BiomeId + 1)\` (\`1..30\`), tinted from \`BIOMES[b]->debug\` in \`Chart::tone()\`.
+     - \`bit 6 (\`WATER = 0x40\`)\`: Water cell flag.
+     - \`bit 7 (\`NOW = 0x80\`)\`: Currently inside the player's live vision radius (stripped on binary save).
+2. **Horizontal Scanline RLE Coalescing (\`Chart::draw\`):** Merges consecutive cells with identical \`key\` into single \`s.rect()\` calls, cutting GPU vertex submissions by 80% to 92%.
+3. **Binary Persistence (\`chart-<code>.bin\`):** Serializes explored pages with \`DISTANCE_MAGIC = 0x3543414Du\` (\`"MAC5"\`), stripping transient \`NOW (0x80)\` bits.
 
 ---
 
-### 3. Asymmetric Viewport Ray-Clipping in \`Hud::edge\` (\`src/gui/Hud.cpp\`)
+### 4. Asymmetric Viewport Ray-Clipping in \`Hud::edge\` (\`src/gui/Hud.cpp\`)
 
 Offscreen objectives (nearest unlit \`Shrine\`, active \`Boss\`, and distant \`Landmark\` pins) are projected onto the screen perimeter by \`Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag)\`:
 
@@ -4023,10 +4007,8 @@ void Hud::edge(Sprites &s, double wx, double wy, Color col, const char *tag) con
 }
 \`\`\`
 
-- **Why \`yh\` Is Asymmetric:**
-  - **Top Edge (\`yd < 0\`):** Insets by \`84 * u\` so edge pointers never collide with the top night-progress bar, omen banner, or minimap header.
-  - **Bottom Edge (\`yd >= 0\`):** Dynamically insets by \`46 * u\` when a boss health bar is active (\`!bossIds.empty()\`), or \`18 * u\` otherwise.
-- **Intersection Factor \`fit\`:** Computing \`fit = min(1.0f, xh / |xd|, yh / |yd|)\` projects any 2D ray \`(xd, yd)\` directly onto the exact perimeter of the safe HUD rectangle in branchless constant time, followed by a 3-layer concentric diamond marker and inward-offset distance label.
+- **Top Edge (\`yd < 0\`):** Insets by \`84 * u\` to clear the night bar, omen banner, and minimap header.
+- **Bottom Edge (\`yd >= 0\`):** Insets by \`46 * u\` when a boss bar is active, or \`18 * u\` otherwise.
 `,
     mermaidCharts: [
       {
@@ -5957,7 +5939,7 @@ flowchart LR
 
 ### Selecting a language
 
-The Language row in Settings lists \`english\` first, followed by the sorted \`.txt\` filenames in \`res/lang/\`. The selected name is saved in \`settings.txt\`. \`Game::loadLanguage()\` resets the interface strings and glossary to English defaults when the selection changes, then loads \`res/lang/<name>.txt\` unless English is selected. If the file cannot be read, the game logs a warning and keeps the defaults. German is supplied as \`res/lang/deutsch.txt\`.
+The Language row in Settings lists \`english\` first, followed by the sorted \`.txt\` filenames in \`res/lang/\`. The selected name is saved in \`settings.txt\`. \`Game::loadLanguage()\` resets the interface strings, glossary, and \`lexicon::rebuild()\` to English defaults when the selection changes, then loads \`res/lang/<name>.txt\` through \`pak::load()\` (supporting encrypted \`data.pak\` archives) unless English is selected. It then iterates \`pak::list(base + "res/lang/" + loaded, ".txt")\` to merge every modular sidecar file inside \`res/lang/<name>/\` (for example, \`res/lang/deutsch/\` holds 23 modular translation files). If the main file cannot be read, the game logs a warning and keeps the defaults. German is supplied as \`res/lang/deutsch.txt\` plus \`res/lang/deutsch/*.txt\`.
 
 ### File format and validation
 
@@ -6007,15 +5989,19 @@ The menu owns the decoder, CPU buffer, image and texture. Its destructor ends th
   },
   {
     id: "input-controls",
-    title: "35. Input, Controls & Rebinding",
+    title: "35. Input, Live Campaign Panels, Quickbar & Choice Badge",
     category: "core",
     interactiveComponent: "input-response",
     summary:
-      "Key transitions, keyboard and gamepad bindings, stick dead zones, saved mappings and contextual prompts.",
+      "Key transitions, 23 keyboard and 10 gamepad bindings, live non-pausing 7-tab campaign window, 4-slot quickbar, choice badge, and contextual prompts.",
     sourceFiles: [
           "src/input/Key.hpp",
           "src/input/Input.hpp",
           "src/input/Input.cpp",
+          "src/gui/Panel.hpp",
+          "src/gui/Panel.cpp",
+          "src/gui/PanelQuick.cpp",
+          "src/gui/HudButtons.cpp",
           "src/menu/ControlsMenu.cpp",
           "src/test/InputTest.cpp"
     ],
@@ -6024,17 +6010,22 @@ The menu owns the decoder, CPU buffer, image and texture. Its destructor ends th
 
 \`Input::handle()\` receives SDL events and updates shared \`Key\` objects. A \`Key\` records whether it is held (\`down\`) and counts transitions from released to pressed. At the next \`Input::tick()\`, \`clicked\` is set if at least one press was recorded and the count is cleared. A press and release between ticks can therefore produce \`clicked\` even though \`down\` is already false. Losing window focus releases the keys and clears stored stick and trigger state.
 
-Keyboard and gamepad bindings can point to the same action. Some gamepad bindings deliberately control two actions: by default, X maps to Gather and Retry, Y to Inventory and Codex, and Back to Map and Quit. Strike defaults to F on the keyboard and R3 on a gamepad. Which action matters depends on the current game or menu context.
+Keyboard and gamepad bindings can point to the same action. Some gamepad bindings deliberately control two actions: by default, X maps to Gather and Retry, Y to Inventory and Codex, and Back to Map and Quit. Strike defaults to F on the keyboard and R3 on a gamepad.
 
-### Rebinding and persistence
+### Rebinding, Defaults & \`KEYS 2\` Persistence
 
-The controls menu exposes 18 keyboard rows and nine gamepad rows. It switches the displayed set according to the current input mode. Selecting a row listens for a new key or supported pad button; Escape cancels keyboard listening and B cancels gamepad listening. Reset restores both sets of defaults.
+The controls menu exposes **23 keyboard rows** (\`BINDING_COUNT = 23\`) and **10 gamepad rows** (\`PAD_COUNT = 10\`), switching sets automatically by input mode. The campaign bottom HUD bar (\`src/gui/HudButtons.cpp\`) displays eight icon buttons matching the default bindings: **Inventory (\`I\`)**, **Character (\`C\`)**, **Skill Tree (\`T\`)**, **Quest Log (\`L\`)**, **Map (\`M\`)**, **Build (\`B\`)**, **Cook (\`K\`)**, and **Settings (\`O\`)**; **Codex** is bound to \`N\`, **Gift** to \`G\` (pad Share/\`MISC1\`), **Choices** to \`U\` (pad \`Start\`), and **Mute** is unbound by default (\`SDL_SCANCODE_UNKNOWN\`, toggled in Settings).
 
-\`Input::rebind()\` rejects unknown and fixed scancodes. \`rebindPad()\` accepts only buttons listed by \`padName()\`. If the requested input is already assigned, the other binding receives the selected row's old input. Both methods release the tracked keys after a successful change, avoiding an unintended held action during the swap.
+Fixed inputs include Arrow keys, Enter, Escape, \`Tab\` / \`Shift+Tab\` (and pad \`LB\` / \`RB\`) for panel tab cycling, number keys \`1–4\` (dialogue options or campaign quickbar), and \`5–8\` (plus pad \`LB\` + D-pad) for d20 Dice Spells. Mouse wheel zooms the camera only in \`--dev\` mode and otherwise scrolls the campaign journal or Pack materials ledger. \`saveKeys()\` writes a \`KEYS 2\` versioned header to \`keys.txt\`.
 
-Arrow keys, Enter, Escape, number keys 1–4 and other keys handled by \`fixed()\` remain fixed. On gamepad, A, B, Start and the D-pad are fixed; supported bindable inputs include X, Y, shoulders, stick buttons, triggers and listed auxiliary buttons. Consult \`Input.cpp\` for the complete current lists.
+### Live Non-Pausing Campaign Window (\`LV1\`, \`PK1\`, \`PK2\`)
 
-\`saveKeys()\` writes names and numeric SDL scancodes or pad identifiers to \`keys.txt\`. \`parseKeys()\` applies valid entries through the same rebind methods, so conflicts are resolved in file order. The controls menu requests a save after listening ends and when defaults are restored; \`Game::saveKeys()\` writes only when \`writes()\` permits it.
+In Campaign mode (\`RunRules::live == true\`), opening an in-game menu where \`Menu::live() == true\` (20 menus including \`Panel\`, \`InventoryMenu\`, \`CraftMenu\`, \`CookMenu\`, \`QuestMenu\`, \`CodexMenu\`, \`MapMenu\`, \`StashMenu\`, \`VendorMenu\`, \`PauseMenu\`) keeps the world simulation running rather than pausing it. Survival mode keeps traditional pausing.
+
+- **One Docked 7-Tab Panel (\`src/gui/Panel.cpp\`):** At viewport widths \`>= 1200\` px (\`DOCK_FROM\`), \`Panel\` docks on the right (\`DOCK = 0.46f\`) and smoothly shifts the camera (\`camera.panGoal = 0.23f\`) so the hero remains centered in the visible left pane; below 1200 px it opens full screen. Its seven tabs are \`Pack\`, \`Make\` (auto-selecting Cook near a hearth or Craft near a workbench), \`Character\`, \`Tree\`, \`Quest\`, \`Codex\`, and \`Settings\`.
+- **Dual Movement & Panel Navigation:** Arrow keys and gamepad D-pad feed \`navUp..navRight\`, so \`WASD\` continues walking the hero in the live world while arrows navigate the open panel. \`input.hush()\` blocks combat clicks from leaking through, a red screen edge flashes when struck, and station panels (\`Craft\`, \`Cook\`, \`Stash\`, \`Vendor\`) auto-close via \`Menu::away()\` if you walk out of reach.
+- **Pack Tab, Stash/Vendor Columns & 4-Slot Quickbar:** \`Pack\` pairs gear and the 32-slot bag on the left with a filterable materials ledger (7 filter chips: \`All\`, \`Food\`, \`Mat\`, \`Reagent\`, \`Brew\`, \`Curio\`, \`Seed\`) and a saved 4-slot quickbar (\`PanelQuick.cpp\`, keys \`1–4\` to eat edible foods or brews). \`StashMenu\` and \`VendorMenu\` dock as live columns with drag, right-click single transfer, and \`Shift\`+click transfer-all of the same base.
+- **Queued Choice Badge (\`LV2\`):** In Campaign mode, level-up, boon, and night-offering cards no longer pop up mid-fight. \`Game::choices()\` counts pending choices behind a pulsing gold badge right of the bottom bar (\`Hud::choiceBadge()\`); press \`U\`, pad \`Start\`, or click the badge to open them via \`Game::choose()\`.
 
 ### Stick dead zone and button hysteresis
 
@@ -6042,13 +6033,11 @@ The left stick uses a radial dead zone. If its raw magnitude is $m \\le 0.25$, o
 
 $$\\mathbf{s}=\\frac{\\mathbf{v}}{m}\\min\\left(1,\\frac{m-0.25}{0.75}\\right)$$
 
-For example, a horizontal input of 0.50 becomes approximately 0.33. The same rescaled axes also drive digital menu directions: a direction presses when its component exceeds 0.6 and remains held until it drops to 0.3 or below. This gap reduces repeated press/release changes near a threshold. Triggers use a separate gap: they press above 0.5 and remain held above 0.25.
+For example, a horizontal input of 0.50 becomes approximately 0.33. The same rescaled axes also drive digital menu directions: a direction presses when its component exceeds 0.6 and remains held until it drops to 0.3 or below. Triggers press above 0.5 and remain held above 0.25.
 
 ### Prompts and tests
 
-\`Input::prompt()\` substitutes recognized space-delimited words. In pad mode it applies fixed replacements such as \`Enter\` to \`A\`, then checks the configured pad binding words. In keyboard mode it substitutes certain default prompt words when their keyboard binding has changed. This is a targeted text substitution, not a general parser for arbitrary sentences or punctuation.
-
-\`src/test/InputTest.cpp\` exercises gamepad mapping, dead zone and threshold behavior, rebinding, cancellation, persistence and representative prompt text. When adding a binding, update the relevant binding table and count, check fixed controls and prompt words, and extend the tests for the new behavior.
+\`Input::prompt()\` substitutes recognized space-delimited words for pad or custom keyboard bindings. \`src/test/InputTest.cpp\` exercises gamepad mapping, dead zone and threshold behavior, rebinding, cancellation, persistence and representative prompt text.
 `,
     mermaidCharts: [
       {
@@ -6091,21 +6080,21 @@ Walking onto a passage tile travels without a key: \`Game::step()\` reads the he
 
 \`Level::shift()\` changes layers without changing the run clock. It removes current foes, draws gems toward the hero, transfers the current chart into its layer slot, updates sky and cave lighting, places the hero and allies at the destination, and moves loose non-gem pickups along. The first visit to a chamber center creates a chest, tracked by a key containing the cell coordinates and layer. The separate chart for each layer prevents explored surface tiles from revealing cave walls.
 
-### Regional rules and rewards
+### 25 Underground Biomes, Tier Classification & Environmental Rules
 
-\`CaveBiome\` contains eight shallow regions followed by eight deep regions. Each \`CaveDef\` supplies floor and wall art, tint, props, foes, pool type, light grade, and optional guardian. \`Level::caveRules()\` selects a timed rule from the hero's current cave biome. Root hollows can put brambles ahead of travel; warrens drop rock; spore halls release poison; vents and magma halls erupt; catacombs and ossuaries raise skeletons; the mere stirs water creatures; the hive hatches spiders. Geodes and the cathedral can heal near crystals, rune stones in the halls frighten nearby non-boss foes, and the abyss pushes the hero with gusts. Some rules require a nearby matching prop or pool, so a timer firing does not guarantee an event.
+\`CaveBiome\` (\`src/level/biome/CaveBiome.hpp\`) now defines **25** underground regions: the original 8 Caves + 8 Sundark regions, \`Delving\`, and **8 expansion sub-biomes** (\`U2.5\`). Rather than relying on enum-order cutoffs (the old \`CAVE_SHALLOW\` constant has been removed), each \`CaveDef\` explicitly carries \`CaveTier tier\` (\`Caves\`, \`Sundark\`, \`Delving\`), \`const char *guardian\`, and \`EnemyKind keeper\`.
 
-Deep lairs wake when the hero approaches their center. \`Level::guard()\` records active guardians by cell, avoids waking one twice, and marks it felled when its entity disappears. Felled deep guardians remain recorded in campaign saves. A guardian's death also calls \`surgeFrom()\`, which may offer a Changeling a region-specific mutation. The Lost Halls have no guardian and instead host the deep sanctuary. Two tiles north of each Halls heart stands a founder's tomb (\`world::tombAt()\`). In a campaign, \`Campaign::buried()\` assigns it to the founder whose seat lies nearest, and reading its epitaph counts as that founder's next Chronicle fragment, once per tomb (\`epitaph cx cy\` in the save). Chapter 32, section 15 proves that fragments stay in order on either path.
+The eight expansion sub-biomes add interactive rules in \`src/level/CaveRules.cpp:192–435\` and rite crafting in \`src/campaign/CampaignPeace.cpp:35–52\`:
+- **Brinewells (Caves):** \`crust\` deposits \`Stuff::Salt\` (slowing footing to \`0.7x\`) beside brine until water dissolves it; standing beside its water grants the Cinder King's **frost salt** rite.
+- **Shardfall (Caves):** \`refract\` catches light on up to 4 crystal props within 6 tiles, easing \`level.dread\` by 20 each.
+- **Ashvein Tubes (Caves):** \`vent\` / \`updraft\` pushes and ignites walkers unless wet or frozen, or lifts the hero onto an adjacent higher dry ledge within \`VENT_REACH = 3\`.
+- **Amberseep (Caves):** \`preserve\` spreads sticky \`Stuff::Resin\` (\`0.4x\` pace) around amber stalagmites; burning resin beside an untapped stalagmite cuts free a daily \`curio::FOSSIL\`.
+- **Drowned Archive (Sundark):** Tremor \`aftershock\` floods dry tiles beside water (\`tide\`); reading a wet \`sunken tablet\` by firelight (\`decipher\`) eases dread and yields lore; standing beside water with \`2 Shard + 1 Stone\` crafts the **deep-water flask** rite.
+- **Rootheart (Sundark):** Tremors trigger \`grow\`, weaving up to 4 \`Piece::Roots\` barriers across narrow passages and cycling the oldest.
+- **Mirrorhall (Sundark):** \`reflect\` spawns short-lived \`AllyKind::Decoy\` reflections (\`2.5 s\`) that draw foes, while standing mirrors deflect shots.
+- **Hollow Forge (Sundark):** \`press\` builds steam pressure in pipe junctions over 24 s until bursting the nearest rock open (\`edits->breach\`).
 
-### Dwarven Delvings & Horrors Below (\`Under.cpp\`, \`Group.cpp\`)
-
-When a cave cell lies beneath elevated surface terrain (\`heightAt >= 2\` in at least 4 of 9 probe samples inside the \`64 × 64\` cell) and passes \`DELVE_ODDS\` (40%), \`Under.cpp\` carves a structured dwarven **Delving** (\`CaveKind::Delving\`): a pillared central hall with optional north, west, and east wings. Delvings are held by **Anvilmark** (\`Delving Hold\` and \`Forge Watch\` groups flagged \`C | H\`) and raided by **Starborn** (\`Woken Below\`), while deeper strata (\`D\`) spawn \`The Lightless\` and \`Hollow Choir\` horrors (\`Lightless\`, \`HollowMaw\`, \`Whisperer\`) that burn when exposed to torch or lantern light (\`lightAt > 0.25\`).
-
-### Dread in a campaign
-
-\`Level::haunt()\` runs underground only when the run does not end at dawn. Dread rises with time below and contributes to \`threatAt()\` alongside the layer's base threat. A warded location reduces dread gain to one quarter. In the Lost Halls sanctuary, dread drains rapidly and the hero slowly heals. The game announces each new third of the dread range. Returning to the surface or resting in the sanctuary relieves the pressure; the campaign save records remaining dread, the current layer, slain guardians, and separate cave and deep edits.
-
-For a new underground region, add its \`CaveBiome\` and \`CaveDef\`, decide how generation selects it, supply a \`CaveRules.cpp\` rule at the matching enum index, then verify its passage, terrain, chart, foe selection, and save behavior. Keep the shallow/deep boundary at \`CAVE_SHALLOW\` aligned with the enum order.
+For a new underground region, add its \`CaveBiome\` and \`CaveDef\` (setting \`tier\`, \`guardian\`, and \`keeper\`), wire its generation and \`CaveRules.cpp\` handler, and verify passage, terrain, chart, foe selection, and save behavior.
 `,
     mermaidCharts: [
       {
@@ -6151,7 +6140,7 @@ Mutations are bits on the player, with a per-mutation timer for repeated effects
 
 The five afflictions each trade a benefit for a cost: Spore Crown grants poison immunity but slows daytime pace; Glass Skin adds armor but doubles charged-ground damage; Frost Blood grants chill immunity but doubles burning-ground damage; Ash Lung adds burn resistance but lowers pace; Moon Touched raises vigor at night and lowers it by day. A town cure removes one owned affliction for 150 gold. \`affliction::cure()\` also reverses its immediate armor or resistance change and recomputes shared immunities, so curing Spore Crown does not remove poison immunity supplied by Spore Sacs.
 
-Campaign saves record the mutation and affliction bitsets. When extending either enum, keep the bit width and save format in mind, add its source or offer mapping, apply and reverse its effects as appropriate, and verify interactions with Synod scrutiny and existing immunities.
+Campaign saves record the mutation and affliction bitsets. Beyond ordinary whispers and surges, \`src/hero/Mutation.hpp\` classifies mutations by \`Pool\` (\`Ordinary\`, \`Taught\`, \`Directed\`), visibility \`Seen\` (\`Obvious\`, \`Concealable\`, \`OnUse\`), and 10 \`Body\` reaction tags (\`Feral\` through \`Echo\`) read by \`src/hero/Regard.cpp\`. Six active pilot/taught gifts (\`WeepingPalms\`, \`MossBrows\`, \`Gutlight\`, \`ChoirTeeth\`, \`BorrowTomorrow\`, \`WorldRoot\`) live in \`src/hero/Gift.cpp\`; firing watched gifts or \`ChoirTeeth\` near a camp warns once per faction per day before lowering standing.
 `,
   },
   {
@@ -6246,7 +6235,7 @@ flowchart LR
     content: `
 ### From a cause to a ground state
 
-Reactive ground is enabled by \`RunRules::matter\`. \`Stuff\` names the state of a tile: None, Wet, Burning, Frozen, Oiled, Spored, Charged, Ash, or Limed. \`Cause\` names an incoming stimulus: Fire, Chill, Water, Charge, or Spore. \`Level::react(x, y, cause)\` reads the tile's effective state, finds the first matching row in the \`REACTIONS\` table, writes the new state and duration to \`Matter\`, and triggers any steam, burst, or current effect. It returns false when matter is disabled or no row matches; a cause does not automatically affect every state.
+Reactive ground is enabled by \`RunRules::matter\`. \`Stuff\` names 11 tile states (\`src/level/Matter.hpp:10\`): \`None\`, \`Wet\`, \`Burning\`, \`Frozen\`, \`Oiled\`, \`Spored\`, \`Charged\`, \`Ash\`, \`Limed\`, **\`Salt\`**, and **\`Resin\`**. \`Cause\` names an incoming stimulus: \`Fire\`, \`Chill\`, \`Water\`, \`Charge\`, or \`Spore\`. \`Level::react(x, y, cause)\` reads the tile's effective state, finds the first matching row in \`REACTIONS\` (including \`Salt + Water -> Wet (8 s)\` and \`Resin + Fire -> Burning (4 s)\`), writes the new state and duration to \`Matter\`, and triggers any steam, burst, or current effect. It returns false when matter is disabled or no row matches.
 
 \`Level::stuffAt()\` first checks the stored matter state. If the tile has no stored state, it treats lava as Burning, a deterministic Badlands tar tile as Oiled, and a sufficiently deep sky puddle as Wet. These fallback states can therefore participate in reactions without filling the sparse matter store in advance. For example, Fire ignites an otherwise empty tile only when \`kindling(x, y)\` finds a suitable, non-submerged prop; Fire on Wet makes steam and clears that wet state; Chill on Wet makes Frozen; Charge on Wet makes Charged.
 
@@ -6264,11 +6253,11 @@ The reaction table includes special effects beyond state replacement. Igniting O
 
 Spored ground poisons actors other than Mycel foes. When a creature dies on spores, \`sprout()\` can schedule a Sporeling after six seconds, with at most four pending sprouts. Fire can consume Spored ground into a brief burn. Synod Limers write Limed tiles around themselves; no Fire or Spore reaction row starts from Limed, and a mob standing there has Burn and Poison ended.
 
-\`Level::tread()\` applies the ground's effects to a mob. Burning applies Burn, Wet ends an existing Burn, Charged applies a brief damaging Burn status, and Spored applies Poison. Bosses receive half the ground damage in the Burning and Charged branches. \`Level::footing()\` separately multiplies movement pace: Wet \`0.85\`, Frozen \`1.1\`, and Oiled \`0.8\`, when those are stored matter states. Afflictions can further change the player's ground damage, including Glass Skin on Charged and Frost Blood on Burning. The player is checked by \`matterTick()\`; enemy movement calls its own tread path.
+\`Level::tread()\` applies the ground's effects to a mob. Burning applies Burn, Wet ends an existing Burn, Charged applies a brief damaging Burn status, and Spored applies Poison (suppressed for the player by \`boons::Sporewalk\`, while \`rune::limed\` ignores Limed tiles). Bosses receive half the ground damage in the Burning and Charged branches. \`Level::footing()\` separately multiplies movement pace: Wet \`0.85\`, Frozen \`1.1\`, Oiled \`0.8\`, **Salt \`0.7\`** (\`SALT_PACE\`), and **Resin \`0.4\`** (\`RESIN_PACE\`). Afflictions can further change the player's ground damage, including Glass Skin on Charged and Frost Blood on Burning.
 
 ### Rendering and checks
 
-\`Matter::render()\` visits only pages overlapping the camera and draws a translucent tile-colored rectangle for each live state; Burning alpha flickers with time and tile position. Reactions also emit ordinary Spark particles for steam, flare, and electric current, connecting this system to the particle chapter without making the particles themselves the authority for terrain state.
+\`Matter::render()\` visits only pages overlapping the camera, drawing translucent tile-colored rectangles for most states (Burning flickers with time and tile position) and dedicated atlas sprites (\`atlasu::u2::SaltCrust\`, \`atlasu::u2::Resin\`) for \`Salt\` and \`Resin\`. Reactions also emit ordinary Spark particles for steam, flare, and electric current.
 
 \`testMatter()\` and \`testMatterTable()\` in \`CampaignTest.cpp\` check freezing and thawing, pace, fuel-limited fire, wet quenching, electric propagation, oil bursts, lime blocking, sporeling growth, and empty-page cleanup. When adding a state or reaction, update \`Stuff\`, \`EXPIRE\`, \`LOOK\`, the reaction table, and these behavior tests together; the enum order indexes the expiry and color arrays.
 `,
@@ -6649,29 +6638,22 @@ Firepepper | 3.0 Days        | 2     | Mat::FirepepperSeed | Mat::Firepepper
 
 ---
 
-### Hydrology & Weather Acceleration (\`farm::wet\` and \`WET_BOOST\`)
+### Hydrology & Weather Acceleration (\`farm::wet\` and \`f.bonus\`)
 
-Crop growth in Mellangan is not a linear countdown timer. It is an environmentally responsive biological simulation:
+Crop growth in Mellangan is an environmentally responsive simulation tracked in \`src/campaign/Farm.cpp\`:
 
 \`\`\`cpp
-constexpr float WET_BOOST = 1.0f;
-
 float growth(const Edits::Plot &f, float day) {
-  float delta = day - f.planted;
-  return delta * (1.0f + (f.wet ? WET_BOOST : 0.0f));
+  return std::max(0.0f, day - f.sown) + f.bonus;
 }
 \`\`\`
 
-\`\`\`
-[ Growth Velocity Comparison ]
-Dry Soil Growth:    1.0x Base Velocity (Turnip matures in 2.0 days)
-Rain / Wet Soil:    2.0x Accelerated Velocity (Turnip matures in 1.0 day!)
-\`\`\`
+Rather than multiplying total elapsed time, wet soil and rainfall accumulate extra progress into \`f.bonus\` over time via \`farm::weather()\`, accelerating maturation toward \`crop.days\`.
 
 #### Weather Integration with \`Sky.hpp\`
-- **Natural Rainfall:** When the sky system triggers rain or snow flurries (\`farm::raining(sky)\`), all outdoor surface plots automatically absorb moisture, setting their moisture bit to active.
-- **Irrigation Retention:** Soil adjacent to natural freshwater ponds or irrigation trenches retains moisture (\`WET_HOLD = 0.25f\`), keeping crops damp for hours after the storm clouds clear.
-- **Tending by Hand:** In dry biomes (such as Badlands or Savanna), the player can manually water plots using water skins to maintain the double-speed growth multiplier.
+- **Natural Rainfall:** When \`farm::raining(sky)\` is active, outdoor surface plots absorb moisture and accumulate growth bonus.
+- **Irrigation Retention:** Soil adjacent to water retains moisture (\`WET_HOLD = 0.25f\`).
+- **Rootsworn Groves:** Plots tended inside a Rootsworn grove (\`farm::grove()\`) double their harvest yield.
 
 ---
 
@@ -6680,20 +6662,17 @@ Rain / Wet Soil:    2.0x Accelerated Velocity (Turnip matures in 1.0 day!)
 When a plot reaches \`Stage::Ripe\` (\`growth >= crop.days\`), golden sparks and gentle sway animations signal that harvest is ready. Striking the plot triggers \`farm::tend\`:
 
 \`\`\`cpp
-bool tend(Level &level, Campaign &c) {
-  // ...
-  spill(level, px, py, produce(plot.crop), crop.yield);
-  if (rng.chance(SEED_BACK))
-    spill(level, px, py, seed(plot.crop), 1);
-  experience::award(level, experience::Source::Harvest, int(produce(plot.crop)), float(crop.yield));
-  c.edits.clearPlot(tx, ty);
-  return true;
-}
+int yield = crop.yield * (inGrove ? 2 : 1) + (hasHarvestHome ? 1 : 0);
+p.materials[produce(f->crop)] += yield;
+if (rng.chance(SEED_BACK))
+  p.materials[seed(f->crop)]++;
+f->crop = -1;
+f->bonus = 0;
 \`\`\`
 
-1. **Physical Produce Spill:** Plump root vegetables and grain bundles erupt from the soil with physical bouncing trajectories (\`spill\`), ready for inventory pickup.
-2. **The 50% Seed-Back Invariant (\`SEED_BACK = 0.5f\`):** Every harvested plant has a 50% probability of dropping viable seeds alongside its food yield. Combined with wild foraging seeds discovered in the wilderness, this allows careful farmers to expand their fields exponentially over successive seasons.
-3. **Agricultural Progression:** Harvesting crops grants non-combat experience (\`experience::Source::Harvest\`), advancing the player's level and unlocking higher-tier farming tools, automated scarecrows, and durable stone planters!
+1. **Direct Inventory Deposit:** Harvested produce goes directly into \`p.materials\`, doubled inside a Rootsworn grove and increased by \`+1\` with the \`HarvestHome\` boon.
+2. **Plot Retention & Seed-Back (\`SEED_BACK = 0.5f\`):** Resetting \`f->crop = -1\` and \`f->bonus = 0\` returns the tile to tilled soil (keeping the plot ready for replanting), with a 50% chance to return a seed.
+3. **Unified Wild Gathering (\`src/campaign/Sources.cpp\`):** Outside crop plots, wild harvesting routes through a single 37-row \`SOURCES[]\` table with six verbs (\`Pick\`, \`Shake\`, \`Dig\`, \`Fish\`, \`Butcher\`, \`Open\`) and four optional tools (\`Knife\`, \`Spade\`, \`Rod\`, \`Basket\`) that boost yield or speed without ever being required. Fishing uses a bobber and \`0.8 s\` bite tell (\`sources::cast\`), and 13 beast species drop timed \`Carcass\` pickups (capped at 6, decaying after 30 s) that can be butchered for meat, hide, bone, sinew, and tallow.
 `,
     mermaidCharts: [
       {
@@ -6739,86 +6718,76 @@ constexpr float GRADE_MULT[GRADES] = {1.0f, 2.0f, 3.5f, 5.5f, 8.0f};
 \`\`\`
 
 \`\`\`
-[ The 5 Facet Grades & Potency Multipliers ]
-Grade 0: Chipped   (1.0x Base Power)  - Rough, unpolished fragments found in shallow ore.
-Grade 1: Flawed    (2.0x Base Power)  - Cleaved stones with visible inclusions.
-Grade 2: Regular   (3.5x Base Power)  - Symmetrically cut and polished town jewels.
-Grade 3: Flawless  (5.5x Base Power)  - Pure crystalline structures cut by master lapidaries.
-Grade 4: Radiant   (8.0x Base Power)  - Blinding, flawless wonders pulsing with latent magic!
+[ The 5 Facet Grades (GRADE_NAMES) ]
+Grade 0: Rough     (Base tier)        Found in shallow reaches and basic trades.
+Grade 1: Cut       (Second tier)      Cleaved stones with clean facets.
+Grade 2: Clear     (Third tier)       Symmetrically cut and polished town jewels.
+Grade 3: Flawless  (Fourth tier)      Pure crystalline structures cut by master lapidaries.
+Grade 4: Radiant   (Pinnacle tier)    Rare pinnacle stones pulsing with latent power.
 \`\`\`
 
-#### The 7 Mineral Kinds & Color Profiles
-1. **Ruby (Crimson):** Fire damage, physical bleed augmentation, and maximum vitality.
-2. **Sapphire (Azure):** Frost slows, mana reserve expansion, and physical armor defense.
-3. **Topaz (Amber):** Lightning critical strikes, attack speed, and electrical resistance.
-4. **Emerald (Verdant):** Poison damage over time, crowd control duration, and evasion.
-5. **Amethyst (Violet):** Life leech, physical damage reflection (thorns), and shadow warding.
-6. **Diamond (Prismatic):** All-elemental resistance, armor penetration, and experience gain.
-7. **Skull (Bone Ivory):** Raw weapon attack power, health regeneration, and boss execution damage.
+#### The 7 Mineral Kinds (\`KIND_DEFS[7]\`)
+1. **Amber (Gold):** Shock on weapons/offhands, Poison Resistance on armour, Gold Find on charms.
+2. **Jade (Verdant):** Poison on weapons/offhands, Health Regeneration on armour, Magic Find on charms.
+3. **Garnet (Crimson):** Burn on weapons/offhands, Burn Resistance on armour, Maximum Life on charms.
+4. **Sapphire (Azure):** Chill on weapons/offhands, Chill Resistance on armour, Haste on charms.
+5. **Opal (Ivory):** Critical Chance on weapons/offhands, Movement Speed on armour, Kindling on charms.
+6. **Onyx (Slate):** Flat Damage on weapons/offhands, Armour on armour, Life Leech on charms.
+7. **Moonstone (Pale Violet):** Night Damage on weapons/offhands, Light Radius on armour, Wisdom on charms.
 
 ---
 
 ### The 3:1 Combining Rule (\`jewel::combine\`)
 
-At any constructed Jeweller's Bench (\`Piece::JewellersBench\`), the player can fuse lower-grade gems into higher-grade gems:
-
-\`\`\`cpp
-int combine(int *jewels, int grade, int kind) {
-  if (grade < 0 || grade >= GRADES - 1 || jewels[id(kind, grade)] < 3)
-    return -1;
-  jewels[id(kind, grade)] -= 3;
-  jewels[id(kind, grade + 1)]++;
-  return id(kind, grade + 1);
-}
-\`\`\`
+At a constructed Jeweller's Bench (\`Piece::JewellersBench\`, free) or at a town jeweller (for gold), the player can fuse three same-grade gems into a chosen higher-grade gem:
 
 \`\`\`
 [ The Gem Compression Pyramid ]
-81 Chipped Gems  -->  27 Flawed Gems  -->  9 Regular Gems  -->  3 Flawless Gems  -->  1 RADIANT GEM!
+81 Rough Gems  -->  27 Cut Gems  -->  9 Clear Gems  -->  3 Flawless Gems  -->  1 RADIANT GEM
 \`\`\`
 
-To forge a single pinnacle Radiant gem from scratch requires 81 Chipped fragments of that mineral kind. This provides an enduring, long-term gold and resource sink that keeps early-game mining drops relevant throughout the entire campaign.
+To forge a single pinnacle Radiant gem from scratch requires 81 Rough stones. This provides an enduring long-term progression sink that keeps early-game finds relevant throughout the campaign.
 
 ---
 
 ### Equipment Socket Capacities (\`SLOT_SOCKETS[]\`)
 
-Not all equipment slots can bear the same weight of socketed jewels. Socket capacity is strictly constrained by equipment morphology:
+Not all equipment slots can bear the same weight of socketed jewels. Socket capacity is constrained by the six gear slots defined in \`GearSlot\`:
 
 \`\`\`cpp
 constexpr int SLOT_SOCKETS[GEAR] = {3, 2, 3, 1, 1, 0};
 \`\`\`
 
 \`\`\`
-Equipment Slot | Maximum Sockets | Tactical Role
----------------|-----------------|---------------------------------------------
-Weapon         | 3 Sockets       | Offensive scaling: flat elemental damage, crit, leech.
-Armor (Chest)  | 2 Sockets       | Core survivability: maximum health, armor, all-resist.
-Shield / Offhand| 3 Sockets      | Defensive utility: block chance, thorns, mana recovery.
-Helm           | 1 Socket        | Utility & focus: experience bonus, cooldown rate.
-Boots          | 1 Socket        | Mobility & evasion: movement speed, trap resistance.
-Ring / Amulet  | 0 Sockets       | Delicate jewelry cannot be socketed with stones.
+Equipment Slot       | Maximum Sockets | Effect Column (jewel::column)
+---------------------|-----------------|------------------------------
+GearWeapon           | 3 Sockets       | Column 0 (Offensive)
+GearOffhand          | 2 Sockets       | Column 0 (Offensive)
+GearArmour           | 3 Sockets       | Column 1 (Defensive)
+GearCharm            | 1 Socket        | Column 2 (Utility)
+GearCharm2           | 1 Socket        | Column 2 (Utility)
+GearImplant          | 0 Sockets       | Cannot be socketed (-1)
 \`\`\`
 
 ---
 
 ### Slot-Dependent Gem Affinity: Tri-Form Utility
 
-A vital design feature in Mellangan is that a gem's effect depends entirely on the equipment slot it is placed into:
+A gem's stat depends on the equipment column it is placed into (\`jewel::column(gearSlot)\`):
 
 \`\`\`
-Gem Type   | In Weapon (Offensive)      | In Armor (Defensive)      | In Shield (Guard)
------------|----------------------------|---------------------------|-------------------------
-Ruby       | +Fire Damage on Hit        | +Maximum Health Points    | Fire Thorns Retaliation
-Sapphire   | Cold Chill & Slow on Hit   | +Physical Armor Rating    | Mana Leech on Block
-Topaz      | +Lightning Critical Chance | +Lightning Resistance     | Shock Arc on Struck
-Emerald    | Deadly Poison Damage/Sec   | +Evasion & Dodge Chance   | Acid Cloud on Guard
-Amethyst   | Life Leech % of Damage     | Health Regeneration/Sec   | Stun Counter-Attack
-Diamond    | Armor Penetration %        | +All Elemental Resistance | Block Chance %
-Skull      | +Flat Physical Attack      | Damage Reduction %        | Bone Armor Absorb Shield
+Gem Type   | Weapon / Offhand (Col 0) | Armour (Col 1)        | Charm / Charm2 (Col 2)
+-----------|--------------------------|-----------------------|------------------------
+Amber      | Shock (8..48)            | ResistPoison (20..75) | GoldFind (10..50)
+Jade       | Poison (10..65)          | Regen (0.2..2.5)      | MagicFind (8..85)
+Garnet     | Burn (10..65)            | ResistBurn (20..75)   | Life (10..120)
+Sapphire   | Chill (10..65)           | ResistChill (20..75)  | Haste (4..30)
+Opal       | Crit (1.5..16)           | Speed (3..25)         | Kindling (10..50)
+Onyx       | Damage (8..100)          | Armour (1..12)        | Leech (1..7)
+Moonstone  | NightDamage (5..25)      | Light (15..90)        | Wisdom (4..25)
 \`\`\`
 
-This tri-form utility ensures that every discovered gem is valuable regardless of the player's current build. A pure mage can use Rubies in their staff for fireball scaling, while a tank paladin uses the exact same Rubies in their chestplate to expand their maximum health pool!
+This tri-form utility ensures that every discovered gem is valuable regardless of the player's current build. A caster can socket Garnet into a charm for flat Life, into armour for Burn Resistance, or into a weapon for Burn procs.
 
 ---
 
@@ -6873,30 +6842,30 @@ A successfully completed Rune Word transforms an ordinary steel sword or boiled-
 
 ---
 
-### The 12 Runes of Mellangan (\`jewel::RUNES\`)
+### The 12 Runes of Mellangan (\`rune::DEFS\`)
 
-The game features 12 canonical runes, ordered by regional reach and cosmic depth:
+The game features 12 canonical runes (1-based indices \`1..12\`), ordered by regional reach and tint tier (Bone, Blue, Gilt):
 
 \`\`\`
-Index | Rune Name  | Epithet            | Elemental / Concept Domain
-------|------------|--------------------|---------------------------
-Rune 0| Sol        | The Hearth-Spark   | Sun, fire, domestic protection
-Rune 1| Tyr        | The Iron Spear     | Martial discipline, pierce, valor
-Rune 2| Oth        | The Root-Stone     | Earth, stability, architecture
-Rune 3| Alg        | The Elk-Horn       | Ward against predators, wild instinct
-Rune 4| Wyn        | The Harvest-Bough  | Agriculture, joy, bountiful yield
-Rune 5| Hag        | The Frost-Hail     | Winter permafrost, stasis, endurance
-Rune 6| Nyd        | The Bitter-Yoke    | Endurance in starvation, pain resistance
-Rune 7| Isa        | The Silent Mirror  | Deep reflection, glasskin stillness
-Rune 8| Jer        | The Turning Year   | Seasonal passage, day/night cycles
-Rune 9| Eih        | The Sacred Yew     | Death and rebirth, spectral passage
-Rune 10|Peor       | The Hidden Well    | Subterranean secrets, curiosity sight
-Rune 11|Sig        | The Sun-Ray        | Blinding celestial light, synod fury
+Index  | Rune  | Epithet                        | Solo Stat Bonus (Min..Max)
+-------|-------|--------------------------------|---------------------------
+Rune 1 | Keth  | the mark that bites the proud  | EliteDamage (6..18)
+Rune 2 | Orra  | the mark that weighs the coin  | GoldFind (8..24)
+Rune 3 | Wenn  | the mark that keeps the hearth | Regen (0.3..0.9)
+Rune 4 | Dunn  | the mark that holds the wall   | Armour (2..6)
+Rune 5 | Brae  | the mark that runs the road    | Speed (4..12)
+Rune 6 | Mirr  | the mark that throws the light | Light (20..60)
+Rune 7 | Hathe | the mark that wakes the shrine | Kindling (12..36)
+Rune 8 | Quor  | the mark that hurries the hand | Haste (6..18)
+Rune 9 | Selv  | the mark that remembers        | Wisdom (6..18)
+Rune 10| Yrn   | the mark that finds the hidden | MagicFind (10..30)
+Rune 11| Thask | the mark that finds the gap    | Crit (3..9)
+Rune 12| Aelm  | the mark that swells the heart | Life (25..75)
 \`\`\`
 
 #### Drop Frequency & Reach Gating
 
-Runes are exceptionally rare drops in the wild. While common enemies carry a minuscule drop probability ($1 / 20{,}000$), deep wilderness reaches scale higher-tier runes:
+Runes are exceptionally rare drops in the wild. While common enemies carry a minuscule base drop probability ($1 / 20{,}000$), deep wilderness reaches unlock higher-index runes:
 
 \`\`\`cpp
 constexpr float KILL_ODDS = 1 / 20000.0f;
@@ -6911,15 +6880,13 @@ int top(int reach) {
 }
 \`\`\`
 
-The highest runes (such as \`Peor\` and \`Sig\`) only drop when venturing into deep wilderness territories with reach values exceeding 24 tiles away from Hearthwick.
+The highest runes (\`Thask\` and \`Aelm\`) only drop when venturing into deep wilderness territories where reach exceeds 24 regions from Hearthwick.
 
 ---
 
 ### Archaeological Word Discovery: The Two Halves
 
-A player cannot simply search the internet, copy a rune sequence, and insert runes into gear to unlock a Rune Word. In Mellangan, **a Rune Word cannot awaken until its formula has been archaeologically discovered in the campaign world!**
-
-Every Rune Word is split into two complementary halves (\`Half half[2]\`):
+Every Rune Word is split into two complementary halves (\`Half half[2]\`) recorded in the campaign chronicle and Codex Rune Words page:
 
 \`\`\`cpp
 struct Half {
@@ -6936,19 +6903,19 @@ struct WordDef {
 
 \`\`\`
 [ Archaeological Discovery Sources ]
-- Whisper:  Overheard in dark taverns or spoken by dying scouts.
-- Tablet:   Chiseled into weathered stone obelisks in deep barrows.
-- Telling:  Recounted by ancient regional elders (Maren, Wren, Kell).
-- Archive:  Preserved within dusty monastery library scrolls.
-- Wending:  Inscribed upon boundary waystones along forgotten pilgrim paths.
+- Whisper:  Biome whispers heard in the wilds.
+- Tablet:   Chiseled into weathered stone obelisks.
+- Telling:  Recounted by faction contacts and elders.
+- Archive:  Preserved within archive scrolls.
+- Wending:  Inscribed upon boundary waystones.
 - Tomb:     Discovered on the sarcophagi of the First Founders.
 \`\`\`
 
-Only when both halves of a Rune Word have been discovered and linked in the campaign chronicle (\`known(c, word) == true\`) will the ancient resonance activate upon socketing!
+Importantly, \`rune::word(const Item &)\` does **not** gate activation on prior discovery: socketing the exact rune sequence into a non-unique item of the matching slot and socket count immediately awakens the Rune Word, and \`RuneWord.cpp\` records it via \`learn()\` so the Codex remembers it.
 
 ---
 
-### The 12 Canonical Rune Words & Tactical Mechanics
+### The 12 Canonical Rune Words (\`WORD_DEFS[12]\`)
 
 \`\`\`cpp
 enum Word : uint8_t {
@@ -6958,35 +6925,22 @@ enum Word : uint8_t {
 };
 \`\`\`
 
-#### 1. Furrowsong (\`Wyn + Oth + Jer\`)
-- **Required Gear Slot:** 3-Socket Hoe or One-Handed Sickle.
-- **Rune Formula:** \`Wyn\` (Harvest) + \`Oth\` (Earth) + \`Jer\` (Year).
-- **Awakened Rule Effect:** While equipped, any agricultural plot tilled or planted by the hero matures at triple speed (\`3.0x\`). Harvesting ripe crops guarantees a 100% seed recovery rate, turning the bearer into a legendary master of agrarian abundance.
-
-#### 2. Toll of Roads (\`Tyr + Jer\`)
-- **Required Gear Slot:** 2-Socket Heavy Boots.
-- **Rune Formula:** \`Tyr\` (Spear) + \`Jer\` (Year).
-- **Awakened Rule Effect:** Moving along paved cobblestone or gravel highways increases sprint velocity by $+40\\%$. Every 200 meters traversed along maintained trade roads deposits travel coins directly into the hero's purse (\`TOLL_DAY = 40\`), simulating mercantile toll revenues!
-
-#### 3. Ashen Tithe (\`Sol + Nyd + Eih\`)
-- **Required Gear Slot:** 3-Socket Two-Handed Greathammer.
-- **Rune Formula:** \`Sol\` (Sun) + \`Nyd\` (Yoke) + \`Eih\` (Yew).
-- **Awakened Rule Effect:** Slain enemies erupt into pyres of holy ash. Every 25 kills (\`TITHE_KILLS = 25\`) detonates a radiant light shockwave that automatically reignites any cold shrines within 300 pixels (\`TITHE_REACH = 300\`), driving back the midnight darkness without spending timber!
-
-#### 4. Smithcall (\`Oth + Tyr\`)
-- **Required Gear Slot:** 2-Socket Blacksmith Apron (Chest Armor).
-- **Rune Formula:** \`Oth\` (Earth) + \`Tyr\` (Spear).
-- **Awakened Rule Effect:** When crafting or imbuing gear at any anvil or workbench, material bit costs and gold fees are cut in half (\`SMITH_ODDS = 6\`). Salvaging gear yields double metal scrap and unrefined ore.
-
-#### 5. Undertorch (\`Sol + Peor\`)
-- **Required Gear Slot:** 2-Socket Lantern Shield.
-- **Rune Formula:** \`Sol\` (Sun) + \`Peor\` (Hidden Well).
-- **Awakened Rule Effect:** Illuminates deep subterranean caverns with a persistent 60-pixel radius of warm sunlight (\`UNDERTORCH = 60\`), preventing cave creepers from executing stealth ambush attacks and revealing hidden mineral seams inside rock faces.
-
-#### 6. Long Table (\`Wyn + Alg + Sol\`)
-- **Required Gear Slot:** 3-Socket Heavy Helm.
-- **Rune Formula:** \`Wyn\` (Harvest) + \`Alg\` (Ward) + \`Sol\` (Sun).
-- **Awakened Rule Effect:** Campfire rest radius expands to 160 pixels (\`TABLE_REACH = 160\`). Allies and neutral guests sitting by your fire recover health at $+2\\%$ per second (\`TABLE_HEAL = 0.02f\`), and food buffs consumed at the fire last three times longer (\`MEAL_STRETCH = 3\`)!
+\`\`\`
+Word           | Runes (Order)        | Slot        | Awakened Rule Effect
+---------------|----------------------|-------------|------------------------------------------------------------
+Ashen Tithe    | Keth + Wenn          | GearWeapon  | Kills near a lit shrine feed light; 25 kills rekindle cold shrines.
+Furrowsong     | Orra + Keth          | GearArmour  | Every 8 tiles on open ground tills behind you and sows a fast seed.
+Toll of Roads  | Dunn + Orra          | GearOffhand | Camps treat you 1 band higher; sales give +2 Coinroad rep (40/day).
+Matterwake     | Brae + Mirr          | GearWeapon  | Hits leave their payload's reactive matter under the foe for 3 s.
+Unwhitened     | Mirr + Dunn          | GearOffhand | Lime does not touch you; scrutiny falls when unseen by the Synod.
+Kindred Flesh  | Wenn + Brae + Keth   | GearArmour  | Changeling: defects sleep, +25% mutation pace. Hale: implants +50%, swap anywhere.
+Kinward        | Hathe + Orra + Wenn  | GearArmour  | Nearby allies/followers mend 3%/s; quickened props last 2x longer.
+Smithcall      | Quor + Dunn + Brae   | GearWeapon  | 1 kill in 6 yields a tinker bit; imbue at Anvil price by any campfire.
+Undertorch     | Selv + Mirr          | GearOffhand | Below ground: +60% light, lightdrawn foes ignore you, 20 s tremor warning.
+Long Table     | Hathe + Selv + Keth  | GearArmour  | Meals last 3x as long and mend nearby allies and followers.
+Laid Spear     | Yrn + Quor           | GearOffhand | Once a day, press 1 by an angry group leader so they stand down and leave.
+Quarter Given  | Aelm + Thask + Yrn   | GearWeapon  | Foes below 10% HP yield and flee: +3 standing and no kill.
+\`\`\`
 
 ---
 
@@ -6996,15 +6950,15 @@ When runes are slotted into an item, \`src/item/loot/Rune.cpp\` inspects the soc
 
 \`\`\`cpp
 int word(const Item &item) {
-  if (item.sockets < 2)
+  if (item.unique >= 0 || item.sockets < 2)
     return -1;
   for (int w = 0; w < WORDS; w++) {
     const WordDef &def = WORD_DEFS[w];
-    if (def.n != item.sockets || def.slot != item.slot())
+    if (def.n != item.sockets || def.slot != item.gearSlot())
       continue;
     bool match = true;
     for (int i = 0; i < def.n; i++)
-      if (item.gem(i) != id(def.runes[i])) {
+      if (item.gems[i] != id(def.runes[i])) {
         match = false;
         break;
       }
@@ -7016,17 +6970,18 @@ int word(const Item &item) {
 \`\`\`
 
 #### Strict Inscription Invariants
-1. **Exact Socket Count Match:** A 2-rune word cannot be forged into a 3-socket weapon! If a 3-socket weapon holds \`Tyr + Jer + (Empty)\`, it will never activate. The socket count must equal \`def.n\` exactly.
-2. **Correct Equipment Slot:** Forging weapon runes into a chestplate produces zero resonance.
-3. **Strict Phonetic Sequence:** Inscribing \`Jer\` then \`Tyr\` does not awaken \`Toll of Roads\`; the glyphs must be placed in the precise historical order: \`Tyr\` first, then \`Jer\`.
+1. **Non-Unique Items Only:** Unique items (\`item.unique >= 0\`) never form Rune Words.
+2. **Exact Socket Count Match:** A 2-rune word cannot be forged into a 3-socket item; \`item.sockets\` must equal \`def.n\` exactly.
+3. **Correct Equipment Slot:** \`def.slot\` must match \`item.gearSlot()\` (\`GearWeapon\`, \`GearOffhand\`, or \`GearArmour\`).
+4. **Strict Phonetic Sequence:** Inscribing \`Orra\` then \`Dunn\` does not awaken \`Toll of Roads\`; the glyphs must be placed in exact order (\`Dunn\` first, then \`Orra\`).
 
 #### The Cost of Shattering (\`rune::shatter\`)
 
-Unlike common gemstones which can be extracted at a Jeweller's Bench for 100 gold, ancient runes bond irrevocably with the metal.
+Unlike ordinary gemstones, which can be safely extracted for gold, ancient runes cannot be recovered intact once socketed.
 
-If a player wishes to recover their precious runes from an obsolete weapon, the item must be **Shattered** at the anvil (\`rune::shatter\`). Shattering obliterates the weapon chassis into dust, but successfully recovers all socketed runes intact.
+Breaking a Rune Word at the town jeweller (\`rune::shatter\`, requiring a double confirmation) **preserves the equipment item**, **destroys all socketed runes** (clearing each rune socket to \`jewel::NONE\`), and returns any regular gems that were also socketed back to the player's gem pouch.
 
-This design forces players to make meaningful, deliberate tactical commitments: either preserve a beloved weapon or sacrifice it to liberate its divine words of power.
+This design forces deliberate commitments: you keep the cherished base item, but breaking the word permanently consumes the runes inscribed within it.
 `,
     mermaidCharts: [
       {
@@ -7156,7 +7111,15 @@ int garnished(int dish, int garnish) {
 
 1. **Spices Alter the Trigger:** Adding a spice changes **when** the ability activates. Seasoning a defensive meal with hot firepepper converts a passive \`Struck\` trigger into an aggressive \`Stride\` trigger, launching fireballs while sprinting!
 2. **Garnishes Alter the Payload:** Adding a rare delicacy (such as glowing cave glowcaps or frozen rime moss) changes **what** elemental effect erupts upon trigger activation.
-3. **Smoke Rack Multiplier:** If the player constructs a \`Piece::SmokeRack\` within 5 tiles of the hearth (\`harvest::pieceNear(level, c, Piece::SmokeRack, RACK_REACH)\`), the meal's active combat duration is doubled from 60 seconds to a massive 120 seconds!
+3. **Smoke Rack Multiplier:** If the player constructs a \`Piece::SmokeRack\` within 4 tiles (\`RACK_REACH = 64\` px) of the hearth (\`harvest::pieceNear(level, c, Piece::SmokeRack, RACK_REACH)\`), the meal's active combat duration is doubled from \`MEAL_LIFE = 300\` seconds (5 minutes) to 600 seconds (10 minutes).
+
+---
+
+### Raw Food Catalog & Quickbar Eating (\`src/campaign/Foods.cpp\`)
+
+Beyond hearth cooking, \`Cookery.hpp\` and \`Foods.cpp\` define a 17-entry \`FOODS[]\` catalog giving edible resources a \`Taste\` (\`Hearty\`, \`Bright\`, \`Fiery\`, \`Cool\`, \`Earthy\`, \`Sweet\`, \`Strange\`), a raw safety tier (\`Raw::No\`, \`Raw::Safe\`, \`Raw::Risky\`), and preparation method flags (\`M_ROAST\`, \`M_STEW\`, \`M_BAKE\`, \`M_PRESERVE\`, \`M_GARNISH\`).
+
+Edible foods and brews can be assigned to the 4-slot campaign quickbar (\`PanelQuick.cpp\`, keys \`1\` to \`4\`). Eating a raw food via \`cookery::eat()\` restores \`RAW_MEND = 5%\` of max health; eating a \`Raw::Risky\` item (\`glowcap\`, \`grave_moss\`, \`pale_veil\`) carries a \`1/3\` chance (\`QUEASY_ODDS\`) to inflict \`queasy\` for 60 seconds (\`0.9x\` movement speed).
 
 ---
 
@@ -7195,7 +7158,7 @@ bool visit(Level &level, Campaign &c) {
 - **Reputation-Weighted Selection:** The odds of an ally from Faction $F$ visiting your fire are proportional to:
   $$\\text{Weight}(F) = 1 + \\left\\lfloor \\frac{\\max(0,\\; \\text{rep}[F])}{100} \\right\\rfloor$$
 - **Hated Exclusion:** Factions that consider the player \`HATED\` ($\\le -500$) will never sit by your fire.
-- **Physical Hospitality Radius:** The visitor sits on a log within 36 pixels of the hearth (\`GUEST_SEAT = 36\`).
+- **Physical Hospitality Radius:** The visitor sits beside the fire within 80 pixels (\`GUEST_SEAT = 80\`).
 
 #### Breaking Bread: The Four Gifts of the Hearth (\`cookery::share\`)
 
@@ -7221,7 +7184,7 @@ int share(Level &level, Campaign &c) {
    - **Curiosity Appraisal:** If the player carries an unidentified curiosity (\`strange lens\`, \`strange coil\`, \`strange idol\`), the traveler explains its true origin and uncovers its latent magical effect (\`c.knownCurios.insert(k)\`).
    - **Secret Culinary Lore:** If all curiosities are known, the traveler teaches a forgotten culinary pairing formula (\`cookery::teach\`), adding it permanently to the recipe book.
    - **Ancient Grave Coordinates:** If recipes are mastered, the traveler shares oral folklore regarding the lost tomb of an ancient Founder (\`c.heard.insert(k)\`), marking historical monuments on the world map.
-   - **Traveler Gold:** If all secrets have been uncovered, the grateful traveler gifts a pouch of traveling gold (\`GIFT_GOLD = 50\\text{ gold}\`).
+   - **Traveler Gold:** If all secrets have been uncovered, the grateful traveler gifts a pouch of traveling gold (\`GIFT_GOLD = 30\\text{ gold}\`).
 
 Through this elegant loop, cooking transforms from a solitary crafting chore into an essential pillar of geopolitical diplomacy and historical archaeology.
 `,
@@ -7312,7 +7275,7 @@ $$XP = \\text{Base} \\times M_{\\text{first}} \\times (\\text{Decay})^{k} \\time
 Where:
 - $k$ is the number of times this specific action has been repeated recently in this region.
 - $\\text{Decay} \\in (0.0, 1.0)$ dampens repetitive farming.
-- $\\text{ACT\\_XP}[5] = \\{1.0,\\; 1.7,\\; 2.25,\\; 2.5,\\; 3.2\\}$ scales rewards upward in later acts to match rising level thresholds.
+- $\\text{ACT\\_XP}[5] = \\{1.0,\\; 1.7,\\; 2.25,\\; 2.5,\\; 3.2\\}$ and \`Level::DEPTH_XP[layer]\` scale rewards upward in later acts and deeper underground layers.
 
 ---
 
@@ -7347,11 +7310,10 @@ struct Experience {
    Each \`Fade\` record tracks a local region \`(rx, ry)\` and an action \`source\`. As the player harvests or mines, \`mult\` decays toward a floor value. However, as in-game days pass (\`day\`), the natural environment recovers:
    \`\`\`cpp
    static float now(const Fade &f, float day) {
-     float elapsed = day - f.day;
-     return std::min(1.0f, f.mult + elapsed * RECOVERY_RATE);
+     return std::min(1.0f, f.mult + std::max(0.0f, day - f.day));
    }
    \`\`\`
-   If a player exhausts an ore vein in Hearthwick and travels to Saltmoor for three days, returning to Hearthwick finds the local resource pool completely refreshed!
+   Local fades recover at \`1.0\` per in-game day (no separate \`RECOVERY_RATE\` constant): traveling away for a day restores the local multiplier.
 
 ---
 
@@ -7389,6 +7351,8 @@ flowchart LR
     sourceFiles: [
           "src/campaign/Standing.cpp",
           "src/campaign/Politics.cpp",
+          "src/campaign/Rank.cpp",
+          "src/hero/Regard.cpp",
           "src/level/Level.hpp",
           "src/test/PoliticsTest.cpp"
     ],
@@ -7402,38 +7366,36 @@ This dynamic is governed by **Political Contagion** (\`src/campaign/Standing.cpp
 
 ---
 
-### The 13 Factions of Mellangan
+### The 19 Factions of Mellangan (\`FACTIONS = 19\`)
 
-The geopolitical landscape is shaped by 13 distinct factions:
+\`src/entity/Faction.hpp\` defines 19 factions in total: 18 reputed factions plus \`Faction::Hearth\` (the player's home towns):
 
 \`\`\`
-[ Holy & Imperial Institutions ]
-- The High Synod: Zealous, dogmatic inquisitors dedicated to purging eldritch taint.
-- The Crownlands: The traditional feudal nobility and hereditary knightly order.
+[ Holy & National Powers ]
+- Lantern Synod (Faction::Synod): Zealous inquisitors purging eldritch taint.
+- The Crownlands: Feudal nobility and hereditary knightly order.
+- Anvilmark: Mountain smiths, mine-holds, and forge clans.
+- Sandwells: Arid oasis water-courts and trade citadels.
+- Silverbough: Ancient woodland realms and bough-wardens.
 
 [ Mercantile & Independent Powers ]
-- The Coinroad: Wealthy merchant consortium controlling roads, bridges, and trade caravans.
-- The Freeblades: Veteran mercenary companies loyal only to coin and iron contracts.
+- The Coinroad: Merchant consortium controlling roads, bridges, and caravans.
+- The Freeblades: Veteran mercenary companies bound to iron contracts.
+- The Unmoored: Outcast wanderers, drift mothers, and hidden villages.
 
-[ Primal & Woodland Clans ]
-- The Rootsworn: Ancient forest druids bound to elder weeping trees and grove springs.
-- The Wildkin: Nomadic hunter clans and shapeshifters dwelling beyond border palisades.
+[ Primal, Eldritch & Subterranean Peoples ]
+- The Rootsworn, The Wildkin, The Mycel, The Glasskin, The Bogspawn,
+  The Starborn, The Rimefolk, The Barrow Host, The Gloamfolk, The Cinderbound.
 
-[ Eldritch, Subterranean & Outcast Peoples ]
-- The Mycel: Symbiotic mushroom tenders living within hollow cavern root systems.
-- The Glasskin: Subterranean deep-delvers whose flesh has vitrified into silicate crystal.
-- The Bogspawn: Amphibious bog-dwellers defending the sunken mires and reed beds.
-- The Starborn: Arcane astronomers obsessively tracking falling comets and sky-iron.
-- The Rimefolk: Hardy northern survivors accustomed to howling permafrost blizzards.
-- The Barrow Host: Spectral guardians bound to the burial mounds of the first founders.
-- The Gloamfolk: Shadow-stalkers navigating the twilight boundaries between day and night.
+[ Neutral Sanctuary ]
+- Hearth (Faction::Hearth): Player towns (not part of the 18 reputed factions).
 \`\`\`
 
 ---
 
 ### Starting Alignment & Lineage Divergence (\`standing::start\`)
 
-When creating a new character, the initial 13-dimensional reputation vector \`Reputation\` is calculated via three distinct deterministic layers:
+When creating a new character, the initial \`Reputation\` vector (sized to \`FACTIONS = 19\`) is calculated via four deterministic layers:
 
 \`\`\`cpp
 Reputation start(int lineage, int hero, uint32_t seed) {
@@ -7456,100 +7418,87 @@ Reputation start(int lineage, int hero, uint32_t seed) {
 }
 \`\`\`
 
-\`\`\`
-[ Reputation Initialization Layers ]
-1. Base Penalties (BASE[]): Universal wilderness wariness towards unknown wanderers.
-2. Lineage Selection:
-   - HALE (Pure Mortal Human): Welcomed by civilized towns; despised by mutants.
-   - CHANGELING (Fae Mutant): Reconstituted by the deep woods; hunted by the Synod!
-3. Hero Class Calling (CLASSES[]): Martial traditions bias starting sympathies.
-4. Procedural Seed Tilt: World seed shifts two random rival factions.
-5. Invariant Clamping: Enforces bounds [-1000..+1000] and the Changeling Synod ceiling.
-\`\`\`
-
-#### The Lineage Divergence: Hale vs Changeling
+#### The Lineage Divergence: Hale vs Changeling (\`Standing.cpp\`)
 
 \`\`\`
 Faction       | Hale Mortal Modifier | Changeling Mutant Modifier
 --------------|----------------------|---------------------------
-High Synod    | +200 (Holy Blessing) | -300 (Heretic Abomination!)
-Crownlands    | +100 (Civil Order)   | -250 (Unregistered Outsider)
-Coinroad      | +100 (Trade Patron)  |    0 (Neutral Gold)
-The Mycel     | -100 (Spore Fear)    | +200 (Kinship of the Rot)
-The Starborn  | -100 (Occult Distrust)| +200 (Celestial Resonance)
-The Glasskin  | -100 (Deep Dread)    | +200 (Deep Crystalline Kin)
-The Bogspawn  | -100 (Swamp Feud)    | +200 (Waters of Acceptance)
-The Unmoored  | -150 (Vagabond Scorn)| +250 (Fellow Outcasts)
+Lantern Synod | +200                 | -300
+Crownlands    | +100                 | -250
+Coinroad      | +100                 |    0
+Barrow Host   | -100                 |    0
+The Mycel     | -100                 | +200
+The Starborn  | -100                 | +200
+The Glasskin  | -100                 | +200
+The Bogspawn  | -100                 | +200
+The Unmoored  | -150                 | +250
+Silverbough   |    0                 | +150
+Sandwells     |    0                 | +100
 \`\`\`
 
 #### The Changeling Synod Invariant
 
-Notice line 58 of \`src/campaign/Standing.cpp\`:
+Notice \`src/campaign/Standing.cpp:59–60\`:
 
 \`\`\`cpp
 if (changeling)
   rep[size_t(F::Synod)] = std::min(rep[size_t(F::Synod)], Campaign::WARY);
 \`\`\`
 
-A Changeling hero can never achieve positive standing with the High Synod! Even if the player spends days completing bounties for inquisitors, their standing is strictly capped at \`Campaign::WARY = -100\`. The dogmatic church will tolerate a mutant as an expendable tool, but will never embrace a changeling into holy fellowship.
+\`Campaign::WARY\` is \`+250\` (\`src/campaign/Campaign.hpp:226\`), which is the bottom of \`Liked\` and strictly below \`Friendly (500)\`. A Changeling hero can earn cautious tolerance from the Lantern Synod, but can never reach \`Friendly\` or \`Revered\` fellowship with the inquisitors.
 
 ---
 
 ### Political Contagion Mechanics (\`standing::spread\`)
 
-When the player completes a commission, rescues an envoy, or slays a border patrol, reputation changes do not apply as isolated additions. Instead, the shift cascades through the continent's signed alliance adjacency matrix:
+When the player's standing with faction $a$ changes by $d$, the shift cascades through the signed diplomatic matrix \`Politics::rel[a][b]\` (values in $[-1000, +1000]$) scaled by \`CONTAGION = 4000\` (\`src/campaign/Standing.hpp:14\`, \`Politics.cpp:255–260\`):
 
-\`\`\`cpp
-void spread(Reputation &rep, Faction a, int d, bool changeling, const Politics *p) {
-  int at = politics::index(a);
-  if (!reputed(a) || at < 0)
-    return;
-  Politics stand;
-  if (!p || !p->live)
-    politics::seed(stand, Grudges{}), p = &stand;
-  int hero[politics::P];
-  for (int i = 0; i < politics::P; i++)
-    hero[i] = rep[size_t(politics::faction(i))];
-  politics::contagion(hero, *p, at, d);
-  for (int i = 0; i < politics::P; i++)
-    rep[size_t(politics::faction(i))] = hero[i];
-  cap(rep, changeling);
-}
-\`\`\`
+$$R_b^{\\text{new}} = R_b^{\\text{old}} + \\left\\lfloor \\frac{d \\times \\text{rel}[a][b]}{4000} \\right\\rfloor$$
 
-#### The Mathematical Contagion Equation
-
-Let $R_i$ be the hero's standing with faction $i$. When faction $k$ experiences a standing change $\\Delta_k$:
-
-$$R_i^{\\text{new}} = R_i^{\\text{old}} + \\Delta_k \\times \\mathbf{M}_{ki} \\times \\lambda$$
-
-Where:
-- $\\mathbf{M}_{ki} \\in [-1.0,\\; +1.0]$ represents the historical diplomatic affinity between faction $k$ and faction $i$ (positive for allies, negative for mortal rivals).
-- $\\lambda \\approx 0.35$ is the political damping coefficient preventing runaway escalation.
-
-If the hero aids the Freeblades ($+100$), their sworn enemies the Coinroad automatically lose standing ($-35$), while Freeblade auxiliary allies gain standing ($+25$), creating a truly living geopolitical ecosystem.
+The maximum effective contagion ratio is $1000 / 4000 = 0.25$. For example, with \`Freeblades <-> Coinroad = -350\`, gaining $+100$ standing with the Freeblades shifts the Coinroad by $\\lfloor 100 \\times (-350) / 4000 \\rfloor = -8$.
 
 ---
 
-### Reputation Tiers & Gameplay Consequences
+### Effective Standing, Body Regard & Unified Access Table (\`O9.S2\` / \`O9.S3\`)
 
-Reputation values range continuously from $-1000$ to $+1000$, partitioned into five functional tiers:
+Earned deeds weigh twice as much as appearance. \`src/hero/Regard.hpp\` sets \`SEEN_SHARE = 2\`:
+
+$$\\text{effective}(F) = \\text{rep}[F] + \\frac{\\text{react}(F,\\; \\text{seen})}{2}$$
+
+Five body-reaction tags (\`Vegetative\`, \`Aquatic\`, \`Crystalline\`, \`Ember\`, \`Echo\`) shift effective standing at half weight. Camp prompts print \`regard::reason(l, f)\` underneath the action line explaining why a camp warms to or shuns you, and using a watched gift or \`ChoirTeeth\` chant warns once per faction per day (\`regard::betrays\`) before dropping standing.
+
+Every standing-gated service reads one unified 14-service \`ACCESS[]\` table in \`src/campaign/Standing.cpp\` (\`Trade\`, \`Kin\`, \`Cut\`, \`Follow\`, \`Gift\`, \`Pass\`, \`Terms\`, \`Hail\`, \`Directions\`, \`Walk\`, \`Commission\`, \`Quest\`, \`Parley\`, \`Grow\`), each specifying its required \`Disposition\` band and whether it checks \`Earned\`, \`Effective\`, or \`Toll\` standing. The Codex Factions page displays earned standing, body regard, current band, and the next locked door (\`standing::next\`).
+
+---
+
+### Six Disposition Bands (\`Standing.cpp\`)
+
+Reputation ranges from $-1000$ to $+1000$, partitioned into six \`Disposition\` bands:
 
 \`\`\`
-Tier     | Score Range   | World & Gameplay Consequence
----------|---------------|-----------------------------
-HATED    | <= -500       | Shoot-on-sight hostility; ambush patrols spawn along roads;
-         |               | refuse campfire hospitality; closed town gates.
-WARY     | -499 to -100  | Cold suspicion; merchants impose 35% price markups;
-         |               | guards shadow your movement; refuse sensitive quests.
-NEUTRAL  | -99 to +99    | Standard open-market commerce; access to common commissions.
-FRIENDLY | +100 to +499  | 15% trade discounts; travelers join campfires;
-         |               | faction guards assist against wilderness predators.
-REVERED  | >= +500       | Elite auxiliary contracts; unique faction rune words;
-         |               | access to ancient relic vaults and faction strongholds.
+Band        | Score Range   | Key Consequences
+------------|---------------|-------------------------------------------------------
+Hated       | <= -500       | Hostile on sight; patrols ambush; camps refuse talk/trade.
+Disliked    | -499 to -250  | Cold suspicion; higher markups; most services closed.
+Indifferent | -249 to +249  | Baseline access; open stalls and basic exchanges.
+Liked       | +250 to +499  | Commissions, sagas, campfire hospitality, Act IV raid pass.
+Friendly    | +500 to +899  | Trade discounts, faction chief oaths (Rank 1), allies.
+Revered     | >= +900       | Rank 4 capstone deeds, physical guide escort (Service::Walk).
 \`\`\`
 
-Through this interconnected system, every battle fought and every contract fulfilled weaves the player's personal story into the grand political chronicle of Mellangan.
+---
+
+### Four Faction Chiefs & Ranks 1 to 4 (\`src/campaign/Rank.cpp\`)
+
+Four chief factions (Freeblades, Coinroad, Rootsworn, Unmoored) each appoint a named chief in the first camp of their kind you wake (saved in \`chiefCamp\`, drawn with dedicated idle/step/attack frames via \`atlasf::chief\`): **Hask Corrinsworn** (Freeblade Camp), **Ismer Tallyhand** (Caravan), **Old Ashvine** (Grove Keepers), and **Veyra Driftmother** (Hidden Village).
+
+Alongside the Lantern Synod's ranks, \`Rank.cpp\` defines Ranks 1 through 4 for all four chief factions (20 rank definitions total):
+- **Rank 1 (Oath at Friendly after 2 jobs):** Pays 100 gold, caps the rival faction at \`WARY\`, and unlocks kin wares for Freeblades.
+- **Rank 2 (3 rival kills):** Pays 200 gold (plus a follower or bonus gold) and shifts inter-faction relations via \`politics::mend()\`.
+- **Rank 3 (Faction deed: guard errand, escort/caravan, founder laid to rest, or 2 Hidden Village gifts):** Pays 300 gold (Freeblades add a Knight follower) and shifts rival relations.
+- **Rank 4 (Revered + capstone deed):** Pays 400 gold and grants a permanent faction boon (\`SellswordsCut\`, \`RoadLuck\`, \`Barkskin\`, or \`Hushstep\`).
+
+Ranks persist even if standing later fluctuates, and dialogue exchanges in \`060-chiefs.rows\` inspect and award them using the \`W::Rank\`, \`W::Deed\`, and \`T::Rank\` kit operations.
 `,
     mermaidCharts: [
       {
@@ -7622,8 +7571,14 @@ The single-player campaign advances across five grand acts, each anchored by a d
 [ ACT V: LAST EMBER ]
 - Regional Leader: Keeper Ash
 - Biomes: Ashlands, Ember Peaks, Void Hollows, Starfall Plains
-- Core Conflict: The final reckoning against the Prioress and the Synod King.
+- Core Conflict: The final reckoning against the Prioress and the Cinder King.
 \`\`\`
+
+#### Cinder King Hall, Annals, Hamlets, Sagas & Unified Talkers
+- **Three Peaceful Hall Routes (\`CampaignPeace.cpp:128–198\`):** Approaching the Cinder King's hall lists all three resolutions (\`Parley\`, \`Quench\` with the 3 rites including the Drowned Archive deep-water flask and Brinewells frost salt, and \`Turn\` with 2 allied warbands) alongside explicit closed reasons when requirements are unmet.
+- **\`WHAT CHANGED\` Annals (\`SituationHistory.cpp\`):** The Quest page records settled outcomes for the Broken Ford, Kettlestaithe, and the Cinder King's fall across Nightmares (retaining up to 48 entries and displaying up to 3 prior-Nightmare eras).
+- **Kettlestaithe, Saltmoor Tidemarket, Tablets, Commissions & Sagas:** Act II adds the **Kettlestaithe** dye-and-eel hamlet overlay situation (\`Hamlet.cpp\`, 5 outcomes \`Sluiced\`/\`Tided\`/\`Leated\`/\`Opened\`/\`Lapsed\`, 6 villagers with persistent moods), the **Saltmoor Tidemarket** (\`Quarter.cpp\`: Iven Vale, Sister Keva, Nera Voss, displaced Odo), **The Unsigned Tablets** (\`Tablets.cpp\`, restoring a defaced founder), three Act I **Faction Commissions** (\`Commission.cpp\`: \`OpenLedger\`, \`ScorchedAcre\`, \`PaidInFull\`), and ten 3-chapter **Culture Sagas** (\`Saga.cpp\`, 30 chapters total, tracked in the Codex Sagas page).
+- **Talk to Anyone, Guides, Hold-Still & Single Prompt (\`Talkers.cpp\`, \`Names.cpp\`, \`Guide.cpp\`, \`Talk.cpp\`):** Every sapient creature carries a deterministic cultural name and optional epithet across 6 styles; calm strangers speak through 56 culture exchanges (\`050-cultures.rows\`) and offer option 3 ("Lead me there", giving directions or physically guiding you at \`Revered\`). Elder Maren speaks through the same paged talk panel (3 options + "Something else"). Walking non-hostile NPCs pause and face you while talking (\`Level::hold\`), and the 16-row \`Talkers\` table resolves nearest-wins so only one talk prompt appears at a time.
 
 ---
 
@@ -7676,7 +7631,7 @@ O::Boss   | Confront and vanquish regional act bosses | 3-Phase Boss AI, encount
 O::Fetch  | Recover relics from ruins or barrows | ItemDrop::Item, Reliquary chests
 O::Purge  | Burn out fungal or spider nests | Level::props, Spore explosion hazards
 O::Gather | Deliver timber, ore, or herbs to town | Player::materials inventory
-O::Survive| Hold a fortified perimeter during a siege | Bastion flow defense, wave timers
+O::Defend | Hold a fortified perimeter during a siege | Bastion flow defense, wave timers
 O::Escort | Guide supply wagons safely between towns | Wayfinding road networks, mob aggro
 \`\`\`
 
@@ -7807,38 +7762,9 @@ struct Ledger {
 +------------------------------------+------------------------------------+
 \`\`\`
 
-1. **\`source[COUNT]\` Array:** For each canonical historical fact in the game database (\`content/fact.inc\`), an 8-bit integer tracks **how** the hero learned it:
-   - \`-1\`: Unknown fact (hermetically locked).
-   - \`0\`: Uncovered on an ancient carved stone tablet in deep wilderness ruins.
-   - \`1\`: Overheard from whispers and rumors in a roadside tavern.
-   - \`2\`: Decoded from an intercepted military courier dispatch.
-   - \`3\`: Recounted orally by a regional elder or holy abbess.
-2. **\`disclosures\` Bitset:** A packed bitset where each bit represents a unique \`(Fact, Recipient)\` tuple. If Bit 42 is set, the hero has formally disclosed Fact $X$ to NPC $Y$.
-3. **Cache Footprint:** The entire historical memory of the world fits within a few hundred bytes, serializeable into a single compact string line for cloud saves!
-
----
-
-### The Four Archaeological Knowledge Sources
-
-Every fact in Mellangan can be learned from up to four independent environmental sources:
-
-\`\`\`
-[ Source 0: Archaeological Tablets ]
-- Weathered stone monoliths, crypt epitaphs, and temple bas-reliefs.
-- Yields the objective, ancient historical account, untainted by modern political spin.
-
-[ Source 1: Tavern Whispers & Rumors ]
-- Overheard by the campfire or purchased from traveling minstrels.
-- Often sensationalized or partial, reflecting common folk anxieties.
-
-[ Source 2: Intercepted Military Dispatches ]
-- Discovered on slain courier patrols, intercepted pigeon coops, or raided supply wagons.
-- Reveals immediate troop movements, conspiratorial orders, and assassination bounties.
-
-[ Source 3: Clan Elders & Religious Lorekeepers ]
-- Recounted by figures like Elder Maren, Abbess Wren, or Warden Kell.
-- Offers deep contextual lore, moral interpretations, and hidden lineage connections.
-\`\`\`
+1. **\`source[COUNT]\` Array:** For each canonical historical fact in \`content/fact.inc\`, an 8-bit integer stores either \`-1\` (unknown) or the index \`0..3\` into that specific fact's own \`std::array<const char *, 4> sources\` table (\`src/campaign/Facts.hpp:14–17\`). Sources are named per fact (validated inside \`learn()\`) rather than belonging to four fixed global categories.
+2. **\`disclosures\` Bitset:** A packed bitset where each bit represents a unique \`(Fact, Recipient)\` tuple. If a bit is set, the hero has formally disclosed Fact $X$ to NPC $Y$.
+3. **Cache Footprint:** The entire historical memory of the world fits within a few hundred bytes, serializable into compact \`qfact\` and \`qdisclose\` lines in campaign saves.
 
 ---
 
@@ -7961,12 +7887,12 @@ All initial campaign sprint items tracked in \`TODO.md\` are now **Complete** an
 - **Unique Weapon Tooltip Attack Grants & Rune Disclosure (\`src/gui/Tooltip.cpp\`):** Done. Unwielded unique weapons mask their granted attack behind runes until first equipped, then permanently reveal the granted attack stats in tooltips across copies.
 - **Mode-Aware Gambling Verification (\`src/test/VendorTest.cpp\`):** Done. Deterministic tests guarantee Campaign never rolls Survival-exclusive uniques and Survival never rolls Campaign bases or uniques.
 - **Content Mode Declaration Assertions (\`src/meta/Content.cpp\`):** Done. \`contentFaults()\` verifies Campaign/Survival item-base and unique alignment at startup and in \`--test\`.
-- **32-Voice LRU Audio Mixer (\`src/audio/AudioMixer.cpp\`):** Done. Dynamic channel culling and distance attenuation preserve clean audio during 10,000-entity soak benchmarks.
+- **32-Voice SDL3 Audio Mixer (\`src/audio/Sound.cpp\`):** Done. Oldest-start voice replacement, 12 lazy-decoded music tracks, 11 biome ambience beds, 10 culture camp beds, and a dedicated \`thread_local Rng\` for deterministic pitch jitter.
 
 #### Major Recent Subsystem Additions Documented in This Wiki
-- **Arbitrary-Precision Math & C-Backed String:** \`BigInteger\` / \`BigFloat\` (\`src/Math.hpp\`, \`src/Math.cpp\`), \`--math-benchmark\` + \`tools/benchmark_math.py\`, and 15-byte SSO \`String\` (\`src/String.hpp\`).
-- **Four Nations, Six Culture Banners & Dynamic Worlds:** Territorial \`realm\` claims, border patrols, uncertain fortune battles, 10 cultural \`festival\` rites, 12 national \`happening\` events, \`economy\` scarcity routes, dwarven \`delvings\`, and light-searing \`horrors\` below.
-- **Overworld Navigation & Encounters:** Bounded A* \`roadway::Planner\` roads/bridges/tunnels, EN/DE wayfinding signs, \`26\` biome curiosities, Morrigan crow-shrines, Zoktor Doidberg races, Web Skill Tree with Keystones, 4 d20 Dice Spells, \`112\` Achievement Feats, and the \`Doteshi\` sprite baking pipeline.
+- **Arbitrary-Precision Math & C-Backed String:** \`BigInteger\` / \`BigFloat\` (\`src/Math.hpp\`, \`src/Math.cpp\`, reserved for future large-number use), \`--math-benchmark\` + \`tools/benchmark_math.py\`, 15-byte SSO \`String\` (\`src/String.hpp\`), and \`StringRead\` (\`src/StringRead.hpp\`).
+- **Four Nations, Six Culture Banners & Dynamic Worlds:** Territorial \`realm\` claims, border patrols, uncertain fortune battles, 10 cultural \`festival\` rites, 12 national \`happening\` events, \`economy\` scarcity routes, 4 Faction Chiefs & Ranks 1 to 4, dwarven \`delvings\`, 8 expansion cave sub-biomes, and light-searing \`horrors\` below.
+- **Overworld Navigation, Live Panels & Encounters:** Ahead-of-time bounded A* \`roadway::Planner\` roads/bridges/tunnels, EN/DE wayfinding signs, \`30\` biome curiosities, living biome decals/sites/secrets/critters, Morrigan crow-shrines, Zoktor Doidberg races, Web Skill Tree with Keystones, 4 d20 Dice Spells, \`112\` Achievement Feats, live docked 7-tab campaign \`Panel\` + 4-slot quickbar + Choice Badge, \`Talkers\`/\`Guide\`/Kettlestaithe/Tidemarket/Sagas, \`data.pak\`, and the vendored \`tools/doteshi/\` pipeline.
 
 ### Community Bridge: Zero-Login Polls, RFCs & Asset Submissions
 
@@ -8038,11 +7964,10 @@ Most game developers assume that standard IEEE-754 32-bit floating point (\`floa
 2. **Loss of Precision at Scale:** A 32-bit float only possesses 24 bits of mantissa (about 7 decimal digits of precision). If an overworld coordinate reaches $x = 100{,}000.0$, the smallest distinguishable distance increments from $0.00001$ to $0.0078125$ pixels, causing jittering physics, stuttering animation interpolation, and seam cracks in tilemaps.
 3. **Cross-Platform Non-Determinism:** Compilers on x86-64, ARM64, and Apple Silicon handle fused multiply-add (FMA), extended precision registers (x87 80-bit), and denormalized numbers differently. A simulation relying on \`float\` can drift out of sync between Linux dedicated servers and Windows clients within seconds.
 
-To permanently banish these bugs, Mellangan implements a pure, deterministic mathematical subsystem in \`src/Math.hpp\` and \`src/Math.cpp\`:
-- **\`BigInteger\`:** An arbitrary-precision, sign-magnitude integer stored in base-$10^9$ limbs.
-- **\`BigFloat\`:** A high-precision fixed-scale decimal number with 34 decimal places of precision and half-to-even bankers' rounding.
-- **Deleted Float Constructors:** Explicitly deleted constructors that forbid implicit conversion from \`float\` or \`double\`, catching accidental precision loss at compile time.
-- **C-Backed 15-Byte SSO \`String\`:** A high-speed, zero-allocation small-string-optimized string class in \`src/String.hpp\` that speeds up text and identifier processing throughout the entire game tick.
+To prepare for future high-precision systems while keeping today's text pipeline fast, Mellangan implements a standalone deterministic math module (\`src/Math.hpp\`, \`src/Math.cpp\`) and owning string utilities (\`src/String.hpp\`, \`src/StringRead.hpp\`):
+- **\`BigInteger\` & \`BigFloat\` (Reserved for Future Use):** Both structs carry \`// Unused for now, but may be useful in the future for large numbers\` in \`src/Math.hpp:14, 62\`. They are currently exercised by \`MathTest.cpp\` and \`MathBenchmark.cpp\` (which outputs CSV benchmarks via \`--math-benchmark\`), not yet wired into live gameplay economy ticks.
+- **Deleted Float Constructors:** Explicitly deleted constructors forbid implicit conversion from \`float\` or \`double\`, catching accidental precision loss at compile time.
+- **C-Backed 15-Byte SSO \`String\` & \`StringRead\`:** \`src/String.hpp\` provides a 15-byte inline SSO string used across gameplay text, while \`src/StringRead.hpp\` implements a lightweight stream parser (\`operator>>\` for \`String\`, \`char\`, clamped integrals, floats, and \`line()\` / \`str::getline()\`) used by save readers.
 
 ---
 
@@ -8277,58 +8202,43 @@ flowchart TD
 
 Developing an expansive 2D action RPG traditionally requires hundreds of hours of manual pixel art creation and tedious spreadsheet data entry. In Mellangan, asset creation is treated as code:
 1. **Procedural Sprite Pipeline (\`doteshi_assets.py\`):** Algorithmic sprite synthesis that generates weapons, armor, icons, and monster frames from mathematical recipes, locked with cryptographic pixel hashing.
-2. **Content Kit (\`Kit.hpp\`, \`Kit.cpp\`, \`.rows\`):** Declarative, human-readable tabular text files in \`src/content/exchange/\` that compile into zero-overhead binary tables at launch.
-3. **Automated Clang Tooling (\`tools/lint.py\`):** Automated formatting and static analysis that prevents code rot across hundreds of C++ files.
+2. **Content Kit (\`Kit.hpp\`, \`Kit.cpp\`, \`.rows\`):** Declarative C++ aggregate initializer fragments in \`src/content/<kind>/*.rows\` gathered into \`build/gen/content/<kind>.inc\` at CMake configure time and \`#include\`d directly into compile-time tables.
+3. **Automated Clang Tooling (\`tools/lint.py\`):** Automated formatting, clang-tidy static analysis, and an opt-in \`--style\` source checker that prevents code rot across hundreds of C++ files.
 
 ---
 
 ### Doteshi Sprite Generation & Pixel-Hash Locking
 
-How do you guarantee that procedurally synthesized sprites look consistent, crisp, and never regress between engine updates? Mellangan introduces the **Doteshi Pipeline** (\`tools/doteshi_assets.py\`):
+To guarantee that procedurally synthesized sprites stay crisp and never silently regress between engine updates, Mellangan vendors **Doteshi** in \`tools/doteshi/\` (as its own \`uv\` Python 3.12+ project) and drives it through \`tools/doteshi_assets.py\` (\`run\`, \`bake\`, \`preview\`, \`check\`, invoking \`python -m doteshi.atlas.mellangan\`):
 
-\`\`\`python
-# tools/doteshi_assets.py
-# Procedural recipe for generating a runic claymore
-def draw_runic_claymore(pixels: np.ndarray, seed: int):
-    # 1. Outline silhouette
-    draw_blade_spine(pixels, length=14, width=3, color=STEEL_DARK)
-    # 2. Runic channel inlay
-    draw_rune_groove(pixels, pattern=seed % 8, color=ARCANE_CYAN)
-    # 3. Crossguard & pommel
-    draw_crossguard(pixels, style=DWARVEN_BRONZE)
-\`\`\`
+- **Authoritative Recipes:** Sprite recipes live in \`tools/source/doteshi/content/*.py\` with atlas band placements in \`manifest.toml\`.
+- **Atlas Integration:** \`make_assets.py --from-atlas\` reads the baked band output into \`res/atlas.png\` and generates typed sprite accessors across \`src/AtlasF.hpp\`, \`src/AtlasB.hpp\` (biome decals, sites, tells, critters, coast curiosities), and \`src/AtlasU.hpp\` (Kettlestaithe hamlet, Tidemarket, and underground \`under2\` sprites).
 
 #### The Lockfile Invariant (\`doteshi.lock.json\`)
 
-Whenever the asset generator runs, it computes the SHA-256 hash of every generated sprite sheet. If a code change inadvertently shifts a pixel by 1 unit or alters a palette index, the build toolchain detects the hash mismatch against \`doteshi.lock.json\` and alerts the developer immediately during CI:
-
-\`\`\`json
-{
-  "res/sprites/weapons.png": {
-    "sha256": "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
-    "sprites": 64,
-    "dimensions": [256, 256]
-  }
-}
-\`\`\`
+Whenever \`tools/doteshi_assets.py bake\` runs, it computes per-cell pixel hashes for the baked \`res/atlas.png\` bands and verifies them against \`doteshi.lock.json\`. Any unintended pixel shift or palette drift is caught immediately before commit.
 
 ---
 
 ### The Content Kit Architecture (\`Kit.hpp\` & \`.rows\`)
 
-Game balance numbers (item stats, dialogue branches, enemy resistances) should never be hardcoded into C++ source files. In Mellangan, non-programmer designers author content in clean \`.rows\` text files:
+Dialogue exchanges, facts, people, and resources are authored as C++ aggregate initializer rows in \`src/content/<kind>/*.rows\` (for example, \`src/content/exchange/010-n02.rows\`, \`020-kettlestaithe.rows\`, \`030-tidemarket.rows\`, \`050-cultures.rows\`, and \`060-chiefs.rows\`):
 
-\`\`\`text
-# src/content/exchange/010-n02.rows
-# id | name          | tier | power | cost | damageType
-101  | Iron Broadsword| 1   | 18.5  | 45   | Physical
-102  | Cinder Blade  | 2    | 26.0  | 110  | Fire
-103  | Rime Dagger   | 2    | 22.0  | 95   | Cold
+\`\`\`cpp
+// src/content/exchange/010-n02.rows (compile-time aggregate fragment)
+// Included directly into kit::EXCHANGES[] inside src/content/Kit.cpp
+{
+  "x.maren.ford", P("role:elder"), 10,
+  {When{W::Act, 1}, When{W::Known, F("qf.ford.found")}},
+  {Say{...}},
+  {Option{...}},
+  {Then{...}},
+},
 \`\`\`
 
-#### Zero-Allocation Tabular Parsing
+#### Zero-Allocation Compile-Time Inclusion
 
-At startup, \`src/content/Kit.cpp\` parses these files into flat, contiguous arrays called \`content::KINDS[]\`. Strings are mapped directly into the engine's 15-byte SSO \`String\` storage. Querying an item by ID is a single $\\mathcal{O}(1)$ array lookup with zero pointer indirection and zero heap allocation.
+At CMake configure time, \`.rows\` files are gathered into \`build/gen/content/*.inc\` and \`#include\`d directly into \`kit::EXCHANGES[]\` (84 dialogue exchanges total) and related tables in \`src/content/Kit.cpp\`. Cross-table keys (\`R()\`, \`F()\`, \`P()\`, \`SRC()\`) are validated at compile time via \`consteval\` helpers and audited at test time by \`contentFaults()\` (\`src/meta/Content.cpp\`). \`src/content/Kinds.cpp\` registers six \`KINDS[]\` tables (\`resource\`, \`fact\` \`qf.*\`, \`person\`, \`exchange\` \`x.*\`, \`formula\` \`f.*\`, and \`piece\` \`p.*\`), and \`--content-report\` (\`src/content/Report.cpp\`) writes Markdown tables, key ledgers, and a German glossary audit into \`build/content/\`.
 
 ---
 
@@ -8337,12 +8247,12 @@ At startup, \`src/content/Kit.cpp\` parses these files into flat, contiguous arr
 Maintaining a codebase of over 500 C++ source files requires strict adherence to style guidelines. Mellangan runs an automated linting wrapper:
 
 \`\`\`bash
-python tools/lint.py --fix
+python tools/lint.py --changed --fix
 \`\`\`
 
-- **Clang-Format Enforcement:** Ensures uniform indentation (2 spaces), bracket placement, and pointer alignments across all files.
-- **Clang-Tidy Modernization:** Enforces modern C++20 idioms: detecting redundant copies, suggesting \`std::move\`, flagging uninitialized struct members, and replacing raw pointers with safe references.
-- **Baseline Suppression:** Historic legacy warnings are tracked in \`tools/lint_baseline.txt\`, preventing legacy code from blocking active pull requests while ensuring that all newly authored code is 100% clean.`,
+- **Clang-Format Enforcement:** Ensures uniform indentation (2 spaces), bracket placement, and pointer alignment across all files.
+- **Clang-Tidy Modernization:** Enforces modern C++20 idioms and catches redundant copies, uninitialized members, and lifetime hazards.
+- **Style Baseline (\`tools/lint_baseline.txt\`):** Used specifically by the opt-in \`--style\` source-level checker (\`--style --write-baseline\`), keeping legacy counts from blocking active work while catching regressions in newly written code.`,
     mermaidCharts: [
       {
         title: "Doteshi Procedural Bake & Pixel-Hash Lock Workflow",
@@ -8380,10 +8290,10 @@ flowchart TD
   },
   {
     id: "roads-wayfinding-landmarks",
-    title: "Procedural Roads, A* Planner, Wayfinding & 26 Overworld Curiosities",
+    title: "Procedural Roads, A* Planner, Wayfinding & 30 Overworld Curiosities",
     category: "world",
     summary:
-      "Bounded A* countryside road planning with bridges and tunnels, readable EN/DE wayfinding signs, all 26 deterministic biome curiosities, Morrigan's three priced crow-shrines, and Zoktor Doidberg.",
+      "Ahead-of-time bounded A* road planning with Gabriel/lune hub links, bridges and tunnels, readable EN/DE wayfinding signs, all 30 deterministic biome curiosities, Morrigan's three crow-shrines, and Zoktor Doidberg.",
     sourceFiles: [
           "src/level/Roads.hpp",
           "src/level/Roads.cpp",
@@ -8398,123 +8308,73 @@ flowchart TD
     ],
     content: `### The Geography of Connection: Why Natural Roads Matter
 
-In procedural game worlds, paths connecting settlements often look synthetic: either perfectly straight Euclidean lines that plow through mountains and plunge through deep lakes, or jagged, chaotic 90-degree zigzags produced by naive grid pathfinding. In the real world, roads follow geography: ancient travelers followed riverbanks, contoured along mountain ridges, avoided impassable cliffs, and bridged rivers at their narrowest fords.
+In procedural game worlds, paths connecting settlements often look synthetic: either rigid straight lines that plow through cliffs and deep lakes, or jagged 90-degree zigzags from naive grid pathfinding.
 
-In Mellangan, overworld roads are not decorative art decals stamped on the map: they are living computational conduits generated by \`src/level/Roads.cpp\`. They dynamically bridge terrain heights, avoid deep water, guide wandering merchant caravans, orient lost players through bilingual wayfinding posts (\`Wayfinding.cpp\`), and lead to 26 mysterious procedural landmarks and crow-shrines (\`Oddity.cpp\`, \`Morrigan.cpp\`).
+In Mellangan, overworld roads are planned by \`src/level/Roads.cpp\` ahead of the player and revealed whole once complete. They follow terrain contours, cross narrow water via bridges and hills via tunnels, orient travelers through bilingual wayfinding posts (\`Wayfinding.cpp\`), and complement 30 deterministic biome curiosities (\`Oddity.cpp\`) and three Morrigan crow-shrines (\`Morrigan.cpp\`).
 
 ---
 
-### Bounded A* Road Planner Architecture
+### Bounded A* Road Planner & Ahead-of-Time Network (\`Roads.hpp\` / \`Roads.cpp\`)
 
-If you run an unrestricted $A^{*}$ search across a continuous $2048 \\times 2048$ overworld tilemap, the priority queue can expand over 4,000,000 cells, requiring gigabytes of memory and stalling the CPU for hundreds of milliseconds. Mellangan avoids this frame hitching by employing **Time-Sliced Bounded $A^{*}$ Planning**:
+Running an unrestricted $A^{*}$ search across an infinite overworld would stall the CPU. Mellangan partitions the world into \`AREA = 120\` tile cells and runs time-sliced bounded $A^{*}$ planning with Gabriel/lune natural neighbour topology:
 
 \`\`\`cpp
-// src/level/Roads.cpp
-constexpr int SAMPLES = 48, BUDGET = 64;
-
-void Planner::begin(Point a, Point b, Sample read, const void *data) {
-  from = a, to = b, sample = read, ctx = data;
-  result.clear(), cells.clear(), open = {};
-  if (distance(a, b) > 360) return; // Cap maximum road search span
-  x0 = std::min(a.x, b.x) - 32, y0 = std::min(a.y, b.y) - 32;
-  w = std::abs(a.x - b.x) + 65, h = std::abs(a.y - b.y) + 65;
-  cells.resize(size_t(w) * h);
-  /* initialize start cell and open priority queue */
-}
+// src/level/Roads.hpp
+constexpr int SAMPLES = 32, BUDGET = 64, GREED = 16;
+constexpr int BEND = 1, LINE = 3, AHEAD = 2, AREA = 120, SPAN = 12;
 \`\`\`
 
-#### Key Architectural Limits
+#### Key Architectural Rules (RW1 / RW2)
 
-1. **Maximum Distance Bounding ($360$ Tiles):** The planner refuses paths exceeding 360 tiles. Continental highways are assembled by chaining local road segments between intermediate milestones rather than attempting one massive transcontinental path.
-2. **Local Bounding Box ($+32$ Margin):** The search area is constrained to a rectangular bounding box encompassing points $A$ and $B$ plus a 32-tile margin on each side. The algorithm cannot wander aimlessly across unrelated biomes.
-3. **Time-Sliced Execution (\`BUDGET = 64\`, \`SAMPLES = 48\`):** The search runs inside \`Planner::advance(budget)\`. In each tick, the planner pops at most 64 nodes from the priority queue and samples at most 48 raw terrain queries. If the road is not finished, it suspends execution and yields control back to the game loop. The player experiences silky-smooth 60 Hz rendering while roads build progressively in the background.
+1. **No Shrines on the Road Network:** \`important(const Structure &s)\` explicitly excludes \`StructureKind::Shrine\` and links founded towns, landmarks, castles, and mines.
+2. **Gabriel / Lune Natural Neighbour Links:** \`Network::develop\` connects hub \`own\` to \`other\` within \`REACH = 1\` only when no third hub lies inside their lune (\`far(own, third) < length && far(other, third) < length\`), producing natural branching hubs rather than a rigid grid.
+3. **Planned Ahead & Revealed Whole:** \`Network::survey\` requests rings \`1..AHEAD (2)\` around the player's \`AREA = 120\` cell, and \`Network::warm\` pre-builds the 3×3 neighborhood synchronously on load. \`Network::reveal\` only publishes an edge once both endpoint areas finish all edges, so roads never visibly grow in front of the player.
+4. **Spurs Join Existing Highways:** Non-hub spurs wait until their hub is \`settled()\`, then seed \`lane\` with existing hub-to-hub road tiles flagged as \`Ground::Road\` so side paths merge cleanly into nearby highways.
+5. **Time-Sliced Budget (\`BUDGET = 64\`, \`SAMPLES = 32\`):** Each tick pops at most 64 nodes and performs at most 32 cold terrain probes (aborting a path if \`visits > 48000\`).
 
 ---
 
 ### Terrain Cost Weighting: How Roads Hug Contours
 
-The magic of Mellangan's organic roads lies in its cost heuristic inside \`Roads.cpp\`:
+Inside \`src/level/Roads.cpp:98–142\`, step costs balance directness against natural geography:
 
-\`\`\`cpp
-// Cost calculation when offering neighbor cells
-int cost = 10; // Base flat ground cost
-if (nextLevel != currentLevel) {
-  if (isRamp(next)) cost += 15; // Natural slope transition
-  else cost += 200;            // Steep cliff penalty
-}
-if (isWater(next)) cost += 300; // Major water avoidance penalty
-if (facing != previousFacing) cost += 4; // Inertia penalty against sharp turns
-\`\`\`
-
-- **Inertia Penalty ($+4$):** Changing direction incurs a penalty. This encourages the planner to maintain long, graceful curves rather than fluttering between cardinal directions every tile.
-- **Cliff Avoidance ($+200$):** Climbing an abrupt cliff face without a natural ramp is heavily penalized, forcing the pathfinder to seek mountain passes or valley floors.
-- **Water Bridges ($+300$):** Crossing water is penalized unless the river narrows to a width that can be spanned by bridge timber, guiding roads directly toward natural fords.
+- **Existing Road Reuse (\`Ground::Road\`):** \`4 + change * 4\` (strongly prefers merging onto already-planned highways).
+- **Normal Ground (\`change <= 1\`):** \`10 + rough (0..12) + change * (Ramp ? 4 : 65) + (turn ? BEND : 0) + stray(next)\`, where \`stray\` adds \`min(perpDist, 24) * LINE (3)\` to keep roads near the straight corridor while wandering gently with the land.
+- **Bridges & Tunnels:** Water bridges (\`span = 2..SPAN (12)\`) cost \`span * 30 + 40\`; hillside tunnels (\`span = 2..SPAN * 2 (24)\`) cost \`span * 15 + 40\`.
 
 ---
 
-### Bilingual Wayfinding Posts & Distance Fields
+### Bilingual Wayfinding Posts (\`src/level/Wayfinding.cpp\`)
 
-Along the road network, travelers encounter carved wooden signposts implemented in \`src/level/Wayfinding.cpp\`. When the hero approaches within 48 pixels of a signpost, the game displays distance and direction to the nearest settlements:
-
-\`\`\`cpp
-// src/level/Wayfinding.cpp
-struct Sign {
-  int x, y;
-  String english;
-  String deutsch;
-  int distanceTiles;
-  int directionCardinal; // 0=North, 1=East, 2=South, 3=West
-};
-\`\`\`
-
-#### Distance Field Calculation
-
-Signpost mileage is not calculated using as-the-crow-flies Euclidean distance: it computes the actual walking path distance along the verified road network. A town 50 tiles away behind an impassable granite cliff will correctly report \`140 Schritt / 140 paces\` because the traveler must walk around the mountain gorge to reach the gate.
+Approaching within \`READ = 44\` pixels of a wayfinding signpost at a town gate, junction, landmark, or player signpost queries \`world::roads->guides()\` (BFS along the road network) for up to two \`Destination\` records (\`name\`, \`x\`, \`y\`, \`tiles\`, nearest town plus nearest named landmark) and renders an 8-direction \`bearing()\` in English or German, falling back to a labelled straight-line direction when no road route exists.
 
 ---
 
-### The 26 Overworld Curiosities (\`src/campaign/Oddity.cpp\`)
+### The 30 Overworld Curiosities (\`src/campaign/Oddity.cpp\`)
 
-The countryside is dotted with 26 handcrafted, procedurally seeded curiosities. These are not empty decorative props: each curio possesses unique lore, visual flourishes, and gameplay interactions:
-
-| Index | Curiosity Name | Biome Placement | Gameplay Interaction & Effect |
-| :--- | :--- | :--- | :--- |
-| 1 | **Star-Fallen Monolith** | Crag / Mountain | Grants temporary arcane shielding when touched under starlight |
-| 2 | **Hollow Willow** | Riverbank / Fen | Restores survival stamina and reveals nearby fishing spots |
-| 3 | **Forgotten Kiln** | Clay Flats / Scrub | Allows field smelting of raw copper and iron ore without a town forge |
-| 4 | **Barrow Cairn** | Tundra / Taiga | Disturbs ancient guardian shades; yields runic grave goods |
-| 5 | **Petrified Grove** | Petrified Basin | Harvestable ancient petrified resin used in masterwork alchemy |
-| 6 | **Crow-Shrine of Morrigan**| Crossroads / Heather| Accepts silver offerings for omens, crowsight, or swift travel |
-| ... | *20 Additional Curiosities* | Worldwide | Dispersed across all 30 biomes via deterministic noise hashes |
+\`Oddity.hpp\` sets \`KINDS = BIOME_COUNT\` (**30**): one deterministic one-use landmark per biome across 48×48 cells, remembering each visit per world hash. This comprises the 12 classic biome curiosities (Wishing Well, Hollow Oak, Scarecrow King, Spiral Stone, Restless Cairn, Frozen Adventurer, Petal Shrine, Wisp Lantern, Mirage Merchant, Idol of Many Teeth, Baobab Stump, Ember Geyser), 14 expansion biome curiosities (Crystal Fields through Starfall), and 4 coastal curiosities (**Barnacle Buoy**, **Drift Cask**, **Pirate's Sandcastle**, and **Castaway's Hearth**).
 
 ---
 
 ### Morrigan Crow-Shrines (\`src/campaign/Morrigan.cpp\`)
 
-Among the most atmospheric landmarks are the three **Crow-Shrines of the Morrigan**. Stationed at desolate crossroads, these iron shrines are roosts for the three-eyed ravens of fate:
-
-\`\`\`cpp
-// src/campaign/Morrigan.cpp
-constexpr int EYE_COIN = 15, FEATHER_COIN = 25, TALON_COIN = 40;
-\`\`\`
-
-The player can drop coins into the shrine's stone basin to invoke one of three pacts:
-1. **The Raven's Eye (15 Coins):** Clears the fog of war across a 600-tile radius, unveiling hidden dungeons, ambushes, and ore veins on the world map.
-2. **The Raven's Feather (25 Coins):** Bestows +20% travel speed along roads and immunity to swamp mire and snow slowdown for one campaign day.
-3. **The Raven's Talon (40 Coins):** Strikes the player with an omen of retribution: the next elite foe encountered takes double damage on the opening strike.`,
+Three **Crow-Shrines of the Morrigan** stand far out in the wilds (700 to 1,400 tiles from Hearthwick). They do not charge coins; instead, \`OFFERS[WISHES]\` grants one wish per shrine and names its permanent price:
+1. **Wealth:** Grants a windfall of gold at the cost of drawing heavy Lantern Synod scrutiny.
+2. **Flesh:** Grants a positive mutation paired with a permanent defect mutation.
+3. **Sight:** Unveils a wide radius of the world chart (\`chart.unveil\`) at the cost of an affliction.`,
     mermaidCharts: [
       {
-        title: "Incremental A* Roadway Planner & Budget Cap",
+        title: "Incremental A* Roadway Planner & Whole-Edge Reveal",
         chart: `
 flowchart LR
     classDef node fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef work fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
     classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Hubs["Survey Towns, Landmarks,<br/>Shrines & Mines"]:::node
-    Loop["Planner::advance(64)<br/>Max 48 Cold Terrain Probes / Tick"]:::work
-    Types["Classify Step Kinds:<br/>Path, Bridge (Water), Tunnel (Relief)"]:::work
-    Chart["Paint Wheel Ruts + Chart Sync +<br/>Wayfinding Guide Signs"]:::out
+    Hubs["Survey Towns, Landmarks,<br/>Castles & Mines (No Shrines)"]:::node
+    Loop["Planner::advance(64)<br/>Max 32 Cold Terrain Probes / Tick"]:::work
+    Types["Classify Step Kinds:<br/>Path, Bridge (<=12), Tunnel (<=24)"]:::work
+    Chart["Whole-Edge Reveal + Wheel Ruts +<br/>Wayfinding Guide Signs"]:::out
 
     Hubs --> Loop --> Types --> Chart
 `,
@@ -8527,8 +8387,8 @@ flowchart TD
     classDef mor fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef zok fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
 
-    O["26 Biome Oddities (48x48 Cells)<br/>12 Classic + 14 Frontier<br/>Remembered Once per World Hash"]:::odd
-    M["3 Morrigan Crow-Shrines (700..1400 Tiles)<br/>Gold (+40 Scrutiny), Flesh (+Flaw),<br/>or Sight (+Affliction)"]:::mor
+    O["30 Biome Oddities (48x48 Cells)<br/>12 Classic + 14 Expansion + 4 Coast<br/>Remembered Once per World Hash"]:::odd
+    M["3 Morrigan Crow-Shrines (700..1400 Tiles)<br/>Gold (+Scrutiny), Flesh (+Defect),<br/>or Sight (+Affliction)"]:::mor
     Z["Zoktor Doidberg (Act I <= 512 Tiles)<br/>Moves Every 3 Days; Mine Boots Reward<br/>& Daily Sprint Race (Key 2)"]:::zok
 `,
       },
@@ -8674,7 +8534,8 @@ inline bool attackHits(int die, int bonus, int armorClass) {
 #### 4. Verdant Ward (Restoration & Shielding)
 - **Mechanic:** Draws healing vitality from the earth.
 - **Healing:** Restores $2d8 + \\text{abilityModifier}$ hit points.
-- **Shield:** Grants a temporary 2-hit physical barrier that blocks incoming projectile strikes completely.`,
+- **Shield:** Calls \`caster.shield(2)\`, granting **2 seconds of invulnerability** on the player (\`Player::invuln = std::max(invuln, 2.0f)\`).
+- **Casting Controls:** All four d20 Dice Spells are cast with keyboard keys \`5\`, \`6\`, \`7\`, and \`8\` (or gamepad \`LB\` + D-pad, \`Input.cpp:327–338\`).`,
     mermaidCharts: [
       {
         title: "3-Wedge Web Skill Tree Ring & Keystone Layout",
@@ -8743,74 +8604,48 @@ Mellangan's overworld is not an empty sandbox populated by random monster spawns
 
 ---
 
+### Six Banner Cultures, Standards & Visual Identity (\`CultureLook.hpp\`)
+
+Alongside the four sovereign nations (whose palettes in \`src/entity/Faction.cpp:159\` use royal blue \`{74,110,214}\` for Crownlands, bronze \`{182,104,64}\` for Anvilmark, and verdigris \`{60,158,124}\` for Sandwells), six human banner cultures roam under parent-faction standing (\`src/level/Group.cpp:185–194\`): **Saltmarch** (Coinroad), **Marshwrights** (Freeblades), **Canopy Courts** (Rootsworn), **Deepward Guilds** (Coinroad), **Gravewardens** (Synod), and **Glasswrights** (Synod).
+
+All ten cultures carry distinct standards and three camp pieces in \`culture::LOOKS[]\` (\`src/level/CultureLook.hpp\`, \`src/AtlasF.hpp:78–88\`). \`LevelRender.cpp:125–150\` places camp pieces on a ring outside the members' formation so same-faction cultures read apart visually, raises the standard lit over the fire during festivals, and has marching patrol leaders carry their culture's standard.
+
+---
+
 ### Voronoi Realm Partitioning (\`src/level/Realm.cpp\`)
 
-How does the game assign thousands of square kilometers of procedural wilderness to individual kingdoms?
-In \`src/level/Realm.cpp\`, the engine partitions the world into macro-cells using a weighted Voronoi diagram:
+\`src/level/Realm.cpp\` partitions the continent into nation realms using unweighted Euclidean Voronoi cells over macro-regions:
 
-$$D_i(x, y) = \\sqrt{(x - x_i)^2 + (y - y_i)^2} \\times W_{\\text{elevation}}$$
+$$D_i(rx, ry) = \\sqrt{(sx_i - (rx + 0.5))^2 + (sy_i - (ry + 0.5))^2}$$
 
 \`\`\`cpp
 // src/level/Realm.cpp
-constexpr int REGION = 96, CELL = 4;
+constexpr int REGION = 96, CELL = 4; // 4x4 regions = 384x384 tiles per seat cell
 \`\`\`
 
-- **Macro-Regions ($96 \\times 96$ Tiles):** The continental map is divided into macro-regions of $96 \\times 96$ tiles.
-- **Cell Sampling ($CELL = 4$):** Rather than evaluating every single tile, the Voronoi algorithm samples at 4-tile stride intervals, dramatically accelerating world generation while preserving smooth, organic national borders.
-- **Natural Boundary Conformance:** Elevation changes and wide water channels add steep penalties to the distance metric. As a result, national boundaries naturally align with mountain ridges and river gorges rather than drawing artificial straight lines across the earth.
+- **Macro-Regions ($96 \\times 96$ Tiles):** Each region belongs to the nearest nation seat placed within a \`CELL = 4\` (4×4 region, 384×384 tile) macro-cell, biased by biome affinity.
+- **Claim Overrides:** \`realm::owner(rx, ry)\` checks \`Campaign::claims\` first so conquered border marches persist across reloads.
 
 ---
 
 ### Territorial Seizures & Non-Seat Region Capture
 
-National borders are not static lines on a map: they shift dynamically based on player warfare and faction skirmishes via \`realm::seize()\`:
-
-\`\`\`cpp
-// src/level/Realm.cpp
-bool seize(int rx, int ry, Faction newOwner) {
-  if (isCapitalSeat(rx, ry)) return false; // Capital seats can never be seized by simple skirmishes
-  Region &reg = regionAt(rx, ry);
-  if (reg.owner == newOwner) return false;
-  reg.owner = newOwner;
-  reg.contested = false;
-  recomputeBorders();
-  return true;
-}
-\`\`\`
-
-#### The Capital Seat Invariant
-
-Notice line 2: \`if (isCapitalSeat(rx, ry)) return false\`. A kingdom's ancestral capital seat is permanent: it cannot flip allegiance through wandering border patrol skirmishes. Border outposts, road toll-gates, mining camps, and frontier watchtowers, however, flip allegiance as soon as local garrisons are overwhelmed, immediately updating road tariffs and town guard allegiances.
+When a border skirmish resolves on a realm seam, \`realm::seize(rx, ry, f)\` checks \`!claimed || !nation(f) || seat(rx, ry) || owner(rx, ry) == f\` plus neighbor adjacency (\`borders\`), records the new owner in \`Campaign::claims\`, and invalidates the local cache via \`forget()\`. Ancestral capital seats (\`seat(rx, ry)\`) can never be seized by border skirmishes.
 
 ---
 
 ### Border Wars, Skirmishes & Feuds (\`Feuds.cpp\`, \`Revels.cpp\`)
 
-Along contested borders, rival patrol groups encounter one another in dynamic real-time battles:
-
-- **Tension Escalation:** When a patrol kills a rival faction squad, the regional feud meter rises. At threshold 100, the border enters active warfare.
-- **Fortify Mechanics (\`fortify\`):** The defending nation deploys autonomous \`Watchtower\` artillery and reinforces road barricades.
-- **Wavering Morale (\`waver\`):** If a squad's captain is slain or casualties exceed 60%, the remaining soldiers suffer morale breakdown, fleeing toward their home territory.
-- **Settlement Treaties (\`settle\`):** After prolonged stalemates, neutral merchant brokers negotiate ceasefire truces, restoring open trade passage.
+Along contested borders, rival patrol groups clash in real time:
+- **Fortify & Uncertain Fortune:** First contact within \`WAR_SIGHT (300 px)\` rolls battle fortune plus national happening might, weakening the luckless side for 30 seconds.
+- **Wavering Morale (\`waver\`):** Once surviving members drop below half initial size, squads roll rout odds and may flee.
+- **Settlement (\`settle\`):** The victor gains standing if the hero aided them and seizes the contested border march via \`realm::seize()\`.
 
 ---
 
-### National Leader Voices & Diplomatic Hail Graphs
+### Culture Voices & Diplomatic Greetings (\`src/campaign/Voices.cpp\`)
 
-Interacting with national heralds and faction rulers in \`src/campaign/Voices.cpp\` triggers dynamic dialogue graphs influenced by the player's global reputation:
-
-\`\`\`cpp
-// src/campaign/Voices.cpp
-String hail(Faction f, int standing) {
-  if (standing >= 80)  return lang.hailHonored(f);
-  if (standing >= 20)  return lang.hailFriendly(f);
-  if (standing >= -20) return lang.hailNeutral(f);
-  if (standing >= -80) return lang.hailSuspicious(f);
-  return lang.hailHostile(f);
-}
-\`\`\`
-
-A player carrying high standing with Silverbough will be welcomed into elven sacred groves with open trade and ancient root boons, but approaching an Anvilmark dwarven stronghold while allied with their ancient rival triggers immediate archery warnings and closed iron gates.`,
+\`src/campaign/Voices.cpp\` drives faction and culture speech through \`voices::line(f, Disposition, aggro, war, sided, roll)\` and \`voices::greet(f, Disposition, aggro, roll)\`, selecting lines by \`Disposition\` band (\`< Indifferent\`, \`== Indifferent\`, \`> Indifferent\`) plus active war and ally overrides, in both English and German.`,
     mermaidCharts: [
       {
         title: "Voronoi Realm Ownership, Border Seams & War Seizure",
@@ -8872,92 +8707,57 @@ In \`src/campaign/Economy.cpp\`, Mellangan models an elastic, living supply-and-
 
 ---
 
-### Supply, Demand & Price Elasticity Mathematics
+### Culture Trade Multipliers & War Scarcity (\`src/campaign/Economy.cpp\`)
 
-The market valuation of an item lot is determined dynamically inside \`Economy.cpp\` using a localized elasticity curve:
-
-$$P = P_0 \\times \\left(1.0 + \\alpha \\cdot \\frac{D - S}{\\max(1, S + D)}\\right) \\times M_{\\text{war}}$$
+Rather than a continuous supply/demand curve, \`Economy.hpp\` and \`Economy.cpp\` define fixed trade profiles across all 10 cultures (\`TRADES[10]\`) using clear multipliers over a base lot value (\`LOT * UNIT = 5 * 4 = 20\` gold):
 
 \`\`\`cpp
-// src/campaign/Economy.cpp
-constexpr float ELASTICITY = 0.45f;
-constexpr float TARIFF_PEACE = 1.0f, TARIFF_WAR = 1.65f;
-
-int price(int basePrice, int supply, int demand, bool wartime) {
-  float ratio = float(demand - supply) / float(std::max(1, supply + demand));
-  float modifier = 1.0f + ELASTICITY * ratio;
-  float tariff = wartime ? TARIFF_WAR : TARIFF_PEACE;
-  return std::max(1, int(float(basePrice) * modifier * tariff));
-}
+// src/campaign/Economy.hpp
+constexpr int LOT = 5, UNIT = 4;
+constexpr float MAKES = 0.6f, NEEDS = 1.8f, SCARCE = 1.5f, ABROAD = 1.3f, FAMINE = 2.0f;
 \`\`\`
 
-#### Step-by-Step Price Fluctuation Example
-
-Let us observe an actual trade transaction for a sack of Grain ($P_0 = 20\\text{ gold}$):
-1. **Peacetime Harvest Surplus:** Supply $S = 80$, Demand $D = 20$, Peacetime.
-   - Ratio: $(20 - 80) / (80 + 20) = -60 / 100 = -0.60$.
-   - Modifier: $1.0 + 0.45 \\times (-0.60) = 1.0 - 0.27 = 0.73$.
-   - Final Price: $20 \\times 0.73 \\times 1.0 = 14\\text{ gold}$ (grain is cheap, farmers eager to sell).
-2. **Wartime Winter Famine:** Supply $S = 10$, Demand $D = 90$, Wartime blockade active.
-   - Ratio: $(90 - 10) / (10 + 90) = 80 / 100 = +0.80$.
-   - Modifier: $1.0 + 0.45 \\times (+0.80) = 1.0 + 0.36 = 1.36$.
-   - Tariff: $1.65$ (war tax).
-   - Final Price: $20 \\times 1.36 \\times 1.65 = 44\\text{ gold}$ (more than double normal price!).
+- **Producer Goods (\`MAKES = 0.6f\`):** Stalls sell what their own culture produces cheaply (base lot \`20 * 0.6 = 12\` gold).
+- **Need Buy Orders (\`NEEDS = 1.8f\`):** Stalls pay a premium for goods their culture lacks (\`20 * 1.8 = 36\` gold).
+- **Wartime Route Disruption (\`SCARCE = 1.5f\`, \`FAMINE = 2.0f\`):** Trade routes count every producer of a material; only when war cuts **all** producers from the buyer does the buy order jump by \`SCARCE (1.5x)\`, with an additional \`FAMINE (2.0x)\` spike on food. Foreign trade applies \`ABROAD = 1.3f\`.
 
 ---
 
 ### The Ten Cultural Festivals (\`src/campaign/Festival.cpp\`)
 
-Culture in Mellangan is measured by a continuous 10-day calendar cycle. Every tenth day, nations pause their daily toil to celebrate one of ten cultural rites:
+Each of the 10 cultures celebrates its own festival on a 10-day cycle staggered by world seed via \`(day + offset(c, salt)) % 10 == 0\`, with five possible moods (\`Somber\`, \`Solemn\`, \`Merry\`, \`Elated\`, \`Ecstatic\`):
 
-| Day | Festival Name | Sponsoring Culture | Cultural Rites & Gameplay Modifiers |
-| :--- | :--- | :--- | :--- |
-| Day 10 | **Feast of the First Anvil** | Anvilmark Dwarves | Masterwork forging bonuses; alcohol flows freely, town guards suffer dropped-guard debuff |
-| Day 20 | **The Silver Solstice** | Silverbough Elves | Ancient forest spirits walk among mortals; sacred herbs bloom along riverbanks |
-| Day 30 | **The Sun Crown Revel** | The Crownlands | Grand jousting tourneys; high commodity trade volume, halved travel tariffs |
-| Day 40 | **Oasis Moon Concourse** | Sandwells Nomads | Exotic spice caravans arrive; black market gambling and rare relic auctions |
-| Day 50 | **Rite of the Pale Harvest** | Barrow Borderers | Ancestral remembrance; skeletal shades placated with grave honey offerings |
-| ... | *5 Additional Festivals* | Worldwide | Spanning seasonal solstices, equinoxes, and heroic commemorations |
+\`\`\`
+Culture       | Festival Name   | Culture       | Festival Name
+--------------|-----------------|---------------|----------------
+Crownlands    | Crowning Eve    | Marshwrights  | Stilt Dance
+Anvilmark     | Long Quaff      | Canopy Courts | Bloom Court
+Sandwells     | Dry Vigil       | Deepward      | Lamp Count
+Silverbough   | Moonrise Revel  | Gravewardens  | Night of Names
+Saltmarch     | Brine Wake      | Glasswrights  | Furnace Night
+\`\`\`
+
+Standing inside an active festival shifts the music track to match the rite's mood (\`Sound::feast\`), lights the culture's standard above the campfire, and plays its rite cue (\`Sound::rite\`).
 
 #### Feast Raids & 8-Day Reprisal Grief (\`avenge\`)
 
-Festivals are moments of profound vulnerability. When revelers are intoxicated and guards drop their vigilance (\`droppedGuard\`), rival factions or hostile players can launch a **Feast Raid**. 
-
-If the player commits sacrilege by attacking celebrants during a feast, the consequences are severe:
-- **Instant Faction Sacrilege:** $-150$ to $-200$ reputation hit.
-- **8-Day Reprisal Grief:** The victim nation enters an active state of grief. For the next 8 campaign days, vengeful bounty hunter strike squads (\`avenge\`) track the player relentlessly across all biomes, ambushing campfires under the dead of night.
+During a festival, revellers drop their guard and rival factions can strike the feast. Attacking celebrants incurs sacrilege (\`-150\`) or massacre (\`-200\`) penalties and triggers 8 days of reprisal grief (\`avenge\`).
 
 ---
 
 ### The Twelve National Happenings (\`src/campaign/Happening.cpp\`)
 
-Beyond predictable festivals, the overworld is shaken by 12 procedural global events called **Happenings**:
-
-1. **Iron Shortage:** Mine collapses in Anvilmark trigger a continent-wide surge in weapons pricing.
-2. **Locust Cloud:** Devastates agricultural output across the central plains, quadrupling bread costs.
-3. **Star Shower:** Celestial meteors strike mountain peaks, scattering glowing starlight ore for intrepid prospectors.
-4. **Plague of Spores:** Fungal miasma rises from the swamps, afflicting travelers with rot unless treated with Synod lime.
-5. **Grand Concourse:** International peace summits bring unique foreign diplomats and master trainers to capital cities.
+\`Happening.cpp\` defines 12 procedural national happenings, three per nation:
+- **Crownlands:** \`Royal Levy\`, \`Succession Quarrel\`, \`Bumper Harvest\`.
+- **Anvilmark:** \`Grudge Oath\`, \`Cave-In\`, \`Deep Vein\`.
+- **Sandwells:** \`Dry Year\`, \`Water Court\`, \`Glass Storm\`.
+- **Silverbough:** \`Long Twilight\`, \`Elder's Sleep\`, \`Seedfall\`.
 
 ---
 
 ### 112 Feats & Non-Intrusive Toast Queue (\`Feats.cpp\`)
 
-Mellangan tracks player mastery through 112 procedural and narrative **Feats**. To prevent immersion-breaking UI popups during intense combat, achievement notifications are handled through a non-intrusive toast queue:
-
-\`\`\`cpp
-// src/gui/AchievementToast.hpp
-class AchievementToast {
-public:
-  static constexpr float TOAST_DURATION = 4.5f;
-  void queue(int featId, const char *title, const char *desc);
-  void tick(float dt);
-  void render(Screen &s);
-};
-\`\`\`
-
-- **$96 \\times 96$ Emblem Atlas:** All 112 feat icons are compiled into a compact $96 \\times 96$ sprite atlas via \`tools/make_achievements.py\`, consuming less than $40\\text{ KB}$ of video memory.
-- **Bit-Packed Verification:** Feat criteria (e.g. killing 500 beasts without dying, crafting 10 runewords, resolving The Splintered Ford peacefully) are stored in compact 64-bit integer bitmasks, ensuring zero runtime CPU overhead during combat.`,
+Mellangan tracks player mastery through 112 **Feats** (\`FEAT_COUNT = 112\`, stored across two 64-bit bitfields \`Codex::feats\` and \`Codex::feats2\`, with a compile-time cap of 128). Unlock cards queue silently in the bottom-right corner via \`AchievementToast\` without pausing play, using a dedicated 96×96 emblem atlas (\`res/achievements.png\`, built by \`tools/make_achievements.py\`).`,
     mermaidCharts: [
       {
         title: "War Disruption -> Scarcity Pricing & Famine Orders (Economy.cpp)",
@@ -9070,7 +8870,7 @@ constexpr Move MOVES[int(Event::Count)] = {
   }
   \`\`\`
 
-If a wandering pack of wolves kills the Freeblade captain or the Grove Keeper diplomat before the treaty is signed, the Situation does not break or crash: it immediately fails with \`Cause::ActorLost\`, permanently locking out diplomatic resolutions and forcing martial outcomes.
+If a wandering pack of wolves kills the Freeblade captain or the Grove Keeper diplomat before the treaty is signed, \`lose()\` settles only that actor's linked **unit** (\`Pass\` and \`Claim\` become \`Phase::Resolved\`; only \`Strand\` becomes \`Phase::Failed\`) with \`Cause::ActorLost\`, without failing the whole Situation.
 
 ---
 
@@ -9083,16 +8883,16 @@ The Splintered Ford is decomposed into four modular sub-goals (\`Unit\`), each t
 3. **Strand (\`Unit::Strand\`):** Rescuing stranded pilgrims or merchants stranded on the far bank without supplies. The player provides survival rations: 4 produce lots and 3 restorative herbs.
 4. **Service (\`Unit::Service\`):** Re-establishing commercial courier dispatch and carriage escort across the border.
 
-#### Branch Outcomes & Rewards
+#### Branch Outcomes & Rewards (\`src/campaign/Ford.cpp:48–50\`)
 
-When all active units reach \`Phase::Resolved\`, the Situation resolves into one of four distinct cultural branches:
+When the Situation resolves, rewards follow \`GOLD[]\`, \`COIN[]\` (Coinroad standing), and \`ROOT[]\` (Rootsworn standing):
 
-| Branch Name | Cultural & Faction Meaning | Gold / Coin Loot | Campaign XP | World Impact |
+| Branch Name | Cultural & Faction Meaning | Gold | Coinroad Standing | Rootsworn Standing |
 | :--- | :--- | :--- | :--- | :--- |
-| \`Caravan\` | Commercial crossing fully reopened under merchant guild charter | 250 gold, 150 coin | +150 XP | Unlocks inter-nation road trade, caravans spawn |
-| \`GroveClosed\` | Sacred grove sealed against iron wagons; spirits placated | 300 gold, 180 coin | +150 XP | Awards 50 Root boons, ancient blessings granted |
-| \`Shared\` | Diplomatic compromise: toll revenue shared with grove keepers | 200 gold, 100 coin | +150 XP | Faction standing +60 with both Keepers and Freeblades |
-| \`Turned\` | Violent coup: occupiers slaughtered, ford fortified by hero | 0 gold, 0 coin | +150 XP | Installs autonomous player-aligned garrison |
+| \`Caravan\` | Commercial crossing reopened under merchant guild charter | 250 gold | +150 | +50 |
+| \`GroveClosed\` | Sacred grove sealed against iron wagons | 300 gold | +180 | 0 |
+| \`Shared\` | Diplomatic compromise: crossing shared with Keepers | 200 gold | +100 | +100 |
+| \`Turned\` | Violent coup: occupiers defeated, ford turned | 0 gold | 0 | 0 |
 
 ---
 
@@ -9437,7 +9237,7 @@ For each Campaign Act, the Synod establishes strict eradication quotas against l
 
 When the player tracks down a target faction's ancestral den, they face a moral and mechanical crossroad via \`Campaign::judge(level, spare)\`:
 
-1. **Purge the Den (\`spare = false\`):** The player eradicates the den inhabitants. The soil is treated with slaked lime (\`limeAround()\`), spawning a permanent barrier of \`Stuff::Limed\` with life $10^{4}$ seconds that repels undead and fungal rot. The player receives 150 purge gold and high Synod prestige.
+1. **Purge the Den (\`spare = false\`):** The player eradicates the den inhabitants. The soil is treated with slaked lime (\`limeAround()\`), spawning a long-lived barrier of \`Stuff::Limed\` ($10^{4}$ s) that repels undead and fungal rot. The player receives \`PURGE_GOLD * act * (member() ? 2 : 1)\` (\`150 * act\`, doubled for Synod members, \`CampaignSynod.cpp:115\`) and Synod standing.
 2. **Spare the Den (\`spare = true\`):** The player refuses the purge. The game triggers immediate excommunication:
    \`\`\`cpp
    rank::castOut(ranks, Faction::Synod);
@@ -9450,16 +9250,16 @@ When the player tracks down a target faction's ancestral den, they face a moral 
 
 ### Curios & Reliquary Caches
 
-Across the countryside, players encounter hidden stone **Caches** (\`src/campaign/Cache.cpp\`) and mystical **Curios** (\`src/campaign/Curio.cpp\`). Appraising a curio reveals one of 12 supernatural archetypes:
+Across the countryside, players encounter hidden stone **Caches** (\`src/campaign/Cache.cpp\`) and mystical **Curios** (\`src/campaign/Curio.cpp\`). Appraising a curio reveals one of 12 archetypes (a mix of boons and hazards):
 
-- \`Reveal\`: Illuminates all nearby dungeon stairs and hidden ore veins.
-- \`Mend\`: Restores 100% weapon durability and clears encumbrance fatigue.
-- \`Gild\`: Transmutes mundane iron scraps into pure gold coin.
-- \`Swarm\`: Summons a temporary vortex of defensive stinging hornets.
-- \`Curse\`: Afflicts the player with unpredictable status volatility in exchange for tripled magic find.
-- \`Thunder\`: Casts an instantaneous ring of chain lightning across the screen.
+- \`Reveal\`: Unveils nearby terrain on the world chart.
+- \`Mend\`: Closes wounds and restores player health (Mellangan has no weapon durability).
+- \`Gild\`: Grants pure gold coin.
+- \`Swarm\`: Negative hazard that calls the restless dead to attack you.
+- \`Curse\`: Negative hazard that sets an affliction in your blood.
+- \`Thunder\`: Calls down lightning around the hero.
 
-Players can burn blasphemous curios at Synod pyres (\`curio::burn()\`) to gain +15 Pyre Pardon, reducing Inquisition scrutiny and restoring peace with church patrols.`,
+Players can burn blasphemous curios at Synod pyres (\`curio::burn()\`) to gain Pyre Pardon, reducing Inquisition scrutiny.`,
     mermaidCharts: [
       {
         title: "Bastion Flow Field Wavefront Propagation & Collision Resolution",
@@ -9621,41 +9421,22 @@ The signal is downsampled to 15,768 Hz and quantized to 9-bit resolution, adding
 
 ---
 
-### The 32-Voice Low-Latency Game Mixer (\`src/audio/Sound.cpp\`)
+### The 32-Voice SDL3 Audio Stream Mixer (\`src/audio/Sound.cpp\`)
 
-In real-time gameplay, sound effects and musical stems are managed by a custom 32-voice stereo mixer (\`Sound.cpp\`):
+In real-time gameplay, sound effects, ambience beds, and music tracks are managed by \`src/audio/Sound.cpp\` over 32 pre-created mono 44.1 kHz \`SDL_AudioStream\` voices:
 
 \`\`\`cpp
 // src/audio/Sound.hpp
-class Sound {
-public:
-  static constexpr int VOICES = 32;
-  static void play(int soundId, double x, double y, float volume = 1.0f);
-  static void tick(double heroX, double heroY);
-};
+void play(float volume = 1.0f, float pitchJitter = 0.0f, float pitch = 1.0f);
 \`\`\`
 
-#### Inverse-Square Spatial Attenuation
+#### Oldest-Start Voice Replacement & Dedicated Jitter RNG
 
-When sounds are triggered at world coordinates $(x, y)$, the mixer computes spatial stereo panning and distance falloff relative to the player:
+\`Sound::play()\` enforces a per-effect minimum gap, scans \`voices[0..31]\` for an empty queue, and when all 32 streams are busy replaces the voice with the oldest start timestamp (\`voiceStarted[pick]\`). Pitch variation is drawn from a dedicated \`thread_local Rng jitter{0x5EED50D5ull}\` so audio playback never perturbs the deterministic simulation RNG. \`Sound::play()\` does not perform stereo panning or spatial attenuation internally; callers scale \`volume\` beforehand.
 
-$$d = \\sqrt{(x - x_{\\text{hero}})^2 + (y - y_{\\text{hero}})^2}$$
+#### Monster Voice Families (\`src/audio/FoeVoice.cpp\`)
 
-$$A(d) = \\frac{1}{1 + \\alpha d^2}, \\quad \\alpha = 0.00012$$
-
-$$\\text{Pan} = \\text{clamp}\\left(\\frac{x - x_{\\text{hero}}}{400.0}, -1.0, 1.0\\right)$$
-
-The left and right channels are weighted according to the constant-power panning law:
-
-$$L = \\cos\\left(\\frac{\\pi (\\text{Pan} + 1)}{4}\\right), \\quad R = \\sin\\left(\\frac{\\pi (\\text{Pan} + 1)}{4}\\right)$$
-
-#### LRU Voice Stealing
-
-During dense engagements involving hundreds of arrows and explosions, sound triggers can easily exceed 32 concurrent voices. When capacity is reached, the mixer selects the voice with the lowest computed audible energy ($A(d) \\times \\text{volume}$) and shortest remaining decay, preempting it cleanly without clipping through a 2 ms cosine ramp-down.
-
-#### Procedural Monster Voices (\`src/audio/FoeVoice.cpp\`)
-
-Enemy roars, grunts, and shrieks are not recorded audio files. The engine synthesizes them at runtime in \`src/audio/FoeVoice.cpp\` using a parametric two-formant vocal tract filter excited by a sawtooth wave with randomized pitch jitter, producing unique guttural shrieks for every goblin and beast.`,
+\`src/audio/FoeVoice.cpp\` maps each \`EnemyKind\` to one of six pre-rendered WAV families (\`Sound::foe[6][3]\`: \`beast\`, \`folk\`, \`hulk\`, \`wing\`, \`spirit\`, \`ooze\` across \`alert\`, \`hurt\`, and \`death\`) and scales volume with linear distance falloff \`1 - dist / 420\` before invoking \`Sound::play()\`.`,
     mermaidCharts: [
       {
         title: "Procedural Music Generation & Loop Tail-Wrapping Pipeline",
@@ -9684,26 +9465,23 @@ flowchart TD
 `,
       },
       {
-        title: "Real-Time 32-Voice Low-Latency Spatial Audio Routing",
+        title: "Real-Time 32-Voice SDL3 Audio Stream Routing",
         chart: `
 flowchart TD
     classDef trig fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
     classDef mix fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
     classDef out fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
 
-    Event["Sound::play(id, x, y, vol) Trigger"]:::trig
-    VoiceAlloc{"Available Mixer Voice<br/>in 32-Slot Ring?"}:::mix
-    LRU["LRU Preemption: Steal Lowest Energy Voice<br/>Apply 2ms Cosine Ramp-Down Fade"]:::mix
-
-    PanCalc["Spatial Processing:<br/>Distance Attenuation: 1 / (1 + 0.00012 * d^2)<br/>Constant-Power Stereo Panning Law"]:::mix
-    PitchJitter["Pitch Randomization (+/- 5%)<br/>Prevent Machine-Gun Repetition Fatigue"]:::mix
-
-    BufferOut["Direct Stereo Accumulation into Audio Device Stream"]:::out
+    Event["Sound::play(volume, pitchJitter, pitch)"]:::trig
+    VoiceAlloc{"Empty Stream in<br/>32-Voice Pool?"}:::mix
+    Steal["Oldest-Start Replacement<br/>Pick Min(voiceStarted[i])"]:::mix
+    PitchJitter["Dedicated thread_local Rng<br/>pitch * (1 + jitter)"]:::mix
+    BufferOut["Queue Mono 44.1 kHz PCM into SDL_AudioStream"]:::out
 
     Event --> VoiceAlloc
-    VoiceAlloc -->|"Slot Available"| PanCalc
-    VoiceAlloc -->|"All 32 Busy"| LRU --> PanCalc
-    PanCalc --> PitchJitter --> BufferOut
+    VoiceAlloc -->|"Empty Stream"| PitchJitter
+    VoiceAlloc -->|"All 32 Busy"| Steal --> PitchJitter
+    PitchJitter --> BufferOut
 `,
       },
     ],
