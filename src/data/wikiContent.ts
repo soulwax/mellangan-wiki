@@ -195,20 +195,20 @@ sequenceDiagram
     participant Render as LevelRender.cpp
     participant VK2D as Vulkan2D GPU
 
-    Note over Main: Poll input; run zero or more fixed ticks per frame
-    Main->>Level: Game::play() calls level.tick() when play is active
+    Note over Main: Poll input and run zero or more fixed ticks per frame
+    Main->>Level: Game.play() calls level.tick() when play is active
     Note over Level: PROF_HOUSEKEEP (Begin)
     Level->>Level: night.tick(), spawner.tick(), explore(), hunt()
     Level->>Level: buildGrid() -> CSR Prefix-Sum cellStart[] & cells[]
     Note over Level: PROF_HOUSEKEEP (End) / PROF_THINK (Begin)
-    Level->>Workers: Barrier 1: workers.run(n, 256, Enemy::think)
+    Level->>Workers: Barrier 1, workers.run(n, 256, Enemy.think)
     Workers-->>Level: Sense & GoalQueue -> xWant, yWant
     Level->>Level: Combat and experience bookkeeping
-    Level->>Workers: Barrier 2: workers.run(n, 256, Enemy::move)
-    Workers-->>Level: Velocity integration & Level::collide
-    Level->>Workers: Barrier 3: workers.run(n, 256, Enemy::push)
+    Level->>Workers: Barrier 2, workers.run(n, 256, Enemy.move)
+    Workers-->>Level: Velocity integration and Level.collide
+    Level->>Workers: Barrier 3, workers.run(n, 256, Enemy.push)
     Workers-->>Level: Read CSR Grid -> xPush, yPush
-    Level->>Workers: Barrier 4: workers.run(n, 256, Enemy::settle)
+    Level->>Workers: Barrier 4, workers.run(n, 256, Enemy.settle)
     Workers-->>Level: Commit xPush, yPush & re-collide
     Note over Level: PROF_THINK (End) / PROF_ENTITIES & PARTICLES
     Level->>Level: Tick Owned Entities, Compact Particles, flush() Dead/Pending
@@ -1491,8 +1491,8 @@ stateDiagram-v2
     CheckInterrupts --> PreemptHead : interrupt->urgent(e, sense) == true
     PreemptHead --> ExecuteFront : goals.pushFront(FALTER / HIDE)<br/>head = (head + 7) & 7
     CheckInterrupts --> TickActiveGoal : No Urgent Interrupt
-    TickActiveGoal --> ExecuteFront : GoalState::Running (Write xWant, yWant)
-    TickActiveGoal --> PopHead : GoalState::Done (Up to 4 Cascade Steps/Tick)
+    TickActiveGoal --> ExecuteFront : Running, write xWant and yWant
+    TickActiveGoal --> PopHead : Done, up to 4 cascade steps per tick
     PopHead --> ExecuteFront : goals.pop() -> head = (head + 1) & 7
     PopHead --> [*] : Queue Exhausted -> next(s) Refill
 `,
