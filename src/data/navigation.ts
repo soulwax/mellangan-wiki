@@ -222,7 +222,7 @@ export const NAV_TREE: NavTreeGroup[] = [
         shortTitle: "32-Voice Audio Mixer, Biome Beds & QA Views",
       },
       {
-        id: "ouroboros-deep-dive",
+        id: "ouroboros",
         shortTitle: "How Ouroboros Really Works",
       },
       {
@@ -448,9 +448,9 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
         icon: Calculator,
       },
       {
-        id: "ouroboros-deep-dive",
+        id: "ouroboros",
         title: "How Ouroboros Works",
-        subtitle: "Bit twiddling & 4 serpents",
+        subtitle: "Bit twiddling & 8 serpents",
         icon: Cpu,
         badge: "LAB",
       },

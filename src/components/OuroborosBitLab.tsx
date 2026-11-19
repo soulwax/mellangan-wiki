@@ -224,7 +224,7 @@ export const OuroborosBitLab: React.FC = () => {
             </h4>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Live interactive execution of <code className="text-gold-300">src/other/Ouroboros.hpp</code>: Four CRTP Serpents, XOR-Linked Augury, and Operator <code className="text-gold-300">-&gt;*</code>
+            Interactive JavaScript model inspired by <code className="text-gold-300">src/other/Ouroboros.hpp</code>: Four CRTP Serpents, XOR-Linked Augury, and Operator <code className="text-gold-300">-&gt;*</code>
           </p>
         </div>
 
@@ -558,7 +558,7 @@ export const OuroborosBitLab: React.FC = () => {
               <div>
                 <span className="text-emerald-400 font-bold text-sm">Augury: Self-Traversing XOR-Linked List</span>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Compact 24-byte <code className="text-gold-300">Rite</code> nodes storing a single <code className="text-slate-200">link = prev ^ next</code> pointer.
+                  Four-node illustration of the eight-node C++ augury, using simulated addresses and <code className="text-slate-200">link = prev ^ next</code>.
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
@@ -639,10 +639,10 @@ export const OuroborosBitLab: React.FC = () => {
             <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800 text-[11px] text-slate-300 space-y-1">
               <span className="text-gold-400 font-bold flex items-center gap-1.5">
                 <Info className="w-3.5 h-3.5" />
-                <span>Why XOR-Linked Lists Validate Compiler Integrity:</span>
+                <span>How XOR-Linked Traversal Works:</span>
               </span>
               <p className="text-slate-400 leading-relaxed">
-                Doubly linked lists require 16 bytes of pointer storage per node. XOR-linked lists compress this into a single 64-bit integer (<code className="text-slate-200">link = prev ^ next</code>). Mellangan runs this in <code className="text-slate-200">consultOuroboros()</code> to guarantee that strict aliasing and pointer provenance optimizations in GCC/Clang/MSVC never corrupt bidirectional pointer reconstruction!
+                Doubly linked lists require 16 bytes of pointer storage per node. XOR-linked lists compress this into a single 64-bit integer (<code className="text-slate-200">link = prev ^ next</code>). The C++ header demonstrates this technique with eight nodes; pointer reconstruction is platform-dependent and is not a portability guarantee.
               </p>
             </div>
           </div>
