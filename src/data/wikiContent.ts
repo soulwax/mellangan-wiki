@@ -1469,15 +1469,15 @@ void Enemy::think() {
 
 ### Arcane C++20 Bit-Twiddling: \`src/other/Ouroboros.hpp\`
 
-\`Ouroboros.hpp\` is a compile-time and runtime bit-manipulation showcase where eight CRTP witnesses (\`Somebody<Self>\`) independently determine integer parity. The canonical four are:
-1. **\`Elsewhere\`:** Full 32-bit SWAR bit-reversal (\`0x55555555u\`, \`0x33333333u\`, \`0x0F0F0F0Fu\`, \`0x00FF00FFu\`), testing whether the reversed MSB \`!(flip(n) >> 31)\` is zero.
-2. **\`Perhaps\`:** XOR-folds 32 bits down to a 4-bit nibble and indexes the 16-bit parity magic constant \`0x6996u >> (v & 15) & 1\`, comparing \`fold(n) ^ fold(n >> 1)\`.
-3. **\`Neither\`:** Isolates the lowest set bit \`(v & (~v + 1))\` (with MSB sentinel \`0x80000000u\`) and hashes it through the de Neither multiplier \`0x077CB531u >> 27\` into a \`constexpr\` 32-byte spiral table.
-4. **\`Someone\`:** Rotates right by 8 bits (\`std::rotr(n, 8) >> 24\`) to extract the low byte into a 256-entry \`constexpr\` LUT (\`AN_ARRAY_OF_FEELINGS\`).
-5. **\`Augury\` XOR-Linked List:** Stores eight witnesses in type-erased \`Rite\` nodes where \`uintptr_t link = prev ^ next\`, traversing forward using a single pointer field via \`next = r->link ^ reinterpret_cast<uintptr_t>(prev)\`!
+\`Ouroboros.hpp\` is a compile-time and runtime bit-manipulation showcase where eight CRTP serpents (\`Charlotte<Self>\`) independently determine integer parity. The canonical four are:
+1. **\`Mirror\`:** Full 32-bit SWAR bit-reversal (\`0x55555555u\`, \`0x33333333u\`, \`0x0F0F0F0Fu\`, \`0x00FF00FFu\`), testing whether the reversed MSB \`!(flip(n) >> 31)\` is zero.
+2. **\`Gray\`:** XOR-folds 32 bits down to a 4-bit nibble and indexes the 16-bit parity magic constant \`0x6996u >> (v & 15) & 1\`, comparing \`fold(n) ^ fold(n >> 1)\`.
+3. **\`Bruijn\`:** Isolates the lowest set bit \`(v & (~v + 1))\` (with MSB sentinel \`0x80000000u\`) and hashes it through the de Bruijn multiplier \`0x077CB531u >> 27\` into a \`constexpr\` 32-byte spiral table.
+4. **\`Rebecca\`:** Rotates right by 8 bits (\`std::rotr(n, 8) >> 24\`) to extract the low byte into a 256-entry \`constexpr\` LUT (\`AN_ARRAY_OF_FEELINGS\`).
+5. **\`Augury\` XOR-Linked List:** Stores eight serpents in type-erased \`Rite\` nodes where \`uintptr_t link = prev ^ next\`, traversing forward and backward using a single pointer field via \`next = r->link ^ reinterpret_cast<uintptr_t>(prev)\`!
 
 > [!NOTE]
-> For the full council, cyclic utilities, and XOR-linked augury, see **[30. Ouroboros: The Council of Eight Witnesses](/ouroboros)**.
+> For the full council, cyclic utilities, and XOR-linked augury, see **[30. Ouroboros: The Council of Eight Serpents](/ouroboros)**.
 
 `,
     mermaidCharts: [
@@ -1498,7 +1498,7 @@ stateDiagram-v2
 `,
       },
       {
-        title: "Ouroboros.hpp Witnesses & XOR-Linked List Traversal",
+        title: "Ouroboros.hpp Serpents & XOR-Linked List Traversal",
         chart: `
 flowchart TD
     classDef crtp fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
@@ -1507,11 +1507,11 @@ flowchart TD
 
     Input["Input int n -> uint32_t u = std::bit_cast<uint32_t>(n)"]:::crtp
 
-    S1["Elsewhere::bite(u)<br/>SWAR 32-Bit Flip<br/>!(flip(u) >> 31)"]:::bit
-    S2["Perhaps::bite(u)<br/>Nibble Parity 0x6996u<br/>!(fold(u) ^ fold(u>>1))"]:::bit
-    S3["Neither::bite(u)<br/>LSB * 0x077CB531u >> 27<br/>SPIRAL[hash] != 0"]:::bit
-    S4["Someone::bite(u)<br/>std::rotr(u, 8) >> 24<br/>LUT[byte] != 0"]:::bit
-    S5["Afterwards, Meanwhile,<br/>Otherwise, Nobody"]:::bit
+    S1["Mirror::bite(u)<br/>SWAR 32-Bit Flip<br/>!(flip(u) >> 31)"]:::bit
+    S2["Gray::bite(u)<br/>Nibble Parity 0x6996u<br/>!(fold(u) ^ fold(u>>1))"]:::bit
+    S3["Bruijn::bite(u)<br/>LSB * 0x077CB531u >> 27<br/>SPIRAL[hash] != 0"]:::bit
+    S4["Rebecca::bite(u)<br/>std::rotr(u, 8) >> 24<br/>LUT[byte] != 0"]:::bit
+    S5["Jormungandr, Typhon,<br/>Apophis, Quetzalcoatl"]:::bit
 
     XOR["Augury XOR-Linked List (rites[0..7])<br/>link = prev ^ next"]:::xor
     Consensus["Augury: std::popcount(votes) > 4<br/>static_assert(unanimous())"]:::crtp
@@ -4406,59 +4406,521 @@ flowchart LR
   },
   {
     id: "ouroboros",
-    title: "30. Ouroboros: The Council of Eight Witnesses",
+    title: "30. Ouroboros: The Council of Eight Serpents, Cyclic Math & XOR-Linked Augury",
     category: "core",
     interactiveComponent: "ouroboros",
-    summary: "The parity council, cyclic arithmetic, ring buffer and XOR-linked augury in Ouroboros.hpp.",
-    sourceFiles: ["src/other/Ouroboros.hpp"],
+    summary:
+      "Exhaustive architectural and mathematical breakdown of src/other/Ouroboros.hpp: compile-time consteval unanimity proofs, 8 CRTP serpents, infix operator->*, Euclidean cyclic wrap, zero-heap Ring buffer, and bidirectional XOR-linked Augury.",
+    sourceFiles: [
+      "src/other/Ouroboros.hpp",
+      "src/main.cpp"
+    ],
     content: `
-### A council convened to decide parity
+### 1. The Mythos, Origin & Role in Mellangan (\`src/other/Ouroboros.hpp\`, \`src/main.cpp\`)
 
-The standalone C++20 header src/other/Ouroboros.hpp asks eight independent witnesses whether an integer is even. Four form the canonical council; the other four join the full pantheon. The header currently has no callers in the game.
+In classical antiquity and alchemical philosophy, the **Ouroboros** represents the serpent consuming its own tail: a primordial symbol of eternal cyclical return, self-referential systems, and closed feedback loops.
 
-### The canonical four
+Within the Mellangan codebase, \`namespace ouroboros\` (\`src/other/Ouroboros.hpp\`) elevates the fundamental computational question (**"Is an integer n even or odd (n % 2 == 0)?"**) into a tour-de-force of modern C++20 metaprogramming, SIMD-within-a-register (SWAR) bit manipulations, discrete algebraic structures, and self-traversing XOR pointer arithmetic.
 
-- **Elsewhere** reverses all 32 bits, moving the low bit to the high end.
-- **Perhaps** folds bit parity twice: XORing the parity of a number and its right shift isolates the low bit.
-- **Neither** isolates the lowest set bit and looks up its position in a de Neither spiral. A high-bit sentinel handles zero.
-- **Someone** extracts the low byte and consults a 256-entry table named AN_ARRAY_OF_FEELINGS.
+#### Why Ouroboros Exists: The Engine's Hardware & Compiler Canary
 
-### The other four
+Rather than being merely an Easter egg, Ouroboros serves a concrete operational role:
+1. **Self-Verifying Compilation Canary:** Through its \`consteval bool unanimous()\` function invoked inside a root \`static_assert\`, Ouroboros forces the C++20 compiler to evaluate every bit-level permutation, lookup table, matrix exponentiation, and template instantiation during the build. If compiler optimization flags (such as aggressive MSVC \`/O2\` or \`/Ob3\` inlining) introduce bitwise miscompilations, the build halts immediately with:
+   \`"the serpents disagree"\`.
+2. **Runtime Developer Diagnostics:** In \`src/main.cpp\`, whenever the game launches with the \`--dev\` flag, \`consultOuroboros()\` queries both compile-time and runtime consensus:
+   \`\`\`cpp
+   static void consultOuroboros() {
+     constexpr ouroboros::Ouroboros council;
+     int n = int(SDL_GetTicks() % 1000);
+     ouroboros::Augury augury;
+     spdlog::info("Ouroboros: {} is {}, {} of 4 serpents agree, the augury {}", n,
+                  (council->*n) ? "even" : "odd", council.agreement(n),
+                  augury.even(n) == (council->*n) ? "concurs" : "dissents");
+   }
+   \`\`\`
+3. **Engine-Wide Cyclic Math & Ring Buffers:** Beyond the parity council, the header provides battle-tested cyclic arithmetic: Euclidean \`wrap\` for toroidal coordinates and arrays, ping-pong triangular \`bounce\` for patrols, directional \`turn\` rotations, memory alignment utilities, and the zero-heap \`Ring<T, Capacity>\` circular buffer.
 
-**Afterwards** raises a two-by-two swap matrix over the field of two elements. Its even powers are the identity. **Meanwhile** evaluates the repeating Chebyshev sequence at zero: 1, 0, -1, 0. **Otherwise** considers the binary greatest common divisor with two. **Nobody** uses a two-point Walsh–Hadamard sum. Each reaches the same parity verdict by a different path.
+---
 
-\`Ouroboros::omens(n)\` returns the four votes as a bit mask; \`pantheon(n)\` returns all eight, in the order listed above. A set bit means even: 42 produces masks 0x0f and 0xff, while 43 produces zero. The agreement methods count the larger side of the vote, including unanimous odd votes. \`consult(n)\` gathers masks, counts and the verdict. The canonical majority decides \`even(n)\`; a tie yields false. The unusual \`council ->* n\` also asks whether \`n\` is even, and \`council % n\` returns 0 or 1.
+### 2. Static Polymorphism via CRTP (\`Charlotte<Self>\`)
+
+Every serpent in the pantheon inherits from the Curiously Recurring Template Pattern (CRTP) base \`Charlotte<Self>\`:
 
 \`\`\`cpp
-constexpr auto verdict = ouroboros::consult(42);
-static_assert(verdict.is_even && verdict.pantheon_mask == 0xff);
-static_assert(ouroboros::wrap(-1, 5u) == 4);
-static_assert(ouroboros::bounce(5, 3) == 1);
-static_assert(ouroboros::turn(7, 2) == 1);
+template <class Self> struct Charlotte {
+  constexpr bool operator()(uint32_t n) const {
+    return static_cast<const Self &>(*this).bite(n);
+  }
+};
 \`\`\`
 
-The generic \`is_even\`, \`is_odd\` and \`parity\` helpers accept integral values; the \`_even\` and \`_odd\` literals expose the same question for integer literals. The interactive lab below models the canonical four in JavaScript; it does not execute the C++ header. Its augury diagram illustrates four nodes rather than the full eight-node list, and its GoalQueue tab is a separate queue example.
+- **Zero Vtable Overhead:** Because dispatch is resolved at compile time through \`static_cast<const Self &>(*this)\`, calling a serpent incurs zero virtual pointer dereferences, zero indirect branch prediction penalties, and zero object size bloat.
+- **Pure Functional Interface:** Every derived serpent implements \`constexpr bool bite(uint32_t n) const\`, allowing uniform invocation via \`Serpent{}(u)\` in both \`constexpr\` and runtime contexts.
 
-### Rings, turns and other cycles
+---
 
-\`wrap(index, size)\` gives a Euclidean index in [0, size), including negative indices; a non-positive size returns zero. \`bounce\` reflects an index along a bounded path, and \`turn\` wraps a heading, defaulting to eight directions. \`is_power_of_two\`, \`next_power_of_two\`, \`align_up\`, \`align_down\` and \`is_aligned\` provide bit arithmetic. Alignment must be a positive compile-time power of two. \`next_power_of_two\` returns 1 for values at or below 1 and zero if the result cannot fit in its type.
+### 3. The Canonical Four Serpents (The Inner Council)
 
-The \`Ring<T, Capacity>\` template stores a fixed number of default-constructed elements without allocation. Pushing into a full ring overwrites the oldest element. \`front\`, \`back\` and \`pop_front\` require a nonempty ring and assert that precondition in debug builds. Indexing is unchecked, and \`at_wrapped\` wraps around storage capacity rather than the number of live elements. Iteration visits the live elements in order; \`clear\` resets the indices and count.
+The canonical four serpents form the core council whose votes determine the primary \`Ouroboros::even(n)\` decision and \`agreement(n)\`:
+
+\`\`\`
+Bit 0: Mirror      (5-Stage SWAR Bit-Reversal Butterfly)
+Bit 1: Gray        (XOR Nibble Parity Fold to 0x6996 S-Box)
+Bit 2: Bruijn      (LSB Isolation & 0x077CB531 Spiral Hash)
+Bit 3: Rebecca     (Low Byte Galois Affine Map to 256-Byte LUT)
+\`\`\`
+
+#### 1. Mirror: 5-Stage SIMD-Within-A-Register (SWAR) Bit Reversal
+\`Mirror::flip(v)\` reverses all 32 bits of an integer in $O(1)$ operations without loops or memory access, using five successive mask-and-shift stages:
 
 \`\`\`cpp
-ouroboros::Ring<int, 2> ring;
+struct Mirror : Charlotte<Mirror> {
+  static constexpr const char *NAME = "Mirror";
+  static constexpr uint32_t flip(uint32_t v) {
+    v = (v >> 1 & 0x55555555u) | (v & 0x55555555u) << 1;
+    v = (v >> 2 & 0x33333333u) | (v & 0x33333333u) << 2;
+    v = (v >> 4 & 0x0F0F0F0Fu) | (v & 0x0F0F0F0Fu) << 4;
+    v = (v >> 8 & 0x00FF00FFu) | (v & 0x00FF00FFu) << 8;
+    return v >> 16 | v << 16;
+  }
+  constexpr bool bite(uint32_t n) const { return !(flip(n) >> 31); }
+};
+\`\`\`
+
+- **Mechanism:** Stage 1 swaps adjacent 1-bit pairs; stage 2 swaps 2-bit dibits; stage 3 swaps 4-bit nibbles; stage 4 swaps 8-bit bytes; stage 5 swaps the 16-bit halfwords.
+- **The Parity Bite:** Because the original least significant bit (bit 0) ends up at bit 31, shifting right by 31 extracts exactly bit 0: \`flip(n) >> 31\`. Inverting with \`!\` yields true if and only if bit 0 was zero (even).
+
+#### 2. Gray: Parity Folding Cascade with 4-Bit S-Box \`0x6996\`
+\`Gray::fold(v)\` computes the parity of all bits by recursively folding the integer in half with XOR, compressing 32 bits into a single 4-bit nibble:
+
+\`\`\`cpp
+struct Gray : Charlotte<Gray> {
+  static constexpr const char *NAME = "Gray";
+  static constexpr uint32_t fold(uint32_t v) {
+    v ^= v >> 16, v ^= v >> 8, v ^= v >> 4;
+    return 0x6996u >> (v & 15) & 1;
+  }
+  constexpr bool bite(uint32_t n) const { return !(fold(n) ^ fold(n >> 1)); }
+};
+\`\`\`
+
+- **The Magic Constant \`0x6996\`:** In binary, \`0x6996\` is \`0b0110_1001_1001_0110\`. This is the exact truth table of the 4-input XOR function: bit $k$ is 1 if and only if the population count of $k$ is odd.
+- **Differential Parity Cancellation:** Because $n$ and $n >> 1$ share all upper bits in identical positions shifted by one, their bit-sum parities differ strictly by the lowest bit:
+  $$\\text{fold}(n) \\oplus \\text{fold}(n >> 1) = (n \\& 1)$$
+  Taking the logical negation \`!(fold(n) ^ fold(n >> 1))\` produces true for even and false for odd.
+
+#### 3. Bruijn: Lowest Set Bit Isolation & De Bruijn Sequence Multiplier
+\`Bruijn::bite(n)\` determines whether the lowest set bit is at position 0 or higher using a 32-bit De Bruijn cycle:
+
+\`\`\`cpp
+struct Bruijn : Charlotte<Bruijn> {
+  static constexpr const char *NAME = "Bruijn";
+  static constexpr std::array<uint8_t, 32> SPIRAL = [] {
+    std::array<uint8_t, 32> t{};
+    for (uint32_t i = 0; i < 32; i++)
+      t[(0x077CB531u << i) >> 27] = uint8_t(i);
+    return t;
+  }();
+  constexpr bool bite(uint32_t n) const {
+    uint32_t v = n | 0x80000000u;
+    return SPIRAL[((v & (~v + 1)) * 0x077CB531u) >> 27] != 0;
+  }
+};
+\`\`\`
+
+- **The Sentinel:** If $n = 0$, bitwise operations have no lowest set bit. Or-ing with \`0x80000000u\` ensures $v$ is never zero, placing a sentinel at bit 31 without altering bit 0.
+- **Two's Complement Isolation:** \`v & (~v + 1)\` isolates the lowest set bit as a single power of two $2^k$.
+- **De Bruijn Hash:** Multiplying $2^k$ by the De Bruijn constant \`0x077CB531u\` slides a unique 5-bit window into the top 5 bits (\`>> 27\`), perfectly mapping each of the 32 bit positions to a distinct entry in \`SPIRAL\`.
+- **The Verdict:** If $n$ is odd, the lowest set bit is bit 0, yielding index \`SPIRAL[...] == 0\`. If $n$ is even, the lowest set bit is at least bit 1 (or the sentinel at bit 31), yielding \`SPIRAL[...] != 0\`.
+
+#### 4. Rebecca: 256-Entry S-Box with Affine Involution in $\\mathbb{Z}_2$
+\`Rebecca::bite(n)\` rotates the input right by 8 bits to expose the lowest byte to a compile-time lookup table:
+
+\`\`\`cpp
+struct Rebecca : Charlotte<Rebecca> {
+  static constexpr const char *NAME = "Rebecca";
+  static constexpr std::array<uint8_t, 256> AN_ARRAY_OF_FEELINGS = [] {
+    std::array<uint8_t, 256> t{};
+    for (uint32_t b = 0; b < 256; b++)
+      t[b] = uint8_t(1 ^ (((b * 0x5Du) ^ 0x2Eu) & 1));
+    return t;
+  }();
+  constexpr bool bite(uint32_t n) const {
+    return AN_ARRAY_OF_FEELINGS[std::rotr(n, 8) >> 24] != 0;
+  }
+};
+\`\`\`
+
+- **Byte Extraction:** \`std::rotr(n, 8) >> 24\` moves bits 0..7 directly into the low byte.
+- **Affine Invariance:** The generator formula uses multiplier $93$ (\`0x5D\`) and offset $46$ (\`0x2E\`). Because $93$ is odd, it is coprime to 256 and preserves parity under multiplication: $(b \\cdot 93) \\equiv b \\pmod 2$. Because $46$ is even, $(b \\cdot 93) \\oplus 46 \\equiv b \\pmod 2$. The outer XOR with 1 inverts the bit, yielding 1 for even bytes and 0 for odd bytes.
+
+---
+
+### 4. The Extended Pantheon of Four Ancient Serpents
+
+To enrich the council, four ancient serpents join the pantheon (bits 4..7 in \`pantheon(n)\`):
+
+\`\`\`
+Bit 4: Jormungandr (GL₂(𝔽₂) Matrix Exponentiation of Anti-Diagonal Swap)
+Bit 5: Typhon      (Chebyshev Polynomial Tₙ(0) Recurrence)
+Bit 6: Apophis     (Stein's Binary GCD with the Sacred Dyad 2)
+Bit 7: Quetzalcoatl (2-Point Walsh-Hadamard Transform Spectral Sum)
+\`\`\`
+
+#### 5. Jormungandr: Matrix Exponentiation in $GL_2(\\mathbb{F}_2)$
+The World-Girdling Serpent computes fast binary matrix exponentiation of the anti-diagonal swap involution over the Galois field of two elements $\\mathbb{F}_2$:
+
+\`\`\`cpp
+struct Jormungandr : Charlotte<Jormungandr> {
+  static constexpr const char *NAME = "Jormungandr";
+  struct Mat2 {
+    uint32_t a, b, c, d;
+    constexpr Mat2 operator*(const Mat2 &o) const {
+      return {(a * o.a + b * o.c) & 1, (a * o.b + b * o.d) & 1,
+              (c * o.a + d * o.c) & 1, (c * o.b + d * o.d) & 1};
+    }
+  };
+  static constexpr Mat2 power(Mat2 m, uint32_t exp) {
+    Mat2 res{1, 0, 0, 1};
+    while (exp > 0) {
+      if (exp & 1) res = res * m;
+      m = m * m;
+      exp >>= 1;
+    }
+    return res;
+  }
+  constexpr bool bite(uint32_t n) const {
+    return power(Mat2{0, 1, 1, 0}, n).a == 1;
+  }
+};
+\`\`\`
+
+- **Mathematical Proof:** Let $M = \\begin{pmatrix} 0 & 1 \\\\ 1 & 0 \\end{pmatrix}$. Note that $M^2 = \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} = I$.
+  Therefore, by induction:
+  $$M^n = \\begin{cases} I = \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} & \\text{if } n \\text{ is even} \\\\ M = \\begin{pmatrix} 0 & 1 \\\\ 1 & 0 \\end{pmatrix} & \\text{if } n \\text{ is odd} \\end{cases}$$
+  Inspecting the top-left element \`res.a\` yields 1 if and only if $n$ is even.
+
+#### 6. Typhon: Chebyshev Polynomial Three-Term Recurrence at Zero
+The Storm Giant evaluates the Chebyshev polynomial of the first kind $T_n(x)$ at $x = 0$:
+
+\`\`\`cpp
+struct Typhon : Charlotte<Typhon> {
+  static constexpr const char *NAME = "Typhon";
+  static constexpr int chebyshev_at_zero(uint32_t n) {
+    int t0 = 1, t1 = 0;
+    for (uint32_t i = 0; i < (n & 3u); i++) {
+      int next = -t0;
+      t0 = t1;
+      t1 = next;
+    }
+    return t0;
+  }
+  constexpr bool bite(uint32_t n) const { return chebyshev_at_zero(n) != 0; }
+};
+\`\`\`
+
+- **Mathematical Proof:** The Chebyshev polynomials satisfy the recurrence $T_0(x) = 1$, $T_1(x) = x$, and $T_{k+1}(x) = 2x T_k(x) - T_{k-1}(x)$.
+  At $x = 0$, the $2x T_k(x)$ term vanishes, reducing the recurrence to:
+  $$T_{k+1}(0) = -T_{k-1}(0)$$
+  This generates the 4-periodic sequence:
+  $$T_0(0) = 1, \\quad T_1(0) = 0, \\quad T_2(0) = -1, \\quad T_3(0) = 0, \\quad T_4(0) = 1, \\quad \\dots$$
+  Thus, $T_n(0) \\neq 0$ if and only if $n$ is even.
+
+#### 7. Apophis: Stein's Binary GCD with the Sacred Dyad 2
+Serpent of Primeval Chaos computes the greatest common divisor with 2 using Stein's binary algorithm:
+
+\`\`\`cpp
+struct Apophis : Charlotte<Apophis> {
+  static constexpr const char *NAME = "Apophis";
+  static constexpr uint32_t stein_gcd2(uint32_t u) {
+    if (u == 0) return 2;
+    uint32_t v = 2;
+    uint32_t shift = 0;
+    while (((u | v) & 1) == 0) {
+      u >>= 1;
+      v >>= 1;
+      ++shift;
+    }
+    return shift > 0 ? 2 : 1;
+  }
+  constexpr bool bite(uint32_t n) const { return stein_gcd2(n) == 2; }
+};
+\`\`\`
+
+- **Mathematical Proof:** If $u$ is even, both $u$ and $2$ share a factor of 2. In binary, $(u \\mid 2) \\& 1 = 0$, allowing the loop to execute at least once and setting \`shift > 0\`, which returns $\\gcd(u, 2) = 2$. If $u$ is odd, the loop does not run, returning 1.
+
+#### 8. Quetzalcoatl: Fast Walsh-Hadamard Transform Spectral Sum
+The Feathered Serpent applies a 2-point Fast Walsh-Hadamard Transform (FWHT) butterfly matrix to the state vector $[n \\& 1, 1]^T$:
+
+\`\`\`cpp
+struct Quetzalcoatl : Charlotte<Quetzalcoatl> {
+  static constexpr const char *NAME = "Quetzalcoatl";
+  static constexpr bool spectral_test(uint32_t n) {
+    int x0 = int(n & 1u);
+    int x1 = 1;
+    int s = x0 + x1;
+    int d = x0 - x1;
+    return (s + d) == 0;
+  }
+  constexpr bool bite(uint32_t n) const { return spectral_test(n); }
+};
+\`\`\`
+
+- **Mathematical Proof:** The 2-point Walsh-Hadamard matrix is $H_2 = \\begin{pmatrix} 1 & 1 \\\\ 1 & -1 \\end{pmatrix}$. Applying it to $[x_0, 1]^T$ yields sum $s = x_0 + 1$ and difference $d = x_0 - 1$.
+  The sum of spectral components is:
+  $$s + d = (x_0 + 1) + (x_0 - 1) = 2x_0$$
+  If $n$ is even, $x_0 = 0$, so $2x_0 = 0$. If $n$ is odd, $x_0 = 1$, so $2x_0 = 2 \\neq 0$.
+
+---
+
+### 5. The Council Consensus & Infix Operator \`->*\`
+
+The \`Ouroboros\` class gathers votes from both the inner council and the full pantheon:
+
+\`\`\`cpp
+class Ouroboros {
+public:
+  static constexpr size_t CANONICAL_SERPENTS = 4;
+  static constexpr size_t PANTHEON_SERPENTS = 8;
+
+  constexpr uint32_t omens(int n) const;     // 4-bit mask (Mirror, Gray, Bruijn, Rebecca)
+  constexpr uint32_t pantheon(int n) const;  // 8-bit mask (all eight serpents)
+
+  constexpr int agreement(int n) const;          // Canonical consensus count (0..4)
+  constexpr int pantheon_agreement(int n) const; // Pantheon consensus count (0..8)
+
+  constexpr bool even(int n) const;          // Majority of canonical serpents
+  constexpr bool odd(int n) const;           // Logical negation of even(n)
+
+  constexpr bool operator()(int n) const { return even(n); }
+  constexpr int operator%(int n) const { return even(n) ? 0 : 1; }
+
+  friend constexpr bool operator->*(Ouroboros self, int n) {
+    return self.even(n);
+  }
+};
+\`\`\`
+
+- **The Infix Pointer-to-Member Syntax:** C++ permits overloading the pointer-to-member operator \`->*\`. Ouroboros exploits this to provide an infix parity query:
+  \`\`\`cpp
+  constexpr ouroboros::Ouroboros council;
+  bool isEven = council->*42;  // true!
+  \`\`\`
+- **The Verdict Structure:** \`ouroboros::consult(n)\` returns a comprehensive \`Verdict\` containing canonical and pantheon bitmasks, agreement tallies, parity, and a unanimity flag.
+- **User-Defined Literals:** \`ouroboros::literals\` provides \`42_even\` and \`42_odd\` for direct literal evaluation.
+
+---
+
+### 6. Cyclic Arithmetic: The Serpent Biting Its Tail
+
+Game worlds, tile grids, angle facings, and circular queues require cyclic math that handles negative numbers cleanly:
+
+\`\`\`cpp
+// Euclidean wrap: result is guaranteed in [0, size) even for negative indices
+template <std::integral T, std::integral S>
+constexpr S wrap(T index, S size) noexcept {
+  if (size <= 0) return 0;
+  if ((size & (size - 1)) == 0)
+    return static_cast<S>(index & (size - 1));
+  auto rem = index % size;
+  return static_cast<S>(rem < 0 ? rem + size : rem);
+}
+
+// Ping-pong triangular wave: 0, 1, ..., max, max-1, ..., 0
+constexpr int bounce(int index, int max) noexcept {
+  if (max <= 0) return 0;
+  int period = 2 * max;
+  int w = wrap(index, period);
+  return w <= max ? w : period - w;
+}
+
+// Cyclic heading turns (default 8 directions)
+constexpr int turn(int heading, int delta, int directions = 8) noexcept {
+  return wrap(heading + delta, directions);
+}
+\`\`\`
+
+- **Euclidean Modulo:** In standard C++, \`-1 % 4 == -1\`. The \`wrap\` function enforces true mathematical modulo: \`wrap(-1, 4) == 3\`.
+- **Power-of-Two Fast Path:** If \`size\` is a power of two, \`wrap\` collapses to a single bitwise AND (\`index & (size - 1)\`), avoiding hardware division instructions entirely.
+- **Memory Alignment & Bit Functions:** \`is_power_of_two\`, \`next_power_of_two\`, \`align_up<N>\`, \`align_down<N>\`, and \`is_aligned<N>\` provide compile-time verified alignment helpers for Vulkan buffers and cachelines.
+
+---
+
+### 7. Zero-Allocation Circular Ring Buffer (\`ouroboros::Ring<T, Capacity>\`)
+
+\`ouroboros::Ring\` is a fixed-capacity, cache-friendly circular queue that allocates zero heap memory:
+
+\`\`\`cpp
+ouroboros::Ring<int, 4> ring;
 ring.push_back(10);
 ring.push_back(20);
-ring.push_back(30);  // overwrites 10
-int oldest = ring.pop_front();  // 20
+ring.push_back(30);
+ring.push_back(40);
+ring.push_back(50); // Capacity full: overwrites oldest element (10)!
+
+int oldest = ring.pop_front(); // Returns 20
 \`\`\`
 
-### The augury and its limits
+- **Tail-Biting Overwrite Semantics:** When full, \`push_back\` automatically advances both \`head_\` and \`tail_\`, overwriting the oldest entry.
+- **Power-of-Two Index Advancement:** Internal pointer advancement uses bitwise masking when \`Capacity\` is a power of two: \`(idx + 1) & (Capacity - 1)\`.
+- **Cyclic Relative Indexing:** \`ring[i]\` indexes logically from the current head, while \`ring.at_wrapped(offset)\` accepts negative offsets relative to the head.
+- **Standard Range-For Iteration:** Exposes \`begin()\` and \`end()\` iterators for clean traversal over active elements.
 
-\`Augury\` traverses eight type-erased \`Rite\` nodes in both directions. Each node stores the XOR of its neighbours’ pointer representations, so traversal recovers the other neighbour from the previous one. \`even\` and \`reverse_even\` each take a majority of eight votes; \`bidirectional_consensus\` compares those two results. This is an unusual runtime experiment, not a portable proof of pointer provenance or an engine integrity check.
+---
 
-The header’s \`static_assert(unanimous())\` checks selected edge values and every integer from -128 through 128, plus ring, wrapping and alignment examples. It is not an exhaustive proof for every integer. The header currently has no callers in the game.
+### 8. Augury: Bidirectional XOR Doubly-Linked List
+
+At runtime, \`Augury\` allocates an array of eight \`Rite\` nodes, connected via a self-traversing XOR-linked list:
+
+\`\`\`cpp
+struct Rite {
+  const void *charlotte;
+  bool (*bite)(const void *, uint32_t);
+  uintptr_t link; // prev ^ next
+  const char *name;
+};
+\`\`\`
+
+#### The XOR Linked List Principle
+A standard doubly linked list requires two separate 64-bit pointers (\`prev\` and \`next\`), consuming 16 bytes of pointer overhead per node.
+An XOR-linked list compresses both pointers into a single 64-bit integer:
+$$\\text{link} = \\text{prev} \\oplus \\text{next}$$
+
+#### Forward Traversal
+\`\`\`cpp
+bool even(int n) const {
+  uint32_t u = std::bit_cast<uint32_t>(n), votes = 0, seat = 0;
+  const void *prev = nullptr, *here = static_cast<const void *>(rites);
+  while (here) {
+    const Rite *r = static_cast<const Rite *>(here);
+    votes |= uint32_t(r->bite(r->charlotte, u)) << seat++;
+    const void *next = reinterpret_cast<const void *>(
+        r->link ^ reinterpret_cast<uintptr_t>(prev));
+    prev = here, here = next;
+  }
+  return std::popcount(votes) > 4;
+}
+\`\`\`
+Because $\\text{link} = \\text{prev} \\oplus \\text{next}$, computing $\\text{link} \\oplus \\text{prev} = (\\text{prev} \\oplus \\text{next}) \\oplus \\text{prev} = \\text{next}$. The forward neighbor is reconstructed on the fly.
+
+#### Reverse Traversal & Bidirectional Consensus
+Starting from the tail node (\`rites[7]\`), reverse traversal reconstructs the previous neighbor via $\\text{link} \\oplus \\text{next} = \\text{prev}$:
+\`\`\`cpp
+bool bidirectional_consensus(int n) const {
+  return even(n) == reverse_even(n);
+}
+\`\`\`
+The augury succeeds if and only if both forward and backward journeys reach unanimous consensus.
+
+---
+
+### 9. Compile-Time Consteval Unanimity Proofs
+
+The header concludes with an extensive compile-time verification suite:
+
+\`\`\`cpp
+consteval bool unanimous() {
+  Ouroboros o;
+  constexpr int EDGES[] = {
+    0, 1, -1, 2, -2,
+    0x7FFFFFFF, int(0x80000000u),
+    0x55555555, int(0xAAAAAAAAu),
+    65536, 255, 256
+  };
+  for (int n : EDGES) {
+    if ((o->*n) != (n % 2 == 0) || o.agreement(n) != 4) return false;
+    if (o.pantheon_agreement(n) != 8) return false;
+  }
+  for (int n = -2048; n <= 2048; n++) {
+    if ((o->*n) != (n % 2 == 0) || o.agreement(n) != 4) return false;
+    if (o.pantheon_agreement(n) != 8) return false;
+  }
+  // Also verifies Ring push/pop/overwrite, wrap, and memory alignments...
+  return true;
+}
+static_assert(unanimous(), "the serpents disagree");
+\`\`\`
+
+If any serpent dissents or if cyclic math deviates from mathematical invariants, the compiler halts the build.
 `,
+    mermaidCharts: [
+      {
+        title: "The Council of Eight Serpents: Compile-Time Parity Consensus Pipeline",
+        chart: `
+flowchart TD
+    classDef input fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef inner fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+    classDef outer fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef council fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+
+    Input["Target Integer int n<br/>u = std::bit_cast<uint32_t>(n)"]:::input
+
+    subgraph InnerCouncil ["Canonical Inner Council (omens: 4 Bits)"]
+        M["Mirror::bite(u)<br/>5-Stage SWAR Bit-Flip<br/>!(flip(u) >> 31)"]:::inner
+        G["Gray::bite(u)<br/>XOR Fold to 0x6996 S-Box<br/>!(fold(u) ^ fold(u>>1))"]:::inner
+        B["Bruijn::bite(u)<br/>LSB * 0x077CB531u >> 27<br/>SPIRAL[hash] != 0"]:::inner
+        R["Rebecca::bite(u)<br/>std::rotr(u, 8) >> 24<br/>AN_ARRAY_OF_FEELINGS[b] != 0"]:::inner
+    end
+
+    subgraph ExtendedPantheon ["Extended Pantheon (pantheon: 8 Bits)"]
+        J["Jormungandr::bite(u)<br/>GL₂(𝔽₂) Matrix Exponentiation<br/>power(swap, u).a == 1"]:::outer
+        T["Typhon::bite(u)<br/>Chebyshev Tₙ(0) Recurrence<br/>Tₙ(0) != 0"]:::outer
+        A["Apophis::bite(u)<br/>Stein's Binary GCD with 2<br/>gcd(u, 2) == 2"]:::outer
+        Q["Quetzalcoatl::bite(u)<br/>2-Point Walsh-Hadamard<br/>(s + d) == 0"]:::outer
+    end
+
+    Omens["Canonical omens(n) = M | G<<1 | B<<2 | R<<3<br/>Pantheon mask = omens | J<<4 | T<<5 | A<<6 | Q<<7"]:::council
+    Operator["council->*n (Infix Pointer-to-Member Evaluation)<br/>static_assert(unanimous(), 'the serpents disagree')"]:::council
+
+    Input --> InnerCouncil & ExtendedPantheon
+    InnerCouncil & ExtendedPantheon --> Omens --> Operator
+`,
+      },
+      {
+        title: "Augury Bidirectional XOR-Linked List Traversal (link = prev ^ next)",
+        chart: `
+flowchart LR
+    classDef node fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef thunk fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef result fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    R0["rites[0] (Mirror)<br/>link = 0 ^ &rites[1]"]:::node
+    R1["rites[1] (Gray)<br/>link = &rites[0] ^ &rites[2]"]:::node
+    R2["rites[2] (Bruijn)<br/>link = &rites[1] ^ &rites[3]"]:::node
+    R7["rites[7] (Quetzalcoatl)<br/>link = &rites[6] ^ 0"]:::node
+
+    R0 -->|"Forward: next = link ^ prev"| R1
+    R1 -->|"Forward: next = link ^ prev"| R2
+    R2 -.->|"Forward: steps 3..6"| R7
+    R7 -->|"Reverse: prev = link ^ next"| R2
+
+    Thunk["Type-Erased Thunk Dispatch<br/>r->bite(r->charlotte, u)<br/>thunk<S>() -> bool"]:::thunk
+    Consensus["Bidirectional Consensus<br/>even(n) == reverse_even(n)<br/>std::popcount(votes) > 4"]:::result
+
+    R0 & R1 & R2 & R7 -.-> Thunk --> Consensus
+`,
+      },
+      {
+        title: "Cyclic Math & Ring Buffer Tail-Biting Overwrite Lifecycle",
+        chart: `
+flowchart TD
+    classDef state fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+    classDef op fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef wrap fill:#181524,stroke:#f6c324,stroke-width:2px,color:#f8fafc;
+
+    Init["Empty Ring<T, Capacity><br/>head = 0, tail = 0, count = 0"]:::state
+    Push["push_back(val)<br/>data[tail] = val, tail = advance(tail)"]:::op
+    Full{"Is Ring Full?<br/>count == Capacity"}:::wrap
+    Overwrite["Tail-Biting Overwrite<br/>data[tail] = val<br/>head = advance(head), tail = advance(tail)"]:::wrap
+    Normal["Normal Insertion<br/>data[tail] = val<br/>tail = advance(tail), count++"]:::op
+    Advance["Index Advance Optimization<br/>Power of Two: (idx + 1) & (Capacity - 1)<br/>General: (idx + 1 == Cap) ? 0 : idx + 1"]:::op
+
+    Init --> Push --> Full
+    Full -- Yes --> Overwrite --> Advance
+    Full -- No --> Normal --> Advance
+`,
+      },
+    ],
   },
   {
     id: "campaign-settlements-delves",

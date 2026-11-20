@@ -131,7 +131,7 @@ export const OuroborosBitLab: React.FC = () => {
       const prev = i > 0 ? addrs[i - 1] : 0;
       const next = i < 3 ? addrs[i + 1] : 0;
       const link = prev ^ next;
-      const witnessName = ['Elsewhere', 'Perhaps', 'Neither', 'Someone'][i];
+      const witnessName = ['Mirror', 'Gray', 'Bruijn', 'Rebecca'][i];
       const vote = [mirrorBite, grayBite, bruijnBite, rebeccaBite][i];
       return { addr, prev, next, link, witnessName, vote };
     });
@@ -410,7 +410,7 @@ export const OuroborosBitLab: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-amber-300">1. Elsewhere</span>
+                <span className="font-bold text-amber-300">1. Mirror</span>
                 <span className={serpentData.mirrorBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.mirrorBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -425,7 +425,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-sky-300">2. Perhaps</span>
+                <span className="font-bold text-sky-300">2. Gray</span>
                 <span className={serpentData.grayBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.grayBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -440,7 +440,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-300">3. Neither</span>
+                <span className="font-bold text-emerald-300">3. Bruijn</span>
                 <span className={serpentData.bruijnBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.bruijnBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -455,7 +455,7 @@ export const OuroborosBitLab: React.FC = () => {
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-purple-300">4. Someone</span>
+                <span className="font-bold text-purple-300">4. Rebecca</span>
                 <span className={serpentData.rebeccaBite ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                   bite = {serpentData.rebeccaBite ? '1 (Even)' : '0 (Odd)'}
                 </span>
@@ -476,7 +476,7 @@ export const OuroborosBitLab: React.FC = () => {
         <div className="space-y-4 font-mono text-xs">
           <div className="p-4 rounded-xl bg-dark-950 border border-dark-800 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-amber-300 font-bold text-sm">Elsewhere: 5-Stage SIMD-Within-A-Register (SWAR) Bit Reversal</span>
+              <span className="text-amber-300 font-bold text-sm">Mirror: 5-Stage SIMD-Within-A-Register (SWAR) Bit Reversal</span>
               <span className="text-slate-400 text-[11px]">Final flip(n) = 0x{serpentData.swar5.toString(16).toUpperCase().padStart(8, '0')}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-[10px]">
@@ -508,7 +508,7 @@ export const OuroborosBitLab: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-sky-300 font-bold">Perhaps Parity Cancellation</span>
+              <span className="text-sky-300 font-bold">Gray Parity Cancellation</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>fold(n) = <strong>{serpentData.f0}</strong> (nibble: {serpentData.nibble})</div>
                 <div>fold(n &gt;&gt; 1) = <strong>{serpentData.f1}</strong></div>
@@ -522,7 +522,7 @@ export const OuroborosBitLab: React.FC = () => {
             </div>
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-emerald-300 font-bold">Neither De Neither Multiplier</span>
+              <span className="text-emerald-300 font-bold">Bruijn De Bruijn Multiplier</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>Sentinel v = <strong>0x{serpentData.bruijnV.toString(16).toUpperCase()}</strong></div>
                 <div>Isolated LSB = <strong>0x{serpentData.isolatedLsb.toString(16).toUpperCase()}</strong></div>
@@ -534,7 +534,7 @@ export const OuroborosBitLab: React.FC = () => {
             </div>
 
             <div className="p-3.5 rounded-xl bg-dark-950 border border-dark-800 space-y-2">
-              <span className="text-purple-300 font-bold">Someone Affine Galois Map</span>
+              <span className="text-purple-300 font-bold">Rebecca Affine Galois Map</span>
               <div className="text-[11px] text-slate-400 space-y-1">
                 <div>rotr8 &gt;&gt; 24 = <strong>0x{serpentData.reb.byte.toString(16).toUpperCase().padStart(2, '0')}</strong> ({serpentData.reb.byte})</div>
                 <div>Formula: 1 ^ (((b*93)^46) &amp; 1)</div>
