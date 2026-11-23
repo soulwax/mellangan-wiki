@@ -15039,4 +15039,152 @@ flowchart TD
       },
     ],
   },
+  {
+    id: "sound-generation-pipeline",
+    title: "How Sound Is Generated: Offline Synthesis, Kenney SFX & Runtime Mixer",
+    category: "core",
+    interactiveComponent: "audiomixer",
+    summary:
+      "End-to-end breakdown of Mellangan's hybrid audio pipeline: four deterministic Python synthesis scripts bake all SFX, ambience beds, culture cues, and OGG music offline, while C++ streams and mixes them via SDL3 + stb_vorbis.",
+    sourceFiles: [
+      "tools/make_audio.py",
+      "tools/make_biome_audio.py",
+      "tools/make_camp_sounds.py",
+      "tools/make_music.py",
+      "src/audio/Sound.hpp",
+      "src/audio/Sound.cpp",
+      "src/audio/FoeVoice.hpp",
+      "src/audio/FoeVoice.cpp",
+    ],
+    content: `## Architectural Overview
+
+Mellangan does **not** run heavy DSP synthesis at runtime. Instead, it uses a **two-stage hybrid pipeline**:
+
+1. **Offline Asset Generation (Python in \`tools/\`)**: Four deterministic Python scripts generate and normalize every sound effect (\`res/sfx/*.wav\`) and original music track (\`res/music/*.ogg\`) from fixed PRNG seeds and external Kenney OGG sources.
+2. **Lightweight Runtime Playback (C++20 in \`src/audio/\`)**: At runtime, \`Sound\` opens a single mono 44.1 kHz 16-bit signed PCM (\`SDL_AUDIO_S16\`) playback device via **SDL3**, plays one-shot SFX through a **32-voice pool**, blends **23 looping ambience beds**, and decodes **12 OGG music tracks** on demand using **\`stb_vorbis\`** on a background \`std::async\` thread.
+
+---
+
+## Stage 1: Offline Sound Generators (\`tools/\`)
+
+Every sound file shipped in \`res/sfx/\` and \`res/music/\` is produced by one of four Python scripts:
+
+### 1. Core SFX, Foe Voices & Base Ambience — \`tools/make_audio.py\`
+Produces **mono 44.1 kHz s16 WAV** files peak-normalized to **-1 dBFS** so in-game volume constants remain the sole mix balance:
+
+- **25 Core Combat & UI SFX** (\`cast\`, \`hit\`, \`kill\`, \`slash\`, \`axe\`, \`gem\`, \`levelup\`, \`hurt\`, \`death\`, \`chest\`, \`potion\`, \`select\`, \`confirm\`, \`boss\`, \`horde\`, \`thunder\`, \`explosion\`, \`bow\`, \`scythe\`, \`magnet\`, \`nova\`, \`barrel\`, \`orb\`, \`erupt\`, \`raise\`): Converted from the *Kenney Game Assets All-in-1* OGG pack via \`ffmpeg\`, with optional pitch-shift, trim, and fade filters (e.g., \`erupt\` and \`raise\`).
+- **Pure-Python Procedural Synthesis (\`--synth\`, stdlib only)**:
+  - **Wolf Howl (\`howl.wav\`)**: Frequency-swept fundamental + 2nd/3rd harmonics with 5.5 Hz vibrato and low-pass filtered breath noise.
+  - **Weather Beds (\`rain.wav\`, \`wind.wav\`)**: 6–8 s seamless loops created by synthesizing an extra 0.5 s tail and linear-crossfading it into the head (\`seamless()\`). Rain layers filtered hiss with 2,600 randomized high-frequency droplet pings; wind layers dual low-pass noise with a sinusoidal swell.
+  - **18 Foe Voices (\`foe_<family>_<event>.wav\`)**: 6 monster families (\`beast\`, \`folk\`, \`hulk\`, \`wing\`, \`spirit\`, \`ooze\`) × 3 events (\`alert\`, \`hurt\`, \`death\`). Synthesized by \`voice()\` using a sine/sawtooth oscillator blend, filtered grit noise, shaped envelopes, and **2-pole resonant formant filters** so buzzes read as throats (plus \`bubbles()\` for oozes).
+  - **5 Base Biome Beds (\`amb_forest\`, \`amb_marsh\`, \`amb_frost\`, \`amb_surf\`, \`amb_cave\`)**: 8 s seamless loops combining filtered noise (\`hush()\`) with chirps, frog pulses, icy shimmer, ocean swells, and triple-echo cavern water drops.
+
+### 2. Extended Biome Ambience & Mood Music — \`tools/make_biome_audio.py\`
+Imports \`make_audio.py\` and \`make_music.py\` read-only to synthesize:
+- **6 Additional Biome Beds**: \`amb_meadow\`, \`amb_desert\`, \`amb_ember\`, \`amb_barrow\`, \`amb_moon\`, and \`amb_storm\` (8 s seamless WAV loops verified by \`--check\` to keep loop-seam step below 0.5× the 99th-percentile sample step).
+- **5 Calm Mood Tracks**: \`res/music/{fen,dune,drift,tide,vigil}.ogg\` used for biome exploration and feast moods.
+
+### 3. Culture Camp Beds & Social Cues — \`tools/make_camp_sounds.py\`
+Synthesizes **30 culture-specific WAVs** across all 10 cultures (\`crownlands\`, \`anvilmark\`, \`sandwells\`, \`silverbough\`, \`saltmarch\`, \`marshwrights\`, \`canopy\`, \`deepward\`, \`gravewardens\`, \`glasswrights\`) from fixed seeds (101–130) using \`numpy\` + \`scipy\` + voices from \`make_music.py\`:
+- **10 Camp Beds (\`camp_<stem>.wav\`)**: 8 s seamless loops scaled to **-22 dBFS RMS** using circular FFT-filtered noise (\`circ_noise()\`), anvil strikes, handbells, clinks, coins, and wind whooshes.
+- **20 Social Cues (\`cue_<stem>_greet.wav\`, \`cue_<stem>_rite.wav\`)**: Short stingers scaled to **-18 dBFS RMS** with a soft limiter under -1 dBFS peak, 5 ms fade-in, and 60 ms fade-out.
+
+### 4. Original Procedural Music — \`tools/make_music.py\`
+Composes **9 original looping tracks** (\`campaign\`, \`menu\`, \`caves\`, \`boss\`, \`hearth\`, \`moor\`, \`fray\`, \`rime\`, \`zoktor\`) using \`numpy\` and \`scipy.signal\` (\`butter\`, \`sosfilt\`, \`fftconvolve\`):
+- Deterministic fixed-seed synthesis of **koto, shakuhachi, reed organ, brass chorale, taiko, shime, fife, trumpet, bassoon, ocarina, and slide whistle** (plus a 15,768 Hz / 9-bit handheld converter effect on \`moor.ogg\`).
+- A shared **leitmotif** from \`menu.ogg\` (fifth → flat sixth → fifth → fourth → root) returns in \`caves\`, \`boss\`, \`hearth\` (in major), and combat breakdowns.
+- Reverb/delay tails wrap cleanly back onto the start of the buffer before encoding to OGG Vorbis via \`ffmpeg\` at **-3 dBFS peak**.
+
+---
+
+## Stage 2: Runtime Playback & Mixing (\`src/audio/\`)
+
+### \`Sound\` Mixer (\`src/audio/Sound.hpp\`, \`src/audio/Sound.cpp\`)
+- **Single Hardware Spec**: Opens the default SDL3 playback device at **44,100 Hz, mono, \`SDL_AUDIO_S16\`**. All WAVs are loaded from \`pak::load()\` via \`SDL_LoadWAV_IO\` and validated against this exact spec.
+- **32-Voice SFX Pool & Voice Stealing**:
+  - \`Sound::play(volume, pitchJitter, pitch)\` enforces a per-sound cooldown (\`gap\` in seconds, e.g., \`0.04s\` for \`hit\`, \`2.5s\` for \`howl\`, \`30s\` for camp cues) to prevent audio stacking.
+  - Selects the first idle \`SDL_AudioStream\` among 32 pre-bound voices; if all 32 are busy, it **steals the oldest active voice** (\`voiceStarted[i]\`).
+  - Applies per-trigger pitch variation via \`SDL_SetAudioStreamFrequencyRatio\` using a thread-local \`Rng\` (\`pitch * (1 ± pitchJitter)\`, default \`±6%\`).
+- **23 Continuous Ambience Beds**:
+  - \`2\` weather beds (\`rain\`, \`wind\`) + \`11\` place beds (\`PLACES\`) + \`10\` culture camp beds (\`CULTURES\`).
+  - Each tick, every bed smoothly approaches its target gain via exponential smoothing: \`b.gain += (b.want - b.gain) * 0.02f\`. Beds that fade below \`0.002f\` with target \`0\` clear their stream queue to save CPU.
+- **Asynchronous OGG Music Streaming**:
+  - Tracks (\`12\` slots: \`night\`, \`campaign\`, \`menu\`, \`caves\`, \`boss\`, \`hearth\`, \`zoktor\`, \`fen\`, \`dune\`, \`drift\`, \`tide\`, \`vigil\`) are decoded from \`res/music/*.ogg\` in memory via **\`stb_vorbis_decode_memory\`** on an \`std::async\` background job (\`pump()\`).
+  - Only the currently \`playing\` and \`wanted\` tracks stay decoded in RAM; all other tracks are immediately freed (\`unload()\`).
+  - Switching tracks fades out at \`FADE = 0.025f\` per tick, swaps the stream format once silent, and fades back in.
+- **One-Shot Video/Intro Clips**: \`Sound::clip()\` decodes standalone OGG audio (such as \`res/videos/moth_studios.ogg\`), hushes background music, and tracks playback position via \`clipTime()\`.
+
+### Distance-Attenuated Monster Voices (\`src/audio/FoeVoice.cpp\`)
+- Maps every \`EnemyKind\` (compile-time verified via \`static_assert\`) to one of the **6 synthesized voice families** (\`beast\`, \`folk\`, \`hulk\`, \`wing\`, \`spirit\`, \`ooze\`).
+- Computes linear distance falloff out to \`HEARD = 420\` world units: \`near = 1 - hypot(dx, dy) / 420\`.
+- Scales base event volumes (\`alert = 0.45\`, \`hurt = 0.22\`, \`death = 0.30\`) by \`near\`, adds \`±6%\` pitch jitter, and drops pitch to **\`0.8x\`** for bosses.
+
+---
+
+## Regenerating Audio Assets
+
+\`\`\`bash
+# Synthesized SFX, foe voices & 5 base biome beds (no Kenney pack or ffmpeg needed)
+python tools/make_audio.py --synth
+
+# All Kenney-sourced SFX + synthesized WAVs (requires ffmpeg on PATH)
+python tools/make_audio.py "<path to Kenney Game Assets All-in-1>"
+
+# Extended 6 biome beds + 5 mood tracks (use --check to audit loop seams)
+uv run --with numpy==2.3.4 --with scipy==1.16.3 tools/make_biome_audio.py
+
+# 10 culture camp beds + 20 greet/rite cues
+uv run --with numpy==2.3.4 --with scipy==1.16.3 python tools/make_camp_sounds.py
+
+# All 9 original OGG music compositions (or pass specific track names)
+uv run --with numpy==2.3.4 --with scipy==1.16.3 tools/make_music.py
+\`\`\`
+`,
+    mermaidChart: {
+      title: "Mellangan Hybrid Sound Generation & Runtime Mixing Pipeline",
+      chart: `
+flowchart LR
+    classDef py fill:#181524,stroke:#f6c324,stroke-width:2px,color:#e2e8f0;
+    classDef asset fill:#181524,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef rt fill:#181524,stroke:#10b981,stroke-width:2px,color:#e2e8f0;
+    classDef out fill:#181524,stroke:#a855f7,stroke-width:2px,color:#e2e8f0;
+
+    subgraph Offline["Offline Generation (tools/)"]
+        MA["make_audio.py<br/>Kenney OGG -> WAV +<br/>Formant Foe Voices & Weather"]:::py
+        MB["make_biome_audio.py<br/>6 Biome Beds +<br/>5 Mood OGG Tracks"]:::py
+        MC["make_camp_sounds.py<br/>10 Culture Beds +<br/>20 Greet/Rite Cues"]:::py
+        MM["make_music.py<br/>NumPy/SciPy Procedural<br/>9 Original OGG Tracks"]:::py
+    end
+
+    subgraph Assets["Packaged Assets (res/)"]
+        WAV["res/sfx/*.wav<br/>Mono 44.1 kHz s16 PCM"]:::asset
+        OGG["res/music/*.ogg<br/>Seamless OGG Vorbis"]:::asset
+    end
+
+    subgraph Runtime["C++20 Runtime (src/audio/)"]
+        FV["FoeVoice::play()<br/>6 Families, 420u Falloff,<br/>0.8x Boss Pitch"]:::rt
+        POOL["32-Voice SFX Pool<br/>Cooldown Gap + Pitch Jitter<br/>+ Oldest-Voice Stealing"]:::rt
+        BEDS["23 Looping Ambience Beds<br/>2 Weather + 11 Places + 10 Camps<br/>(0.02 Smooth Gain)"]:::rt
+        MUS["Async stb_vorbis Decoder<br/>12 Track Slots + Crossfade"]:::rt
+    end
+
+    DEV["SDL3 Audio Device<br/>44.1 kHz Mono S16 Output"]:::out
+
+    MA --> WAV
+    MB --> WAV
+    MB --> OGG
+    MC --> WAV
+    MM --> OGG
+
+    WAV --> POOL
+    WAV --> BEDS
+    FV --> POOL
+    OGG --> MUS
+
+    POOL --> DEV
+    BEDS --> DEV
+    MUS --> DEV
+`,
+    },
+  },
 ];

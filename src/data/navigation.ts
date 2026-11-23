@@ -245,6 +245,10 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "procedural-music-audio-engineering",
         shortTitle: "Procedural Music, FM Tracker & Audio Mixer",
       },
+      {
+        id: "sound-generation-pipeline",
+        shortTitle: "How Sound Is Generated (Offline Synth & Runtime)",
+      },
     ],
   },
   {
