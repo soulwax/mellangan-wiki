@@ -70,7 +70,7 @@ export function verifyIntegrity() {
         errors.push(`Section '${sec.id}' has an empty Mermaid chart definition`);
       } else {
         const chartTrimmed = mc.chart.trim();
-        const validHeaders = ["flowchart", "graph", "sequenceDiagram", "stateDiagram", "classDiagram", "erDiagram"];
+        const validHeaders = ["flowchart", "graph", "sequenceDiagram", "stateDiagram", "classDiagram", "erDiagram", "pie", "timeline", "xychart-beta", "quadrantChart", "journey", "mindmap", "gantt"];
         const hasValidHeader = validHeaders.some((h) => chartTrimmed.startsWith(h));
         if (!hasValidHeader) {
           errors.push(`Section '${sec.id}' Mermaid chart '${mc.title}' does not begin with a valid diagram keyword: ${chartTrimmed.slice(0, 30)}`);

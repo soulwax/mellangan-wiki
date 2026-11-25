@@ -1,3 +1,4 @@
+import { DESIGN_LAB } from "./designLab.ts";
 export interface MermaidDiagramDef {
     title: string;
     chart: string;
@@ -16113,3 +16114,5 @@ sequenceDiagram
         ],
     },
 ];
+
+WIKI_SECTIONS.push(DESIGN_LAB);

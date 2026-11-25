@@ -258,6 +258,7 @@ export const NAV_TREE: NavTreeGroup[] = [
     color: "text-rose-400",
     badgeColor: "bg-rose-500/15 text-rose-300 border-rose-500/30",
     items: [
+      { id: "design-lab", shortTitle: "Design Lab: Trees, Spellcraft & Ultimates" },
       { id: "campaign-quest-flow", shortTitle: "Campaign Quest Flow" },
       { id: "campaign-fact-ledger", shortTitle: "Local Knowledge Ledger" },
       { id: "campaign-cookery", shortTitle: "Cookery & Sharing" },
