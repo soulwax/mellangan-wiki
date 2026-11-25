@@ -420,6 +420,22 @@ export const NAV_TREE: NavTreeGroup[] = [
         id: "vk2d-renderer-book-targets-resize-production",
         shortTitle: "Book XII: Offscreen Targets, MSAA & Resize",
       },
+      {
+        id: "vk2d-renderer-book-cameras-geometry-viewports",
+        shortTitle: "Book XIII: Cameras, NDC Math & Geometry",
+      },
+      {
+        id: "vk2d-renderer-book-runtime-shader-compiler",
+        shortTitle: "Book XIV: Slang Compiler & Hot-Reload",
+      },
+      {
+        id: "vk2d-renderer-book-async-queues-and-readback",
+        shortTitle: "Book XV: Async Queues & GPU Readback",
+      },
+      {
+        id: "vk2d-renderer-book-vulkan13-modernization",
+        shortTitle: "Book XVI: Vulkan 1.3 Dynamic Rendering",
+      },
     ],
   },
 ];
