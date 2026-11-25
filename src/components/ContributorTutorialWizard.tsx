@@ -87,21 +87,23 @@ const STEPS: TutorialStep[] = [
     level: "Assets",
     title: "Step 4: The 16×16 Pixel Art & Atlas Contract",
     summary:
-      "Every sprite in Mellangan is strictly 16×16 pixels packed into an 18×18 cell (with a 1-pixel transparent gutter on all four sides) inside res/atlas.png (432×786, 24 columns per row). Asset generation is 100% deterministic via Python scripts.",
+      "Every sprite in Mellangan is strictly 16×16 pixels packed into an 18×18 cell (with a 1-pixel transparent gutter on all four sides) inside res/atlas.png (432×2784 across 39 bands, 24 columns per row). New sprites are authored with vendored Doteshi (tools/doteshi/) and baked via make_assets.py.",
     commands: [
-      "python tools/make_assets.py --verify",
-      "python tools/make_expansion.py --preview build/atlas_preview.png",
+      "python tools/doteshi_assets.py bake",
+      "uv run --with pillow python tools/make_assets.py --from-atlas",
     ],
     rules: [
-      "Every gameplay sprite must be 16x16 at 1x native scale with nearest-neighbor sampling.",
-      "Reserve cell coordinates in tools/atlas_layout.py and expose constexpr Sprite accessors in src/Atlas.hpp.",
-      "Run python tools/make_assets.py --verify to confirm two consecutive runs produce byte-identical RGBA and PNG hashes.",
+      "Every gameplay sprite must be 16x16 at 1x native scale with nearest-neighbor sampling (tall trees use two separate 16x16 cells: *High and *Low).",
+      "Author new sprites in tools/source/doteshi/content/*.py + manifest.toml and verify hashes with tools/doteshi_assets.py check.",
+      "Run uv run --with pillow==13.0.0 tools/make_assets.py --verify \"<Kenney path>\" for full dual-run RGBA/PNG hash verification.",
     ],
     files: [
-      "src/Atlas.hpp",
+      "src/AtlasF.hpp",
+      "src/AtlasB.hpp",
+      "src/AtlasU.hpp",
       "tools/atlas_layout.py",
       "tools/make_assets.py",
-      "tools/sprite_kit.py",
+      "tools/doteshi_assets.py",
     ],
   },
   {
@@ -109,20 +111,23 @@ const STEPS: TutorialStep[] = [
     level: "Code",
     title: "Step 5: Adding Content (Weapons, Enemies, or Biomes)",
     summary:
-      "Keep each change focused on its responsible module. New weapons can be added as a single data-driven row in RECIPES (Recipe.cpp) or as a dedicated Upgrade subclass. New enemies combine an EnemyKind entry, a static Plan in Plans.cpp, and an Enemy Type definition.",
+      "Keep each change focused on its responsible module. New weapons can be added as a single data-driven row in RECIPES (Recipe.cpp) or as a dedicated Upgrade subclass. New enemies append to EnemyKind, Roster.cpp (EnemyType + NAMES[]), Plans.cpp, FoeVoice.cpp, and Faction.cpp.",
     commands: [
-      './build/bin/Debug/MellanganApp.exe --test-arsenal-view "Ember Lance"',
-      "./build/bin/Debug/MellanganApp.exe --test-combat-view",
-      "./build/bin/Debug/MellanganApp.exe --test-biome-view -220 -192 0",
+      './build/bin/Release/MellanganApp.exe --test-arsenal-view "Ember Lance"',
+      "./build/bin/Release/MellanganApp.exe --test-combat-view",
+      "./build/bin/Release/MellanganApp.exe --test-biome-view -220 -192 0",
     ],
     rules: [
       "All SpriteObject subclasses automatically use Pool.c via inherited operator new / sized operator delete.",
-      "New enemies must be appended at the end of EnemyKind so classic progression and Codex slain indices remain intact.",
-      "Monster audio cues must route through Enemy::voice (on-screen only) with a cooldown gap in Sound.cpp to prevent crowd comb-filtering.",
+      "New enemies must be appended at the end of EnemyKind and added to Roster, Plans, FoeVoice, and Faction static_assert tables.",
+      "Use FoeMask helper foe(EnemyKind::...) (never 1ULL << ...) because EnemyKind::Count is 119 (> 64).",
     ],
     files: [
       "src/item/weapon/Recipe.cpp",
       "src/entity/enemy/ai/Plans.cpp",
+      "src/entity/enemy/Roster.cpp",
+      "src/audio/FoeVoice.cpp",
+      "src/entity/Faction.cpp",
       "src/level/biome/Biome.cpp",
     ],
   },
@@ -131,48 +136,53 @@ const STEPS: TutorialStep[] = [
     level: "Verification",
     title: "Step 6: Deterministic Tests, Visual QA & Benchmarks",
     summary:
-      '"It compiles" is never a completion gate. Every contribution must pass the Debug assertion test suite (--test), visual QA inspection views, and the --bench frame-time harness before landing.',
+      '"It compiles" is never a completion gate. Every contribution must pass the headless assertion test suite (--test, active in Release via #undef NDEBUG), both campaign smokes, visual QA views, and the --bench frame-time harness.',
     commands: [
-      "./build/bin/Debug/MellanganApp.exe --test",
-      "./build/bin/Debug/MellanganApp.exe --capture-screenshots",
+      "./build/bin/Release/MellanganApp.exe --test <filter>",
+      "./build/bin/Release/MellanganApp.exe --test",
+      "./build/bin/Release/MellanganApp.exe --campaign-smoke",
       "./build/bin/Release/MellanganApp.exe --bench",
     ],
     rules: [
-      "Always run --test in Debug mode so C/C++ assert() invariants are active.",
-      "Use --test-gui-view, --test-effects-view, and --test-encounter-view to verify visual readability at 1x scale.",
-      "Verify --bench does not regress CPU tick or render timings by more than 10%.",
+      "Test files #undef NDEBUG before <cassert>, so assert() runs in Release too; register new tests in Tests.hpp and CASES[] in Test.cpp.",
+      "Use --test <filter> while iterating, then run full --test (ALL TESTS PASSED) and --campaign-smoke [--peaceful] as the final gate.",
+      "Use --test-gui-view, --test-roads-view, and --capture-screenshots to inspect drawing changes at 1x native scale.",
     ],
-    files: ["src/test/Test.cpp", "src/test/view/QaViews.cpp", "src/Bench.cpp"],
+    files: ["src/test/Test.cpp", "src/test/Tests.hpp", "src/test/view/QaViews.cpp", "src/Bench.cpp"],
   },
 ];
 
 const BIOME_LIST = [
   "0: Meadow",
   "1: Forest",
-  "2: Desert",
-  "3: Snow",
-  "4: Mire",
-  "5: Ashlands",
-  "6: Heath",
-  "7: Taiga",
-  "8: Barrow",
+  "2: Autumn",
+  "3: Heath",
+  "4: Barrow",
+  "5: Snow",
+  "6: Blossom",
+  "7: Mire",
+  "8: Desert",
   "9: Jungle",
-  "10: Autumn",
-  "11: Blossom",
-  "12: CrystalFields",
-  "13: FungalWood",
+  "10: Savanna",
+  "11: Ashlands",
+  "12: Crystal",
+  "13: Fungal",
   "14: Badlands",
-  "15: Savanna",
-  "16: SaltFlats",
-  "17: Floodplain",
-  "18: MoonlitGrove",
-  "19: SunkenRuins",
-  "20: EmberFen",
-  "21: AmberWoods",
-  "22: StormSteppe",
-  "23: GlassDesert",
-  "24: HollowCaverns",
-  "25: StarfallBasin",
+  "15: Taiga",
+  "16: Salt",
+  "17: Flood",
+  "18: Moon",
+  "19: Ruins",
+  "20: Ember",
+  "21: Amber",
+  "22: Storm",
+  "23: Glass",
+  "24: Hollow",
+  "25: Starfall",
+  "26: TropicSea",
+  "27: ColdSea",
+  "28: WarmBeach",
+  "29: ColdBeach",
 ];
 
 export const ContributorTutorialWizard: React.FC = () => {
@@ -241,7 +251,6 @@ export const ContributorTutorialWizard: React.FC = () => {
 
   const atlasPixelX = atlasCol * 18 + 1;
   const atlasPixelY = atlasRow * 18 + 1;
-  const atlasHeight = isTallTree ? 34 : 16;
   const linearCellIndex = atlasRow * 24 + atlasCol;
 
   const generatedSnippet = useMemo(() => {
@@ -254,47 +263,15 @@ export const ContributorTutorialWizard: React.FC = () => {
 
     if (templateKind === "recipe") {
       return {
-        files: "src/item/weapon/Recipe.cpp",
-        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --arm "${cleanName}!,${customCatalyst}"`,
-        code: `{
-    "${cleanName}",
-    "Sweeps a crescent of astral steel across nearby foes.",
-    Form::Sweep,
-    Aim::Nearest,
-    Motion::Linear,
-    Hit::Pierce,
-    Element::Arcane,
-    Atlas::BroadSword,
-    Atlas::SlashArc,
-    Color::rgb(0x88, 0xD4, 0xFF),
-    ${dmg}f,
-    ${cd}f,
-    0.24f,
-    180.0f,
-    ${rch}.0f,
-    1,
-    3,
-    18.0f,
-    0.0f,
-    8,
-    0.22f,
-    0.18f,
-    1,
-    12,
-    Evolution{
-        "${cleanEvo}",
-        "Unleashes twin astral crescents that shock and cleave the pack.",
-        "${customCatalyst}",
-        Atlas::BroadSword,
-        Color::rgb(0xE0, 0xB0, 0xFF),
-        ${(customDamage * 1.55).toFixed(1)}f,
-        ${Math.max(0.35, customCooldown * 0.78).toFixed(2)}f,
-        ${rch + 18}.0f,
-        2,
-        2,
-        Element::Lightning,
-    },
-},`,
+        files: "src/item/weapon/Recipe.cpp & src/item/Upgrade.cpp",
+        verifyCmd: `./build/bin/Release/MellanganApp.exe --dev --arm "${cleanName}!,${customCatalyst}"`,
+        code: `// src/item/weapon/Recipe.cpp (RECIPES[])
+{"${cleanName}", nullptr, "Sweeps an arc of astral steel across nearby foes",
+ "arc", 53, Form::Cleave, pay::Chain | pay::Mark, ${dmg}f, ${cd}f, ${rch}.0f, 0, 1,
+ {0.53f, 0.83f, 1.0f, 1.0f}, atlas::pt::ArcaneStar},
+
+// src/item/Upgrade.cpp (EVOLUTIONS[][3])
+{"${cleanName}", "${customCatalyst}", "${cleanEvo}"},`,
       };
     }
 
@@ -302,51 +279,17 @@ export const ContributorTutorialWizard: React.FC = () => {
       return {
         files:
           "src/entity/Ally.hpp, src/entity/Ally.cpp & src/item/weapon/Recipe.cpp",
-        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --arm "${cleanName}" --allies 4`,
-        code: `enum class AllyKind : uint8_t {
-    Skeleton,
-    Wolf,
-    Wisp,
-    Turret,
-    Totem,
-    Golem,
-    Decoy,
-    Fairy,
-    Crow,
-    Imp,
-    Beetle,
-    Banner,
-    Ancestor,
-    Mirror,
-    Bear,
-    Hawk,
-    Spiderling,
-    BoneMage,
-    EmberHound,
-    FrostSprite,
-    Gargoyle,
-    VineTendril,
-    Drone,
-    Valkyrie,
-    ${cleanId},
-    Count
+        verifyCmd: `./build/bin/Release/MellanganApp.exe --dev --arm "${cleanName}" --allies 4`,
+        code: `// src/entity/Ally.hpp
+enum class AllyKind {
+  Wolf, Hawk, Ghoul, Skeleton, Drone, Crew, Decoy, Ghost, Quickened, Beguiled,
+  ${cleanId},
+  Count
 };
 
-{
-    "${cleanName}",
-    "${cleanName}",
-    EnemyKind::Wisp,
-    ${Math.round(customDamage * 12)}.0f,
-    82.0f,
-    ${cd}f,
-    ${rch}.0f,
-    18.0f,
-    1.0f,
-    true,
-    false,
-    Color::rgb(0x70, 0xE8, 0xFF),
-    "Arcane Staff"
-},`,
+// src/entity/Ally.cpp (ALLIES[] — must match AllyKind::Count)
+{"${cleanName}", "${cleanName}", EnemyKind::FrostWisp, ${Math.round(customDamage * 12)}.0f, 82.0f,
+ ${cd}f, ${rch}.0f, 18.0f, 1.0f, true, false, {0.44f, 0.91f, 1.0f, 1.0f}, &DRONE_BOLT},`,
       };
     }
 
@@ -356,118 +299,87 @@ export const ContributorTutorialWizard: React.FC = () => {
       return {
         files:
           "src/item/loot/Affix.hpp, src/item/loot/Affix.cpp & src/item/loot/Equip.cpp",
-        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --give 16 --loot`,
-        code: `{
-    "${cleanId}",
-    true,
-    slot::Weapon | slot::Charm,
-    Stat::${cleanId},
-    0xFFF,
-    5,
-    {
-        {"Glimmering", 1, ${lo1}.0f, ${lo1 + 2}.0f},
-        {"Astral", 5, ${lo1 + 3}.0f, ${lo1 + 5}.0f},
-        {"Celestial", 10, ${lo1 + 6}.0f, ${lo1 + 9}.0f},
-        {"Starforged", 15, ${lo1 + 10}.0f, ${lo1 + 14}.0f},
-        {"Cosmic", 20, ${lo1 + 15}.0f, ${hi5}.0f},
-    }
-},
+        verifyCmd: `./build/bin/Release/MellanganApp.exe --dev --give 16 --loot`,
+        code: `// src/item/loot/Affix.cpp (insert BEFORE "feral" to stay within AFFIX_ORDINARY)
+{"${cleanId.toLowerCase()}", true, slot::Weapon | slot::Charm, Stat::${cleanId}, false, 5,
+ {{"Glimmering", 1, ${lo1}.0f, ${lo1 + 2}.0f},
+  {"Astral", 5, ${lo1 + 3}.0f, ${lo1 + 5}.0f},
+  {"Celestial", 10, ${lo1 + 6}.0f, ${lo1 + 9}.0f},
+  {"Starforged", 15, ${lo1 + 10}.0f, ${lo1 + 14}.0f},
+  {"Cosmic", 20, ${lo1 + 15}.0f, ${hi5}.0f}}},
 
+// src/item/loot/Affix.cpp (describe)
 case Stat::${cleanId}:
-    p.stats().might += v * 0.01f;
-    break;`,
+  return say(tr("+{:.0f}% ${cleanName}"), value);
+
+// src/item/loot/Equip.cpp (apply(Mob &m, Stat stat, float v))
+case Stat::${cleanId}:
+  m.might += v * 0.01f;
+  break;`,
       };
     }
 
     if (templateKind === "foe") {
       return {
         files:
-          "src/entity/enemy/EnemyType.hpp, src/entity/enemy/ai/Plans.cpp & src/entity/enemy/WildFoe.cpp",
-        verifyCmd: `./build/bin/Debug/MellanganApp.exe --dev --biome ${biomeId}`,
-        code: `const Plan PLAN_${cleanId.toUpperCase()}{
-    Gait::Hover,
-    ${rch}.0f,
-    0.35f,
-    {
-        {GoalKind::Dodge, 1, 0.25f, 36.0f, 1.85f},
-        {GoalKind::Pounce, 3, 0.55f, ${rch}.0f, 2.20f},
-        {GoalKind::Orbit, 5, 1.10f, ${Math.max(36, rch - 12)}.0f, 1.15f},
-        {GoalKind::March, 8, 1.00f, 0.0f, 1.00f},
-    }
-};
+          "src/entity/enemy/Enemy.hpp, Roster.cpp, ai/Plans.cpp, FoeVoice.cpp & Faction.cpp",
+        verifyCmd: `./build/bin/Release/MellanganApp.exe --dev --biome ${biomeId}`,
+        code: `// src/entity/enemy/ai/Plans.cpp (append at EnemyKind::${cleanId} index)
+{{&HOVER, &ORBIT, &DIVE}, {&FALTER}},
 
-case EnemyKind::${cleanId}: {
-    constexpr Type t{
-        "${cleanName}",
-        Atlas::Wisp,
-        Color::rgb(0x66, 0xE0, 0xFF),
-        ${Math.round(customDamage * 6)},
-        76.0f,
-        1.0f,
-        true,
-        2,
-        &PLAN_${cleanId.toUpperCase()}
-    };
-    return t;
-}`,
+// src/entity/enemy/Roster.cpp (TYPES[] + NAMES[])
+{atlas::e::Wisp, ${Math.round(customDamage * 6)}.0f, 76.0f, ${dmg}f, 6.0f, 1.0f, 12,
+ 0.0f, {0.40f, 0.88f, 1.0f, 1.0f}, true, 0.0f, nullptr},
+// Also append "${cleanName}" to NAMES[], a voice family to FoeVoice.cpp,
+// a faction row to Faction.cpp, and foe(EnemyKind::${cleanId}) to biome FoeMask.`,
       };
     }
 
     if (templateKind === "trait") {
       return {
         files: "src/entity/Trait.hpp & src/entity/Trait.cpp",
-        verifyCmd: `./build/bin/Debug/MellanganApp.exe --test-encounter-view`,
-        code: `enum class Trait : uint8_t {
-    Hasted,
-    Armored,
-    Regenerating,
-    Vampiric,
-    Thorns,
-    Molten,
-    Frozen,
-    Plagued,
-    Stormcaller,
-    Splitting,
-    Shielded,
-    Berserk,
-    Blinker,
-    Avenger,
-    Executioner,
-    Juggernaut,
-    Dampening,
-    Vortex,
-    Hexer,
-    Undying,
-    ${cleanId},
-    Count
+        verifyCmd: `./build/bin/Release/MellanganApp.exe --test-encounter-view`,
+        code: `// src/entity/Trait.hpp (append before Count)
+enum class Trait {
+  Hasted, Vampiric, Warded, Splitting, Volatile, Frosted, Thorned, Regenerating,
+  Blinking, Phasing, Brooding, Gravitic, Cursed, Silencing, FireEnchanted,
+  ColdEnchanted, StormEnchanted, StoneSkin, Multishot, AuraBearer,
+  ${cleanId},
+  Count
 };
 
+// src/entity/Trait.cpp
 float Traits::incoming(Mob &self, float damage) {
-    if (has(Trait::${cleanId}) && self.hp * 2 <= self.maxHp) {
-        damage *= 0.65f;
-    }
-    return damage;
+  if (has(Trait::${cleanId}) && self.hp * 2 <= self.maxHp)
+    damage *= 0.65f;
+  return damage;
 }
 
 void Traits::landed(Mob &self, float dealt) {
-    if (has(Trait::${cleanId}) && dealt > 0.0f && self.level) {
-        self.level->player()->applyChill(1.1f);
-    }
+  if (has(Trait::${cleanId}) && dealt > 0.0f && self.level && self.level->player)
+    self.level->player->afflict(StatusKind::Chill, 1.1f, 0.3f);
 }`,
       };
     }
 
     return {
-      files: "src/test/AllyTest.cpp & src/test/Test.cpp",
-      verifyCmd: `./build/bin/Debug/MellanganApp.exe --test`,
-      code: `void test${cleanId}() {
-    Field f;
-    f.player->grant("${cleanName}", 1);
-    auto *foe = f.spawn(EnemyKind::Zombie, f.player->x + ${rch}.0, f.player->y);
-    int hpBefore = foe->hp;
-    f.step(180);
-    assert(foe->removed || foe->hp < hpBefore);
-}`,
+      files: "src/test/AllyTest.cpp, src/test/Tests.hpp & src/test/Test.cpp",
+      verifyCmd: `./build/bin/Release/MellanganApp.exe --test ${cleanId.toLowerCase()}`,
+      code: `#undef NDEBUG
+#include <cassert>
+
+void test${cleanId}() {
+  Field f;
+  Ally *ally = summon(f.level, AllyKind::Wolf, f.p.x + 16.0, f.p.y, ${dmg}f, 10.0f);
+  assert(ally != nullptr);
+  Enemy *rat = f.foe(EnemyKind::Rat, ${rch}.0, 0.0);
+  entt::entity id = rat->id;
+  float hpBefore = rat->hp;
+  f.run(180);
+  Enemy *after = f.level.get<Enemy>(id);
+  assert(!after || after->hp < hpBefore);
+}
+// Declare in src/test/Tests.hpp and register in CASES[] in src/test/Test.cpp.`,
     };
   }, [
     templateKind,
@@ -919,7 +831,7 @@ void Traits::landed(Mob &self, float dealt) {
               </h5>
             </div>
             <span className="text-slate-400 text-[11px]">
-              Atlas Dimensions: 432 × 786 px (24 Columns × 43 Rows)
+              Atlas Dimensions: 432 × 2784 px (24 Columns × 39 Bands)
             </span>
           </div>
 
@@ -941,13 +853,13 @@ void Traits::landed(Mob &self, float dealt) {
 
             <div className="p-3 rounded-lg bg-dark-900 border border-dark-800 space-y-2">
               <label className="block text-slate-400">
-                Row (0..42):{" "}
+                Row (0..153):{" "}
                 <strong className="text-purple-300">{atlasRow}</strong>
               </label>
               <input
                 type="range"
                 min={0}
-                max={42}
+                max={153}
                 value={atlasRow}
                 onChange={(e) => setAtlasRow(Number(e.target.value))}
                 className="w-full accent-purple-400"
@@ -965,7 +877,7 @@ void Traits::landed(Mob &self, float dealt) {
                 }`}
               >
                 {isTallTree
-                  ? "2-Cell Stacked Tree (16×34)"
+                  ? "2-Cell Stacked Tree (High + Low 16×16)"
                   : "Standard 1-Cell Sprite (16×16)"}
               </button>
             </div>
@@ -991,7 +903,7 @@ void Traits::landed(Mob &self, float dealt) {
             <div className="p-3 rounded-lg bg-dark-900 border border-dark-750">
               <div className="text-[10px] text-slate-500">Inner Dimensions</div>
               <div className="text-base font-bold text-emerald-300 mt-0.5">
-                16 × {atlasHeight} px
+                {isTallTree ? "2 × (16 × 16) px" : "16 × 16 px"}
               </div>
             </div>
             <div className="p-3 rounded-lg bg-dark-900 border border-dark-750">
@@ -1006,12 +918,14 @@ void Traits::landed(Mob &self, float dealt) {
             <div className="flex items-center gap-2">
               <Grid className="w-4 h-4 text-gold-400" />
               <span>
-                C++20 <code className="text-gold-300">src/Atlas.hpp</code>{" "}
-                Definition:
+                C++20 <code className="text-gold-300">namespace atlas</code>{" "}
+                Accessor:
               </span>
             </div>
             <code className="text-emerald-300 font-bold">
-              {`constexpr Sprite MySprite{${atlasPixelX}, ${atlasPixelY}, 16, ${atlasHeight}};`}
+              {isTallTree
+                ? `atlas::tile(${linearCellIndex}) /* High */ + atlas::tile(${linearCellIndex + 24}) /* Low */`
+                : `atlas::tile(${linearCellIndex}) /* {${atlasPixelX}, ${atlasPixelY}, 16, 16} */`}
             </code>
           </div>
         </div>

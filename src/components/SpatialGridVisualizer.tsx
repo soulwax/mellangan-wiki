@@ -393,16 +393,20 @@ export const SpatialGridVisualizer: React.FC = () => {
               {[7, 6, 5, 4, 3, 2, 1, 0].map((bit) => {
                 const val = (packedByte >> bit) & 1;
                 const role =
-                  bit >= 5
+                  bit >= 6
                     ? 'Unused'
+                    : bit === 5
+                    ? 'Roped'
                     : bit === 4
                     ? 'isRamp'
                     : bit >= 2
                     ? 'Height'
                     : 'Surface';
                 const color =
-                  bit >= 5
+                  bit >= 6
                     ? 'border-dark-800 text-slate-600 bg-dark-900/40'
+                    : bit === 5
+                    ? 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10'
                     : bit === 4
                     ? 'border-amber-500/50 text-amber-300 bg-amber-500/10'
                     : bit >= 2

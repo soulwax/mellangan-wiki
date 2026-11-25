@@ -332,12 +332,13 @@
   box-shadow: inset 0 -1px 0 rgba(171, 178, 191, .2);
 }
 .wiki-sidebar input:focus { border-color: #e5c07b; box-shadow: inset 0 -2px 0 #e5c07b; }
-.wiki-nav-group { border-bottom: 0; margin-bottom: 4px; }
+.wiki-nav-group { border-bottom: 0; margin-bottom: 2px; }
 .wiki-nav-group > button { border-radius: var(--ui-radius); }
 .wiki-nav-group > button:hover, .wiki-nav-group a:not([aria-current="page"]):hover { background: rgba(255, 255, 255, .06); }
-.wiki-nav-group > button span.font-display { font: 600 14px/20px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+.wiki-nav-group > button span.font-display { font: 600 12px/18px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
 .wiki-nav-group > div { border-top: 0; }
-.wiki-nav-group > div > div > a { font-size: 13px; line-height: 20px; border-radius: var(--ui-radius); }
+.wiki-nav-group > div > div > a { font-size: 12px; line-height: 18px; min-height: 30px; border-radius: var(--ui-radius); }
+.wiki-nav-group > button { min-height: 36px; }
 .wiki-nav-group a[aria-current="page"] { border-color: transparent; border-radius: var(--ui-radius); box-shadow: inset 3px 0 #e5c07b; }
 .wiki-hero { padding-top: 2.5rem; }
 .wiki-title { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; font-size: clamp(2rem, 3.4vw, 2.75rem); line-height: 1.18; letter-spacing: -.025em; }

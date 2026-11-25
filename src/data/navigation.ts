@@ -120,7 +120,7 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "goal-steering-catalog",
-        shortTitle: "16 AI Goals, Gaits & Plans[] Catalog",
+        shortTitle: "19 AI Goals, Gaits & 119 Plans[] Catalog",
       },
       {
         id: "spatial-grid",
@@ -138,6 +138,14 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "renderer-in-context",
         shortTitle: "Renderer Architecture in Context",
+      },
+      {
+        id: "camera-viewport",
+        shortTitle: "Camera, Zoom & Window Fit",
+      },
+      {
+        id: "visible-world-rendering",
+        shortTitle: "Visible Tiles, Props & Draw Order",
       },
       {
         id: "radix-rendering",
@@ -178,15 +186,15 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "biome-events-chart-hud",
-        shortTitle: "26 BiomeEvents, RLE Chart & HUD Pins",
+        shortTitle: "30 BiomeEvents, Hazards, RLE Chart & Living Biomes",
       },
       {
         id: "reactive-ground",
-        shortTitle: "Reactive Ground, Fire & Spores",
+        shortTitle: "Reactive Ground, Fire, Salt & Resin",
       },
       {
         id: "roads-wayfinding-landmarks",
-        shortTitle: "Roads, Wayfinding & 26 Curiosities",
+        shortTitle: "Roads, Wayfinding & 30 Curiosities",
       },
     ],
   },
@@ -215,14 +223,14 @@ export const NAV_TREE: NavTreeGroup[] = [
       },
       {
         id: "input-controls",
-        shortTitle: "Input, Controls & Rebinding",
+        shortTitle: "Input, Live Panels, Quickbar & Choice Badge",
       },
       {
         id: "audio-qa",
-        shortTitle: "32-Voice LRU Audio Mixer & QA Views",
+        shortTitle: "32-Voice Audio Mixer, Biome Beds & QA Views",
       },
       {
-        id: "ouroboros-deep-dive",
+        id: "ouroboros",
         shortTitle: "How Ouroboros Really Works",
       },
       {
@@ -236,6 +244,10 @@ export const NAV_TREE: NavTreeGroup[] = [
       {
         id: "procedural-music-audio-engineering",
         shortTitle: "Procedural Music, FM Tracker & Audio Mixer",
+      },
+      {
+        id: "sound-generation-pipeline",
+        shortTitle: "How Sound Is Generated (Offline Synth & Runtime)",
       },
     ],
   },
@@ -464,9 +476,9 @@ export const FEATURED_TOPIC_GROUPS: FeaturedTopicGroup[] = [
         icon: Calculator,
       },
       {
-        id: "ouroboros-deep-dive",
+        id: "ouroboros",
         title: "How Ouroboros Works",
-        subtitle: "Bit twiddling & 4 serpents",
+        subtitle: "Bit twiddling, 8 serpents & ring buffer",
         icon: Cpu,
         badge: "LAB",
       },
